@@ -56,13 +56,13 @@ static int panel_rgb_parse_dt(struct device *dev, struct panel_comp *p)
 	if (of_property_read_u32(np, "interface-format", &rgb->format))
 		rgb->format = PRGB_24BIT;
 
-	if (of_property_read_u32(np, "data-order", &rgb->data_cfg.data_order))
-		rgb->data_cfg.data_order = RGB;
+	if (of_property_read_u32(np, "data-order", &rgb->data_order))
+		rgb->data_order = RGB;
 
-	if (of_property_read_u32(np, "clock-phase", &rgb->data_cfg.clock_phase))
-		rgb->data_cfg.clock_phase = DEGREE_0;
+	if (of_property_read_u32(np, "clock-phase", &rgb->clock_phase))
+		rgb->clock_phase = DEGREE_0;
 
-	rgb->data_cfg.data_mirror = of_property_read_bool(np, "data-mirror");
+	rgb->data_mirror = of_property_read_bool(np, "data-mirror");
 	rgb->mode = PRGB;
 
 	p->panel.rgb = rgb;

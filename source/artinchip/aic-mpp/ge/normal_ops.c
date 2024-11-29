@@ -34,7 +34,7 @@ static int ge_add_dma_buf(struct mpp_ge *ge, int dma_fd)
 {
 	(void)ge;
 	(void)dma_fd;
-	return -1;
+	return 0;
 }
 
 static int ge_rm_dma_buf(struct mpp_ge *ge, int dma_fd)
@@ -42,7 +42,7 @@ static int ge_rm_dma_buf(struct mpp_ge *ge, int dma_fd)
 	(void)ge;
 	(void)dma_fd;
 
-	return -1;
+	return 0;
 }
 
 static int ge_fillrect(struct mpp_ge *ge, struct ge_fillrect *fill)

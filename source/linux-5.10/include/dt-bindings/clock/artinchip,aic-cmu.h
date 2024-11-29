@@ -49,6 +49,7 @@
 #define	CLK_I2S1		34
 #define	CLK_CODEC		35
 #define	CLK_RGB			36
+#define	CLK_DBI			36
 #define	CLK_LVDS		37
 #define	CLK_MIPIDSI		38
 #define	CLK_DE			39

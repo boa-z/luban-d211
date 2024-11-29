@@ -9,6 +9,7 @@
 #include <malloc.h>
 #include <string.h>
 #include <stddef.h>
+#include <fcntl.h>
 #include "aic_mov_parser.h"
 #include "mpp_log.h"
 #include "mpp_mem.h"
@@ -16,7 +17,7 @@
 #include "aic_stream.h"
 #include "mov.h"
 
-s32 mov_peek( struct aic_parser * parser, struct aic_parser_packet *pkt)
+s32 mov_peek(struct aic_parser * parser, struct aic_parser_packet *pkt)
 {
 	struct aic_mov_parser *mov_parser = (struct aic_mov_parser *)parser;
 
@@ -33,7 +34,7 @@ s32 mov_read(struct aic_parser * parser, struct aic_parser_packet *pkt)
 	return 0;
 }
 
-s32 mov_get_media_info( struct aic_parser *parser, struct aic_parser_av_media_info *media)
+s32 mov_get_media_info(struct aic_parser *parser, struct aic_parser_av_media_info *media)
 {
 	int i;
 	int64_t duration = 0;
@@ -46,6 +47,8 @@ s32 mov_get_media_info( struct aic_parser *parser, struct aic_parser_av_media_in
 			media->has_video = 1;
 			if (st->id == CODEC_ID_H264)
 				media->video_stream.codec_type = MPP_CODEC_VIDEO_DECODER_H264;
+			else if (st->id == CODEC_ID_MJPEG)
+				media->video_stream.codec_type = MPP_CODEC_VIDEO_DECODER_MJPEG;
 			else
 				media->video_stream.codec_type = -1;
 
@@ -91,7 +94,7 @@ s32 mov_get_media_info( struct aic_parser *parser, struct aic_parser_av_media_in
 	return 0;
 }
 
-s32 mov_seek( struct aic_parser *parser, s64 time)
+s32 mov_seek(struct aic_parser *parser, s64 time)
 {
 	s32 ret = 0;
 	struct aic_mov_parser *mov_parser = (struct aic_mov_parser *)parser;
@@ -99,7 +102,7 @@ s32 mov_seek( struct aic_parser *parser, s64 time)
 	return ret;
 }
 
-s32 mov_init( struct aic_parser *parser)
+s32 mov_init(struct aic_parser *parser)
 {
 	struct aic_mov_parser *mov_parser = (struct aic_mov_parser *)parser;
 
@@ -129,7 +132,7 @@ s32 aic_mov_parser_create(unsigned char *uri, struct aic_parser **parser)
 	s32 ret = 0;
 	struct aic_mov_parser *mov_parser = NULL;
 
-	mov_parser = (struct aic_mov_parser *)mpp_alloc( sizeof(struct aic_mov_parser));
+	mov_parser = (struct aic_mov_parser *)mpp_alloc(sizeof(struct aic_mov_parser));
 	if (mov_parser == NULL) {
 		loge("mpp_alloc aic_parser failed!!!!!\n");
 		ret = -1;
@@ -137,7 +140,7 @@ s32 aic_mov_parser_create(unsigned char *uri, struct aic_parser **parser)
 	}
 	memset(mov_parser, 0, sizeof(struct aic_mov_parser));
 
-	if (aic_stream_open((char *)uri, &mov_parser->stream) < 0) {
+	if (aic_stream_open((char *)uri, &mov_parser->stream, O_RDONLY) < 0) {
 		loge("stream open fail");
 		ret = -1;
 		goto exit;

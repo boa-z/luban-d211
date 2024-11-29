@@ -13,6 +13,14 @@ set(BASE_PARSER
     parser/mov/mov_tags.c
     parser/mov/mov.c
     parser/rawdata/aic_raw_parser.c
+    parser/mp3/aic_mp3_parser.c
+    parser/mp3/mp3.c
+)
+
+set(BASE_MUXER
+    muxer/aic_muxer.c
+    muxer/mp4/aic_mp4_muxer.c
+    muxer/mp4/mp4_muxer.c
 )
 
 set(BASE_RENDER
@@ -27,6 +35,7 @@ add_library(openmax_base SHARED
     ${BASE_MSG}
     ${BASE_STREAM}
     ${BASE_PARSER}
+    ${BASE_MUXER}
     ${BASE_RENDER}
     ${BASE_AUDIO_RENDER}
 )
@@ -43,6 +52,8 @@ target_include_directories(openmax_base PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/parser/rawdata"
     "${CMAKE_CURRENT_SOURCE_DIR}/stream/file"
     "${CMAKE_CURRENT_SOURCE_DIR}/../audio_decoder/include"
+    "${CMAKE_CURRENT_SOURCE_DIR}/parser/mp3"
+    "${CMAKE_CURRENT_SOURCE_DIR}/muxer/mp4"
 )
 
 if(DEFINED CMAKE_INSTALL_FULL_LIBDIR)

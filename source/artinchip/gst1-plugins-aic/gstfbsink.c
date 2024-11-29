@@ -10,6 +10,7 @@
  *   gst-launch-1.0 filesrc location=/sdcard/test.mp4 typefind=true ! video/quicktime ! qtdemux ! vedec ! fbsink
  */
 
+#include <stdio.h>
 #include <gst/gst.h>
 #include <gst/video/video-info.h>
 #include <gst/gstbuffer.h>
@@ -18,6 +19,7 @@
 #include <sys/ioctl.h>
 
 #include "gstfbsink.h"
+#include "gstmppallocator.h"
 
 #define gst_fbsink_parent_class parent_class
 G_DEFINE_TYPE (Gstfbsink, gst_fbsink, GST_TYPE_VIDEO_SINK);
@@ -80,31 +82,43 @@ gst_fbsink_change_state (GstElement * element,
 
 static int alloc_mpp_buf(Gstfbsink* fbsink, GstVideoInfo *info)
 {
-	struct mpp_buf *buf = &fbsink->buf;
-	buf->size.width = info->width;
-	buf->size.height = info->height;
-	buf->stride[0] = info->width;
+	int i;
+	struct mpp_buf *buf = NULL;
 
-	switch (info->finfo->format) {
-	case GST_VIDEO_FORMAT_I420:
-		buf->format = MPP_FMT_YUV420P;
-		break;
-	case GST_VIDEO_FORMAT_YV12:
-		buf->format = MPP_FMT_YUV420P;
-		break;
-	case GST_VIDEO_FORMAT_NV12:
-		buf->format = MPP_FMT_NV12;
-		break;
-	case GST_VIDEO_FORMAT_NV21:
-		buf->format = MPP_FMT_NV21;
-		break;
-	default:
-		GST_ERROR_OBJECT(fbsink, "unkown format: %d, %s",
-			info->finfo->format, info->finfo->name);
-		break;
+	for (i=0; i<2; i++) {
+		buf = &fbsink->buf[i];
+		buf->size.width = info->width;
+		buf->size.height = info->height;
+		buf->stride[0] = info->width;
+
+		switch (info->finfo->format) {
+		case GST_VIDEO_FORMAT_I420:
+			buf->format = MPP_FMT_YUV420P;
+			buf->stride[1] = buf->stride[2] = buf->stride[0]/2;
+			break;
+		case GST_VIDEO_FORMAT_YV12:
+			buf->format = MPP_FMT_YUV420P;
+			buf->stride[1] = buf->stride[2] = buf->stride[0]/2;
+			break;
+		case GST_VIDEO_FORMAT_NV12:
+			buf->format = MPP_FMT_NV12;
+			buf->stride[1] = buf->stride[2] = buf->stride[0];
+			break;
+		case GST_VIDEO_FORMAT_NV21:
+			buf->format = MPP_FMT_NV21;
+			buf->stride[1] = buf->stride[2] = buf->stride[0];
+			break;
+		default:
+			GST_ERROR_OBJECT(fbsink, "unkown format: %d, %s",
+				info->finfo->format, info->finfo->name);
+			break;
+		}
+
+		mpp_buf_alloc(fbsink->dmabuf_fd, buf);
+
+		printf("buf: %d, fd: %d %d %d\n", i, buf->fd[0], buf->fd[1], buf->fd[2]);
 	}
 
-	mpp_buf_alloc(fbsink->dmabuf_fd, buf);
 	fbsink->alloc_flag = 1;
 
 	return 0;
@@ -119,29 +133,36 @@ static GstFlowReturn gst_fbsink_show_frame (GstBaseSink * bsink, GstBuffer * buf
 	GstMemory *mem = NULL;
 	GstVideoInfo info;
 	GstVideoFrame frame;
-	GstMapInfo mapinfo;
-	struct mpp_frame mframe;
+	struct mpp_frame *mframe;
 	int i=0;
 
 	mem = gst_buffer_get_memory(buffer, 0);
 
-	if (mem->size == sizeof(struct mpp_frame)) {
-		if(!gst_memory_map(mem, &mapinfo, GST_MAP_READ)) {
-			GST_ERROR_OBJECT(fbsink, "memory_map failed");
-			return GST_FLOW_ERROR;
+	GST_DEBUG_OBJECT(fbsink, " mem ref_count: %d, buffer ref_count: %d",
+		GST_MINI_OBJECT_REFCOUNT_VALUE(mem),
+		GST_MINI_OBJECT_REFCOUNT_VALUE(buffer));
+
+	if (gst_memory_is_type(mem, GST_MPP_MEMORY_TYPE)) {
+		GstMppMemory *mpp_mem = (GstMppMemory*)mem;
+		mframe = mpp_mem->frame;
+
+		// hold this buffer
+		gst_memory_ref(mem);
+
+		GST_ERROR_OBJECT(fbsink, "render mpp_frame id: %d, w: %d, h: %d, fd: %d %d %d", mframe->id,
+			mframe->buf.size.width, mframe->buf.size.height,
+			mframe->buf.fd[0], mframe->buf.fd[1], mframe->buf.fd[2]);
+
+		gst_aicfb_render(fbsink->aicfb, &(mframe->buf), mframe->id);
+
+		// ref count of prev memory decrease 1, it will return
+		// the previous mpp_frame in mpp_allocator
+		if (fbsink->prev_mem != NULL) {
+			gst_memory_unref(fbsink->prev_mem);
 		}
-
-		// physic memory
-		memcpy(&mframe, mapinfo.data, sizeof(struct mpp_frame));
-		GST_DEBUG_OBJECT(fbsink, "mpp_frame id: %d, w: %d, h: %d", mframe.id,
-			mframe.buf.size.width, mframe.buf.size.height);
-		gst_aicfb_render(fbsink->fb_fd, &(mframe.buf));
-
-		// send event to vedec, return this mpp_frame
-		GstStructure *s = gst_structure_new ("return-frame", "id", G_TYPE_INT, mframe.id, NULL);
-		GstEvent* event = gst_event_new_custom (GST_EVENT_CUSTOM_UPSTREAM, s);
-		gst_pad_push_event(bsink->sinkpad, event);
+		fbsink->prev_mem = mem;
 	} else {
+		int cur_frame_id = fbsink->cur_frame_id;
 		GstCaps *caps = gst_pad_get_current_caps (GST_VIDEO_SINK_PAD (fbsink));
 		gst_video_info_from_caps (&info, caps);
 
@@ -149,41 +170,41 @@ static GstFlowReturn gst_fbsink_show_frame (GstBaseSink * bsink, GstBuffer * buf
 		GST_DEBUG_OBJECT(fbsink, "frame width: %d, height: %d, format: %d, name: %s",
 			info.width, info.height, info.finfo->format, info.finfo->name);
 
+
 		if(!fbsink->alloc_flag) {
 			alloc_mpp_buf(fbsink, &info);
 		}
 
 		int datasize[3] = {info.width * info.height, info.width * info.height/4, info.width * info.height/4};
-		unsigned char* data[3] = {frame.data[i], frame.data[i]+ datasize[0], frame.data[i]+ datasize[0]*5/4};
 		int comp = 1;
 		if(info.finfo->format == GST_VIDEO_FORMAT_I420 || info.finfo->format == GST_VIDEO_FORMAT_YV12) {
 			comp = 3;
 		} else if(info.finfo->format == GST_VIDEO_FORMAT_NV12 || info.finfo->format == GST_VIDEO_FORMAT_NV21) {
 			comp = 2;
-			datasize[1] = datasize[0];
+			datasize[1] = datasize[0]/2;
 		}
 
 		for (i=0; i<comp; i++) {
-			unsigned char* vaddr = dmabuf_mmap(fbsink->buf.fd[i], datasize[i]);
-			memcpy(vaddr, data[i], datasize[i]);
+			unsigned char* vaddr = dmabuf_mmap(fbsink->buf[cur_frame_id].fd[i], datasize[i]);
+			memcpy(vaddr, GST_VIDEO_FRAME_COMP_DATA (&frame, i), datasize[i]);
+			dmabuf_sync(fbsink->buf[cur_frame_id].fd[i], CACHE_CLEAN);
 			dmabuf_munmap(vaddr, datasize[i]);
-			dmabuf_sync(fbsink->buf.fd[i], CACHE_CLEAN);
 		}
 
-		gst_aicfb_render(fbsink->fb_fd, &fbsink->buf);
+		gst_aicfb_render(fbsink->aicfb, &fbsink->buf[cur_frame_id], cur_frame_id);
+		fbsink->cur_frame_id = (cur_frame_id == 0? 1: 0);
 	}
 
 	gst_memory_unref(mem);
+
 	return 0;
 }
 
 static gboolean gst_framebuffersink_start (GstBaseSink *sink)
 {
 	Gstfbsink *fbsink = GST_FBSINK(sink);
-	fbsink->fb_fd = gst_aicfb_open();
+	fbsink->aicfb = gst_aicfb_open();
 	fbsink->dmabuf_fd = dmabuf_device_open();
-
-	//gst_get_screeninfo(fbsink->fb_fd, &fbsink->screen_width, &fbsink->screen_height);
 
 	return TRUE;
 }
@@ -192,8 +213,11 @@ static gboolean gst_framebuffersink_stop (GstBaseSink *sink)
 {
 	Gstfbsink *fbsink = GST_FBSINK(sink);
 
-	if(fbsink->fb_fd)
-		gst_aicfb_close(fbsink->fb_fd);
+	if (fbsink->prev_mem)
+		gst_memory_unref(fbsink->prev_mem);
+
+	if(fbsink->aicfb)
+		gst_aicfb_close(fbsink->aicfb);
 	if(fbsink->dmabuf_fd)
 		dmabuf_device_close(fbsink->dmabuf_fd);
 
@@ -203,7 +227,8 @@ static gboolean gst_framebuffersink_stop (GstBaseSink *sink)
 static void gst_fbsink_finalize (Gstfbsink * fbsink)
 {
 	if(fbsink->alloc_flag) {
-		mpp_buf_free(&fbsink->buf);
+		mpp_buf_free(&fbsink->buf[0]);
+		mpp_buf_free(&fbsink->buf[1]);
 	}
 	G_OBJECT_CLASS (parent_class)->finalize ((GObject *) (fbsink));
 }
@@ -245,5 +270,5 @@ static void gst_fbsink_class_init (GstfbsinkClass * klass)
  */
 static void gst_fbsink_init (Gstfbsink *fbsink)
 {
-
+	fbsink->prev_mem = NULL;
 }

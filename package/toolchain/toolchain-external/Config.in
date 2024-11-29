@@ -27,6 +27,12 @@ config BR2_TOOLCHAIN_EXTERNAL_GLIBC
 	bool
 	select BR2_TOOLCHAIN_USES_GLIBC
 
+config BR2_TOOLCHAIN_EXTERNAL_MUSL
+	bool
+	select BR2_TOOLCHAIN_USES_MUSL
+	# Compatibility headers: cdefs.h, queue.h
+	select BR2_PACKAGE_MUSL_COMPAT_HEADERS
+
 # Make sure the virtual-package infra checks the provider
 config BR2_PACKAGE_HAS_TOOLCHAIN_EXTERNAL
 	bool

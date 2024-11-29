@@ -327,7 +327,7 @@ check_glibc_rpc_feature = \
 check_glibc = \
 	SYSROOT_DIR="$(strip $1)"; \
 	if test `find -L $${SYSROOT_DIR}/ -maxdepth 2 -name 'ld-linux*.so.*' -o -name 'ld.so.*' -o -name 'ld64.so.*' | wc -l` -eq 0 ; then \
-		echo "Incorrect selection of the C library"; \
+		echo "Incorrect selection of the glibc library"; \
 		exit -1; \
 	fi; \
 	$(call check_glibc_feature,BR2_USE_MMU,MMU support) ;\
@@ -342,7 +342,7 @@ check_musl = \
 	__CROSS_CC=$(strip $1) ; \
 	libc_a_path=`$${__CROSS_CC} -print-file-name=libc.a` ; \
 	if ! strings $${libc_a_path} | grep -q MUSL_LOCPATH ; then \
-		echo "Incorrect selection of the C library" ; \
+		echo "Incorrect selection of the musl-c library" ; \
 		exit -1; \
 	fi
 
@@ -390,7 +390,7 @@ check_uclibc_feature = \
 check_uclibc = \
 	SYSROOT_DIR="$(strip $1)"; \
 	if ! test -f $${SYSROOT_DIR}/usr/include/bits/uClibc_config.h ; then \
-		echo "Incorrect selection of the C library"; \
+		echo "Incorrect selection of the uclibc library"; \
 		exit -1; \
 	fi; \
 	UCLIBC_CONFIG_FILE=$${SYSROOT_DIR}/usr/include/bits/uClibc_config.h ; \

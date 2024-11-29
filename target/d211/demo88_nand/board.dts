@@ -47,6 +47,7 @@
 #include <dt-bindings/gpio/gpio.h>
 #include <dt-bindings/pwm/pwm.h>
 #include <dt-bindings/input/input.h>
+#include <dt-bindings/input/linux-event-codes.h>
 
 / {
 	model = "ArtInChip DEMO QFN88 with SPI NAND";
@@ -77,6 +78,8 @@
 		can1 = &can1;
 		spi0 = &spi0;
 		spi1 = &spi1;
+		spi2 = &spi2;
+		spi3 = &spi3;
 		gmac0 = &gmac0;
 		gmac1 = &gmac1;
 		rtc = &rtc;
@@ -85,6 +88,7 @@
 		de0 = &de0;
 		lvds0 = &lvds0;
 		rgb0 = &rgb0;
+		dbi0 = &dbi0;
 		dsi0 = &dsi0;
 		dvp0 = &dvp0;
 		cir = &cir;
@@ -113,20 +117,31 @@
 		reset-after-fw-burn;
 	};
 	config {
-		/*
-		 * The "aic,upgmode-gpio" is used to define upgrade-mode
-		 * pin to enter USB upgrade mode.
-		 * Why don't use the naming format "-gpios" as other gpio?
-		 * Because this pin maybe reuse some other device's pin,
-		 * e.g. UART. If use the "-gpios" to name it, it will cause
-		 * PINMUX conflict error during pinmux check.
-		 */
-		aic,upgmode-gpio = <&gpio_a 0 GPIO_ACTIVE_LOW>;
+	};
+
+	cpus {
+		u-boot,dm-pre-reloc;
+		cpu0: cpu@0 {
+			u-boot,dm-pre-reloc;
+		};
+	};
+
+	clocks {
+		u-boot,dm-pre-reloc;
+	};
+
+	soc {
+		u-boot,dm-pre-reloc;
+	};
+
+	timer {
+		u-boot,dm-pre-reloc;
 	};
 
 	memory@40000000 {
 		device_type = "memory";
 		reg = <0x0 0x40000000 0x0 0x4000000>;
+		u-boot,dm-pre-reloc;
 	};
 
 	/* Reserved 1M memory for aic ramdump
@@ -155,23 +170,27 @@
 	panel_rgb {
 		compatible = "artinchip,aic-general-rgb-panel";
 		status = "okay";
+		u-boot,dm-pre-reloc;
 
-		enable-gpios = <&gpio_e 19 GPIO_ACTIVE_HIGH>;
 		sleep-gpios = <&gpio_e 15 GPIO_ACTIVE_HIGH>;
 		rgb-mode = <PRGB>;
 		interface-format = <PRGB_16BIT_LD>;
 		clock-phase = <DEGREE_0>;
 		data-order = <RGB>;
 		disp-dither = <DITHER_RGB565>;
+		backlight = <&backlight>;
 
 		port {
+			u-boot,dm-pre-reloc;
 			panel_rgb_in: endpoint {
-			remote-endpoint = <&rgb0_out>;
+				remote-endpoint = <&rgb0_out>;
+				u-boot,dm-pre-reloc;
 			};
 		};
 
 		display-timings {
 			native-mode = <&timing0>;
+			u-boot,dm-pre-reloc;
 			timing0: 1024x600 {
 				clock-frequency = <52000000>;
 				hactive = <1024>;
@@ -184,6 +203,18 @@
 				vsync-len = <3>;
 				de-active = <1>;
 				pixelclk-active = <1>;
+				u-boot,dm-pre-reloc;
+			};
+		};
+	};
+
+	panel_dbi {
+		compatible = "artinchip,aic-dbi-panel-simple";
+		status = "disabled";
+
+		port {
+			panel_dbi_in: endpoint {
+				remote-endpoint = <&dbi0_out>;
 			};
 		};
 	};
@@ -193,8 +224,9 @@
 		/* pwm node name; pwm device No.; period_ns; pwm_polarity */
 		pwms = <&pwm 3 1000000 0>;
 		brightness-levels = <0 10 20 30 40 50 60 70 80 90 100>;
-		default-brightness-level = <0>;
-		status = "disabled";
+		default-brightness-level = <6>;
+		u-boot,dm-pre-reloc;
+		status = "okay";
 	};
 
     keys: gpio-keys {
@@ -231,6 +263,23 @@
 	/* Enable clock out2 */
 	clk-out2-enable;
 	// clk-out3-enable;
+	u-boot,dm-pre-reloc;
+};
+
+&rst {
+	u-boot,dm-pre-reloc;
+};
+
+&osc24m {
+	u-boot,dm-pre-reloc;
+};
+
+&rc1m {
+	u-boot,dm-pre-reloc;
+};
+
+&osc32k {
+	u-boot,dm-pre-reloc;
 };
 
 &rtc {
@@ -247,6 +296,7 @@
 	pinctrl-names = "default";
 	pinctrl-0 = <&uart0_pins_a>;
 	status = "okay";
+	u-boot,dm-pre-reloc;
 };
 
 &uart1 {
@@ -338,11 +388,16 @@
 	};
 };
 
+&dma {
+	u-boot,dm-pre-reloc;
+};
+
 &spi0 {
 	pinctrl-names = "default";
 	pinctrl-0 = <&spi0_pins_a>;
 	status = "okay";
 	spi-max-frequency = <100000000>;
+	u-boot,dm-pre-reloc;
 	spi-flash@0 {
 		#address-cells = <1>;
 		#size-cells = <1>;
@@ -354,6 +409,7 @@
 		// aic,encrypt;
 		// aic,spi-id = <0>;
 		status = "okay";
+		u-boot,dm-pre-reloc;
 	};
 };
 
@@ -389,6 +445,7 @@
 	bus-width = <4>;
 	cap-sd-highspeed;
 	status = "okay";
+	u-boot,dm-pre-reloc;
 };
 
 &sdmc2 {
@@ -398,10 +455,10 @@
 };
 
 /* case 1: USB0 = OTG Enable */
-#if 1
+#if 0
 &otg {
-	id-gpios = <&gpio_e 14 GPIO_ACTIVE_HIGH>;
-	otg-mode = "auto";
+	dp-sw-gpios = <&gpio_e 14 GPIO_ACTIVE_LOW>;
+	otg-mode = "device";
 	status = "okay";
 };
 
@@ -412,6 +469,7 @@
 };
 
 &usbh0 {
+	aic,usb-ext-resistance = <0x40>;
 	status = "okay";
 };
 
@@ -435,6 +493,7 @@
 };
 
 &usbh0 {
+	aic,usb-ext-resistance = <0x40>;
 	status = "disabled";
 };
 &ohci0 {
@@ -452,7 +511,7 @@
 	pinctrl-names = "default";
 	pinctrl-0 = <&usb0_pins_a>;
 	artinchip,sw_usb_phy0;
-	// vbus-en-gpios = <&gpio_a 3 GPIO_ACTIVE_HIGH>;
+	aic,usb-ext-resistance = <0x40>;
 	status = "okay";
 };
 &ohci0 {
@@ -462,6 +521,7 @@
 #endif
 
 &pinctrl {
+	u-boot,dm-pre-reloc;
 	gmac0_local_pins: gmac0-2 {
 		pins {
 			pinmux = <AIC_PINMUX('E', 0, 6)>,
@@ -491,6 +551,54 @@
 			pinmux = <AIC_PINMUX('E', 11, 4)>;
 			bias-disable;
 			drive-strength = <3>;
+		};
+	};
+	gpio_a: bank-0 {
+		u-boot,dm-pre-reloc;
+	};
+	gpio_b: bank-1 {
+		u-boot,dm-pre-reloc;
+	};
+	gpio_c: bank-2 {
+		u-boot,dm-pre-reloc;
+	};
+	gpio_d: bank-3 {
+		u-boot,dm-pre-reloc;
+	};
+	gpio_e: bank-4 {
+		u-boot,dm-pre-reloc;
+	};
+	gpio_f: bank-5 {
+		u-boot,dm-pre-reloc;
+	};
+	lcd_rgb565_ld_pins: lcd-4 {
+			u-boot,dm-pre-reloc;
+		pins {
+			u-boot,dm-pre-reloc;
+		};
+	};
+	pwm3_pins_d: pwm3-3 {
+		u-boot,dm-pre-reloc;
+		pins {
+			u-boot,dm-pre-reloc;
+		};
+	};
+	uart0_pins_a: uart0-0 {
+		u-boot,dm-pre-reloc;
+		pins {
+			u-boot,dm-pre-reloc;
+		};
+	};
+	spi0_pins_a: spi0-0 {
+		u-boot,dm-pre-reloc;
+		pins {
+			u-boot,dm-pre-reloc;
+		};
+	};
+	sdmc1_pins: sdmc1-0 {
+		u-boot,dm-pre-reloc;
+		pins {
+			u-boot,dm-pre-reloc;
 		};
 	};
 };
@@ -538,29 +646,45 @@
 &fb0 {
 	artinchip,uboot-logo-on=<1>;
 	height-virtual = <1200>;
+	u-boot,dm-pre-reloc;
 	port {
+		u-boot,dm-pre-reloc;
 		fb0_out: endpoint {
 			remote-endpoint = <&de0_in>;
+			u-boot,dm-pre-reloc;
 		};
 	};
 };
 
 &de0 {
 	status = "okay";
+	u-boot,dm-pre-reloc;
 
 	port@0 {
 		reg = <0>;
+		u-boot,dm-pre-reloc;
 		de0_in: endpoint {
 			remote-endpoint = <&fb0_out>;
+			u-boot,dm-pre-reloc;
 		};
 	};
 
 	port@1 {
 		reg = <1>;
+		u-boot,dm-pre-reloc;
 		de0_out: endpoint {
 			remote-endpoint = <&rgb0_in>;
+			u-boot,dm-pre-reloc;
 		};
 	};
+};
+
+&disp {
+	u-boot,dm-pre-reloc;
+};
+
+&ve {
+	u-boot,dm-pre-reloc;
 };
 
 &rgb0 {
@@ -568,18 +692,43 @@
 	pinctrl-0 = <&lcd_rgb565_ld_pins>;
 	pinctrl-1 = <&lcd_rgb565_ld_sleep_pins>;
 	status = "okay";
+	u-boot,dm-pre-reloc;
 
 	port@0 {
 		reg = <0>;
+		u-boot,dm-pre-reloc;
 		rgb0_in: endpoint {
 			remote-endpoint = <&de0_out>;
+			u-boot,dm-pre-reloc;
 		};
 	};
 
 	port@1 {
 		reg = <1>;
+		u-boot,dm-pre-reloc;
 		rgb0_out: endpoint {
 			remote-endpoint = <&panel_rgb_in>;
+			u-boot,dm-pre-reloc;
+		};
+	};
+};
+
+&dbi0 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&lcd_pins>;
+	status = "disabled";
+
+	port@0 {
+		reg = <0>;
+		dbi0_in: endpoint {
+			remote-endpoint = <&dbi0_in>;
+		};
+	};
+
+	port@1 {
+		reg = <1>;
+		dbi0_out: endpoint {
+			remote-endpoint = <&panel_dbi_in>;
 		};
 	};
 };
@@ -658,7 +807,8 @@
 };
 
 &pwm {
-	status = "disabled";
+	status = "okay";
+	u-boot,dm-pre-reloc;
 	pinctrl-names = "default";
 	pinctrl-0 = <&pwm3_pins_d>;
 	/* mode: up-count, down-count, up-down-count
@@ -672,6 +822,7 @@
 		aic,action0 = "none", "none", "none", "low", "none", "high";
 		aic,action1 = "none", "none", "none", "high", "none", "low";
 		status = "disabled";
+		u-boot,dm-pre-reloc;
 	};
 
 	pwm1 {
@@ -683,6 +834,7 @@
 		aic,action0 = "none", "none", "none", "low", "none", "high";
 		aic,action1 = "none", "none", "none", "high", "none", "low";
 		status = "disabled";
+		u-boot,dm-pre-reloc;
 	};
 
 	pwm2 {
@@ -695,6 +847,7 @@
 		aic,rise-edge-delay = <10>;
 		aic,fall-edge-delay = <10>;
 		status = "okay";
+		u-boot,dm-pre-reloc;
 	};
 
 	pwm3 {
@@ -706,6 +859,7 @@
 		aic,rise-edge-delay = <10>;
 		aic,fall-edge-delay = <10>;
 		status = "okay";
+		u-boot,dm-pre-reloc;
 	};
 };
 

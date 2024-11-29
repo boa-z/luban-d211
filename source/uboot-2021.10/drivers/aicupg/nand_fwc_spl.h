@@ -13,6 +13,7 @@
 
 #define SPL_NAND_IMAGE_BACKUP_NUM 4
 #define PAGE_CNT_PER_BLOCK        64
+#define PAGE_TABLE_MAX_ENTRY      101
 #define SLICE_DEFAULT_SIZE        2048
 #define PAGE_TABLE_USE_SIZE       2048
 #define PAGE_MAX_SIZE             4096
@@ -61,7 +62,7 @@ struct nand_page_table_entry {
  */
 struct nand_page_table {
 	struct nand_page_table_head head;
-	struct nand_page_table_entry entry[PAGE_CNT_PER_BLOCK];
+	struct nand_page_table_entry entry[PAGE_TABLE_MAX_ENTRY];
 };
 
 s32 nand_fwc_spl_reserve_blocks(void);

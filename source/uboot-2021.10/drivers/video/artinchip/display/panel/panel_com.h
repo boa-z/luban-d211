@@ -24,8 +24,6 @@ struct panel_priv {
 };
 
 
-/* Defined in panel_com.c, called in panel_xxx.c */
-
 void panel_di_enable(struct aic_panel *panel, u32 ms);
 void panel_de_timing_enable(struct aic_panel *panel, u32 ms);
 void panel_backlight_enable(struct aic_panel *panel, u32 ms);
@@ -42,12 +40,14 @@ int panel_parse_dts(struct udevice *dev);
 
 void panel_send_command(u8 *para_cmd, u32 size, struct aic_panel *panel);
 
-static inline void panel_init(struct panel_priv *p, struct udevice *dev,
-			struct fb_videomode *vm, struct aic_panel_funcs *funcs)
+static inline void
+panel_init(struct panel_priv *p, struct udevice *dev, struct fb_videomode *vm,
+		struct aic_panel_funcs *funcs, void *data)
 {
 	p->panel.dev = dev;
 	p->panel.funcs = funcs;
 	p->panel.vm = vm;
+	p->panel.panel_private = data;
 }
 
 #endif

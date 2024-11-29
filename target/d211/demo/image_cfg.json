@@ -2,8 +2,7 @@
 	"mmc": { // Media type
 		"size": "8G", // Size of SD/eMMC
 		"partitions": { // Partition table apply to device
-			"spl_1":  { "offset": "0x4400", "size": "128k" },
-			"spl_2":  { "size": "367k" },
+			"spl":    { "offset": "0x4400", "size": "495k" },
 			"uboot":  { "size": "1m" },
 			"env":    { "size": "256k" },
 			"falcon": { "size": "256k" },
@@ -39,6 +38,11 @@
 				"attr": ["required"],
 				"ram": "0x41100000"
 			},
+			"logo": {
+				"file": "logo.itb",
+				"attr": ["required"],
+				"ram": "0x42400000"
+			},
 			"spl": {
 				"file": "u-boot-spl-dtb.aic",
 				"attr": ["required", "run"],
@@ -49,7 +53,7 @@
 			"spl": {
 				"file": "u-boot-spl-dtb.aic",
 				"attr": ["required"],
-				"part": ["spl_1"]
+				"part": ["spl"]
 			},
 			"uboot": {
 				"file": "u-boot.itb",
@@ -62,7 +66,7 @@
 				"part": ["env"]
 			},
 			"logo": {
-				"file": "boot_logo.png",
+				"file": "logo.itb",
 				"attr": ["block", "required"],
 				"part": ["logo"]
 			},
@@ -77,10 +81,16 @@
 				"part": ["rootfs"]
 			},
 			"app": {
-				"file": "user.ext4",
+				"file": "userfs1.ext4",
 				"attr": ["block", "optional"],
 				"part": ["user"]
 			},
+		},
+		"extension": { // Extended file archive
+			"tar": {
+				"file": "extension.tar",
+				"attr": ["block", "optional"],
+			}
 		},
 	},
 	"temporary": { // Pre-proccess to generate image components from raw data
@@ -115,8 +125,32 @@
 			"u-boot.itb": {
 				"its": "u-boot.its"
 			},
+			"logo.itb": {
+				"its": "logo.its"
+			},
 			"kernel.itb": {
 				"its": "kernel.its"
+			},
+		},
+
+		"extension": {
+			"extension.tar": {
+				"exfiles": ["image_cfg.json",
+					    "u-boot.its",
+					    "kernel.its",
+					    "recovery.its",
+					    "u-boot.dtb",
+					    "u-boot-nodtb.bin",
+					    "u-boot-spl-nodtb.bin",
+					    "u-boot-spl-dtb.bin",
+					    "u-boot-spl.dtb",
+					    "env.txt",
+					    "ddr_init.bin",
+					    "d211.pbp",
+					    "Image",
+					    "fw_dynamic.bin",
+					    "u-boot-nodtb.bin"],
+				"exdirs": ["dts"],
 			},
 		},
 	},

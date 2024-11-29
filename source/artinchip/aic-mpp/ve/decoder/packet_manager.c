@@ -137,7 +137,6 @@ int pm_dequeue_empty_packet(struct packet_manager *pm, struct mpp_packet *packet
 {
 	struct packet_impl *pkt_impl;
 	int left_size;		// remain size in end of stream buffer
-	int write_offset = 0;
 
 	if (!pm || !packet || size <= 0)
 		return -1;
@@ -178,8 +177,13 @@ int pm_dequeue_empty_packet(struct packet_manager *pm, struct mpp_packet *packet
 	pkt_impl->pos_offset = 0;
 
 	if (pm->write_offset >= pm->read_offset) {
-		if (left_size >= size) {
-			//* if left_size is enough to store this packet
+		int reserve_space = 8;
+		if (pm->packet_count == 1) {//decode pic
+			reserve_space = 0;
+		}
+		if ((left_size - (int)size) >= reserve_space) {
+			// if left_size is enough to store this packet
+			// (careful, we must reserve 8 bytes, or read_bits maybe extend the buffer)
 			pm->write_offset += size;
 			pm->available_size -= size;
 
@@ -187,8 +191,8 @@ int pm_dequeue_empty_packet(struct packet_manager *pm, struct mpp_packet *packet
 				pm->write_offset = 0;
 		} else if (pm->read_offset >= size) {
 			logi("left_size: %d, size: %zu", left_size, size);
-			//* if left_size is not enough to store this packet,
-			//*  we store this packet from the start of stream buffer
+			// if left_size is not enough to store this packet,
+			// we store this packet from the start of stream buffer
 			pm->write_offset = size;
 			pm->available_size -= (size + left_size);
 			pkt_impl->pos_offset = left_size;
@@ -206,7 +210,7 @@ int pm_dequeue_empty_packet(struct packet_manager *pm, struct mpp_packet *packet
 		pm->available_size -= size;
 	}
 
-	logi("get empty packet phy_offset: %d, size: %zu", write_offset, size);
+	logi("get empty packet phy_offset: %d, size: %zu", pm->write_offset, size);
 
 	packet->data = pkt_impl->pkt.data;
 	packet->size = pkt_impl->pkt.size;
@@ -347,14 +351,14 @@ int pm_get_ready_packet_num(struct packet_manager *pm)
 
 int pm_reset(struct packet_manager *pm)
 {
-	if (!pm){
+	if (!pm) {
 		return -1;
 	}
 
 	pthread_mutex_lock(&pm->lock);
-	if(!mpp_list_empty(&pm->ready_list)){
+	if (!mpp_list_empty(&pm->ready_list)) {
 		struct packet_impl *pkt1=NULL,*pkt2=NULL;
-		mpp_list_for_each_entry_safe(pkt1,pkt2,&pm->ready_list,list){
+		mpp_list_for_each_entry_safe(pkt1,pkt2,&pm->ready_list,list) {
 			mpp_list_del_init(&pkt1->list);
 			mpp_list_add_tail(&pkt1->list, &pm->empty_list);
 		}

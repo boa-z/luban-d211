@@ -16,8 +16,10 @@
 #include <g_dnl.h>
 #include <artinchip/aicupg.h>
 
-//#undef debug
-//#define debug printf
+#ifdef CONFIG_ARTINCHIP_DEBUG_AICUPG
+#undef debug
+#define debug printf
+#endif
 
 #define USB_UPG_BUF_SIZE                (64 * 1024)
 #define USB_CBW_LENGTH                  31
@@ -171,13 +173,17 @@ static int aicupg_bind(struct usb_configuration *c, struct usb_function *f)
 	interface_desc.iInterface = id;
 
 	f_upg->in_ep = usb_ep_autoconfig(gadget, &fs_ep_in);
-	if (!f_upg->in_ep)
+	if (!f_upg->in_ep) {
+		pr_err("%s, in ep config failed.\n", __func__);
 		return -ENODEV;
+	}
 	f_upg->in_ep->driver_data = c->cdev;
 
 	f_upg->out_ep = usb_ep_autoconfig(gadget, &fs_ep_out);
-	if (!f_upg->out_ep)
+	if (!f_upg->out_ep) {
+		pr_err("%s, out ep config failed.\n", __func__);
 		return -ENODEV;
+	}
 	f_upg->out_ep->driver_data = c->cdev;
 
 	f->descriptors = aicupg_fs_function;
@@ -307,7 +313,7 @@ static int aicupg_trans_layer_send_csw(u32 tag, int residue, u8 status)
 	struct aic_csw csw;
 	int ret;
 
-	debug("%s, tag = %d\n", __func__, tag);
+	debug("%s, tag = 0x%x, status = %d\n", __func__, tag, status);
 	csw.signature = cpu_to_le32(USB_CSW_SIGNATURE);
 	csw.tag = tag;
 	csw.residue = cpu_to_be32(residue);
@@ -319,7 +325,7 @@ static int aicupg_trans_layer_send_csw(u32 tag, int residue, u8 status)
 	usb_ep_dequeue(in_ep, in_req);
 	ret = usb_ep_queue(in_ep, in_req, 0);
 	if (ret)
-		debug("Error %d on queue\n", ret);
+		pr_err("Error %d on queue\n", ret);
 	return ret;
 }
 
@@ -332,7 +338,7 @@ static void aicupg_trans_layer_tx_csw(struct usb_ep *in_ep,
 static void aicupg_trans_layer_write_pkt(struct usb_ep *out_ep,
 					 struct usb_request *out_req)
 {
-	debug("%s\n", __func__);
+	debug("%s, actual %d\n", __func__, out_req->actual);
 
 	aicupg_data_packet_write(out_req->buf, out_req->actual);
 	/*
@@ -353,7 +359,7 @@ static void aicupg_trans_layer_write_pkt(struct usb_ep *out_ep,
 static void aicupg_trans_layer_read_pkt(struct usb_ep *in_ep,
 					struct usb_request *in_req)
 {
-	debug("%s\n", __func__);
+	debug("%s, length %d\n", __func__, in_req->length);
 	aicupg_data_packet_read(in_req->buf, in_req->length);
 	/* Send data packet, and csw should be sent when data packet is done */
 	in_req->complete = aicupg_trans_layer_tx_csw;
@@ -371,7 +377,7 @@ static void aicupg_trans_layer_rx_cbw(struct usb_ep *out_ep,
 		return;
 	memcpy(&cbw, out_req->buf, USB_CBW_LENGTH);
 
-	debug("\n%s, tag = %d, data_transfer_length = %d\n", __func__, cbw.tag,
+	debug("\n%s, tag = 0x%x, data_transfer_length = %d\n", __func__, cbw.tag,
 	      cbw.data_transfer_length);
 	if (cbw.cmd == AICUPG_USB_CMD_WRITE_PKT) {
 		/*

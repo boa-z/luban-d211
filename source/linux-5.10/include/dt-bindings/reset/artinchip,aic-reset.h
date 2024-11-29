@@ -31,6 +31,7 @@
 #define RESET_I2S1			20
 #define RESET_CODEC			21
 #define RESET_RGB			22
+#define RESET_DBI			22
 #define RESET_LVDS			23
 #define RESET_MIPIDSI			24
 #define RESET_DE			25

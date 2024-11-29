@@ -87,6 +87,7 @@ enum upg_mode {
 	UPG_MODE_BURN_USER_ID,
 	UPG_MODE_DUMP_PARTITION,
 	UPG_MODE_BURN_IMG_FORCE,
+	UPG_MODE_BURN_FROZEN,
 	UPG_MODE_INVALID,
 };
 
@@ -95,6 +96,13 @@ struct upg_cfg {
 	u8 reserved[31];
 };
 
+#define INIT_MODE(mode) (1 << (mode))
+
+struct upg_init {
+	u8 mode;
+};
+
+s32 aicupg_initialize(struct upg_init *param);
 s32 aicupg_set_upg_cfg(struct upg_cfg *cfg);
 s32 aicupg_get_upg_mode(void);
 s32 aicupg_data_packet_write(u8 *data, s32 len);

@@ -32,6 +32,15 @@
 #   $2: the name of the step
 #   $3: the name of the package
 
+# Compatible for C908: Support new glibc and 32bit/64bit mode
+ifeq ($(BR2_TOOLCHAIN_EXTERNAL_LIBC_VER),)
+PREBUILT_CUSTOM_DIR = $(GNU_TARGET_NAME)
+else ifeq ($(BR2_TOOLCHAIN_EXTERNAL_LIBC_VER),"")
+PREBUILT_CUSTOM_DIR = $(GNU_TARGET_NAME)
+else
+PREBUILT_CUSTOM_DIR = $(ARCH)-$(TARGET_OS)-glibc$(call qstrip,$(BR2_TOOLCHAIN_EXTERNAL_LIBC_VER))-$(call qstrip,$(BR2_GCC_TARGET_ABI))
+endif
+
 # Start step
 # $1: step name
 define step_start
@@ -328,14 +337,14 @@ $(foreach dir,$(call qstrip,$(BR2_GLOBAL_PATCH_DIR)),\
 $(BUILD_DIR)/%/.stamp_do_source_check:
 	$($(PKG)_GENERIC_PKG_PREPARE)
 	$(Q)mkdir -p $(@D)
-	$(Q)if [ -d $($(PKG)_SRCDIR) ]; then \
+	$(Q)if [ -d $($(PKG)_SRCROOT) ]; then \
 		if [ -f $(@D)/.stamp_state_sumval_after_built ]; then \
-			if [ "`find $($(PKG)_FINDOPTS) $($(PKG)_SRCDIR) -type f ! -name \".*\" -cnewer $(@D)/.stamp_state_sumval_after_built`" != "" ]; then \
+			if [ "`find $($(PKG)_FINDOPTS) $($(PKG)_SRCROOT) -type f ! -name \".*\" -cnewer $(@D)/.stamp_state_sumval_after_built`" != "" ]; then \
 				touch $(@D)/.stamp_source_update_checked; \
-				echo "Newer Files detected at: $($(PKG)_SRCDIR)"; \
-			elif [ "`find $($(PKG)_SRCDIR) -type f ! -name \".*\" |md5sum`" != "`cat $(@D)/.stamp_state_sumval_after_built;`" ]; then \
+				echo "Newer Files detected at: $($(PKG)_SRCROOT)"; \
+			elif [ "`find $($(PKG)_SRCROOT) -type f ! -name \".*\" |md5sum`" != "`cat $(@D)/.stamp_state_sumval_after_built;`" ]; then \
 				touch $(@D)/.stamp_source_update_checked; \
-				echo "Files changed detected at: $($(PKG)_SRCDIR)"; \
+				echo "Files changed detected at: $($(PKG)_SRCROOT)"; \
 			fi; \
 			if [ "$($(PKG)_ADD_LINUX_HEADERS_DEPENDENCY):$($(PKG)_TYPE)" = "YES:target" ]; then \
 				if [ "`find $($(PKG)_FINDOPTS) $(LINUX_HEADERS_BUILDDIR) -type f -name \".stamp_state_sumval_after_built\" -cnewer $(@D)/.stamp_state_sumval_after_built`" != "" ]; then \
@@ -345,7 +354,7 @@ $(BUILD_DIR)/%/.stamp_do_source_check:
 			fi; \
 		else \
 			touch $(@D)/.stamp_source_update_checked; \
-			echo "Source is not built yet : $($(PKG)_SRCDIR)"; \
+			echo "Source is not built yet : $($(PKG)_SRCROOT)"; \
 		fi; \
 	fi
 
@@ -499,13 +508,13 @@ $(BUILD_DIR)/%/.stamp_installed:
 	@$(call pkg_size_after,$(HOST_DIR),-host)
 	@$(call check_bin_arch)
 	$(Q)touch $@
-	@if [ -d $($(PKG)_SRCDIR) ]; then \
-		find $($(PKG)_SRCDIR) -type f ! -name ".*" |md5sum > $(@D)/.stamp_state_sumval_after_built; \
+	@if [ -d $($(PKG)_SRCROOT) ]; then \
+		find $($(PKG)_SRCROOT) -type f ! -name ".*" |md5sum > $(@D)/.stamp_state_sumval_after_built; \
 	fi
 
 $(BUILD_DIR)/%/.stamp_tarball:
 	@$(call MESSAGE,"Generating prebuilt binary tarball")
-	@tools/support/scripts/gen-prebuilt-tarball.sh $($(PKG)_NAME) $($(PKG)_BASENAME) $($(PKG)_DIR) $(HOSTARCH) $(GNU_TARGET_NAME)
+	@tools/support/scripts/gen-prebuilt-tarball.sh $($(PKG)_NAME) $($(PKG)_BASENAME) $($(PKG)_DIR) $(HOSTARCH) $(PREBUILT_CUSTOM_DIR)
 	$(Q)touch $@
 
 $(BUILD_DIR)/%/.stamp_prebuilt_installed:
@@ -710,20 +719,32 @@ ifndef $(2)_STRIP_COMPONENTS
 endif
 
 ifneq ($$(findstring package/artinchip,$$($(2)_PKGDIR)),)
+$(2)_SRCROOT			?= $$(PACKAGES_DIR)/artinchip/$$($(2)_BASENAME)
 $(2)_SRCDIR			?= $$(PACKAGES_DIR)/artinchip/$$($(2)_BASENAME)
 else ifneq ($$(findstring package/opensbi,$$($(2)_PKGDIR)),)
+$(2)_SRCROOT			?= $$(PACKAGES_DIR)/$$($(2)_BASENAME)
 $(2)_SRCDIR			?= $$(PACKAGES_DIR)/$$($(2)_BASENAME)
 else ifneq ($$(findstring package/uboot,$$($(2)_PKGDIR)),)
+$(2)_SRCROOT			?= $$(PACKAGES_DIR)/$$($(2)_BASENAME)
 $(2)_SRCDIR			?= $$(PACKAGES_DIR)/$$($(2)_BASENAME)
 $(2)_FINDOPTS			= -L
 else ifneq ($$(findstring package/linux,$$($(2)_PKGDIR)),)
+$(2)_SRCROOT			?= $$(PACKAGES_DIR)/$$($(2)_BASENAME)
 $(2)_SRCDIR			?= $$(PACKAGES_DIR)/$$($(2)_BASENAME)
 else ifneq ($$(findstring package/third-party/uboot-tools,$$($(2)_PKGDIR)),)
+$(2)_SRCROOT			?= $$(PACKAGES_DIR)/$(UBOOT_BASENAME)
 $(2)_SRCDIR			?= $$(PACKAGES_DIR)/$(UBOOT_BASENAME)
+else ifneq ($$(filter $$(foreach dir,$$(BR2_EXTERNAL_DIRS),$$(dir)/%),$(pkgdir)),)
+$(2)_SRCROOT ?= $$(strip $$(foreach dir,$$(BR2_EXTERNAL_DIRS),$$(if $$(filter $$(dir)/%,$(pkgdir)),$$(dir),)))/source/$$($(2)_BASENAME)
+$(2)_SRCDIR  ?= $$(strip $$(foreach dir,$$(BR2_EXTERNAL_DIRS),$$(if $$(filter $$(dir)/%,$(pkgdir)),$$(dir),)))/source/$$($(2)_BASENAME)
+# Set the rule: External packages only for user developed code, all source is fixed in external-tree/source
+$(2)_ENABLE_TARBALL = NO
 else ifneq ($$($(2)_SUPPORTS_OUT_SOURCE_BUILD),YES)
-$(2)_SRCDIR			?= $$(PACKAGES_DIR)/third-party/$$($(2)_BASENAME)
+$(2)_SRCROOT			?= $$(PACKAGES_DIR)/third-party/$$($(2)_BASENAME)
+$(2)_SRCDIR			?= $$(PACKAGES_DIR)/third-party/$$($(2)_BASENAME)/$$($(2)_SUBDIR)
 else
-$(2)_SRCDIR			?= $$(PACKAGES_DIR)/third-party/$$($(2)_BASENAME)
+$(2)_SRCROOT			?= $$(PACKAGES_DIR)/third-party/$$($(2)_BASENAME)
+$(2)_SRCDIR			?= $$(PACKAGES_DIR)/third-party/$$($(2)_BASENAME)/$$($(2)_SUBDIR)
 endif
 
 ifdef $(2)_SUBDIR
@@ -934,7 +955,7 @@ endif
 ifneq ($$(BR2_PACKAGE_$(2)_USE_PREBUILT),n)
 # Select to use prebuilt tarball
 ifeq ($(4),target)
-ifneq ($$(filter $(PREBUILT_DIR)/$(GNU_TARGET_NAME)/$$($(2)_BASENAME).%,$(PREBUILT_TARBALLS)),)
+ifneq ($$(filter $(PREBUILT_DIR)/$(PREBUILT_CUSTOM_DIR)/$$($(2)_BASENAME).%,$(PREBUILT_TARBALLS)),)
 $(2)_USE_PREBUILT_TARBALL = YES
 endif
 endif # package for target
@@ -1063,7 +1084,7 @@ $(2)_TARGET_EXTRACT =		$$($(2)_DIR)/.stamp_prebuilt_extracted
 ifeq ($$($(2)_ENABLE_TARBALL)$$($(2)_FORCE_BUILD_DIR),YESYES)
 $(2)_SOURCE_DIRCLEAN =		$$($(2)_DIR)/.stamp_srccleaned
 else ifeq ($$($(2)_ENABLE_TARBALL),YES)
-$(2)_SOURCE_DIRCLEAN =		$$($(2)_SRCDIR)/.stamp_srccleaned
+$(2)_SOURCE_DIRCLEAN =		$$($(2)_SRCROOT)/.stamp_srccleaned
 else
 $(2)_SOURCE_DIRCLEAN =		$$($(2)_DIR)/.stamp_srccleaned
 endif
@@ -1087,7 +1108,7 @@ ifeq ($$($(2)_ENABLE_PATCH)$$($(2)_FORCE_BUILD_DIR),YESYES)
 $(2)_TARGET_PATCH =		$$($(2)_DIR)/.stamp_patched
 else ifeq ($$($(2)_ENABLE_PATCH),YES)
 # Need to patch source code
-$(2)_TARGET_PATCH =		$$($(2)_SRCDIR)/.stamp_patched
+$(2)_TARGET_PATCH =		$$($(2)_SRCROOT)/.stamp_patched
 else
 # No need to patch source code
 $(2)_TARGET_PATCH =		$$($(2)_DIR)/.stamp_dummy_patched
@@ -1099,8 +1120,8 @@ $(2)_TARGET_EXTRACT =		$$($(2)_DIR)/.stamp_build_dir_extracted
 $(2)_SOURCE_DIRCLEAN =		$$($(2)_DIR)/.stamp_srccleaned
 else ifeq ($$($(2)_ENABLE_TARBALL),YES)
 # Third-party packages
-$(2)_TARGET_EXTRACT =		$$($(2)_SRCDIR)/.stamp_extracted
-$(2)_SOURCE_DIRCLEAN =		$$($(2)_SRCDIR)/.stamp_srccleaned
+$(2)_TARGET_EXTRACT =		$$($(2)_SRCROOT)/.stamp_extracted
+$(2)_SOURCE_DIRCLEAN =		$$($(2)_SRCROOT)/.stamp_srccleaned
 else
 # Use source always on, e.g. linux, uboot
 $(2)_TARGET_EXTRACT =		$$($(2)_DIR)/.stamp_dummy_extracted
@@ -1123,7 +1144,7 @@ $(2)_TARBALL_SRC_PATH = $$($(2)_SOURCE)
 $(2)_TARBALL_DST_PATH = $$($(2)_BUILDDIR)
 else
 $(2)_TARBALL_SRC_PATH = $$($(2)_DL_DIR)/$$($(2)_SOURCE)
-$(2)_TARBALL_DST_PATH = $$($(2)_SRCDIR)
+$(2)_TARBALL_DST_PATH = $$($(2)_SRCROOT)
 endif
 
 # default extract command
@@ -1139,16 +1160,16 @@ $(2)_PREBUILT_EXTRACT_CMDS ?= @rm -rf $$($(2)_DIR)/prebuilt; \
 	mkdir -p $$($(2)_DIR)/prebuilt ; \
 	$$(if $$(filter host-%,$$($(2)_BASENAME)),  \
 	$$(TAR) -C $$($(2)_DIR)/prebuilt -xf $(PREBUILT_DIR)/$(HOSTARCH)/$$($(2)_BASENAME).tar.gz, \
-	$$(TAR) -C $$($(2)_DIR)/prebuilt -xf $(PREBUILT_DIR)/$(GNU_TARGET_NAME)/$$($(2)_BASENAME).tar.gz)
+	$$(TAR) -C $$($(2)_DIR)/prebuilt -xf $(PREBUILT_DIR)/$(PREBUILT_CUSTOM_DIR)/$$($(2)_BASENAME).tar.gz)
 
 # Fixup source directory for generic makefile package which not support to set alternate build directory
 $(2)_GENERIC_PKG_PREPARE ?= $$(if $$(filter NO,$$($(2)_SUPPORTS_OUT_SOURCE_BUILD)), \
-	@if [ -d $$($(2)_SRCDIR) -a ! -f $$($(2)_BUILDDIR)/.stamp_source_update_checked ]; then \
+	@if [ -d $$($(2)_SRCROOT) -a ! -f $$($(2)_BUILDDIR)/.stamp_source_update_checked ]; then \
 		rm -rf $$($(2)_DIR); \
 		mkdir -p $$($(2)_DIR); \
-		find $$($(2)_SRCDIR) -type d -printf "%P\n" | xargs -I {} mkdir -p $$($(2)_DIR)/{} ; \
-		find $$($(2)_SRCDIR) ! -type d -printf "%P\n" | xargs -I {} ln $$($(2)_SRCDIR)/{} $$($(2)_DIR)/{} ; \
-		echo "Source files in this folder is hard linked to $$($(2)_SRCDIR)" >> $$($(2)_DIR)/THIS_IS_NOT_YOUR_SOURCE_DIRECTORY ; \
+		find $$($(2)_SRCROOT) -type d -printf "%P\n" | xargs -I {} mkdir -p $$($(2)_DIR)/{} ; \
+		find $$($(2)_SRCROOT) ! -type d -printf "%P\n" | xargs -I {} ln $$($(2)_SRCROOT)/{} $$($(2)_DIR)/{} ; \
+		echo "Source files in this folder is hard linked to $$($(2)_SRCROOT)" >> $$($(2)_DIR)/THIS_IS_NOT_YOUR_SOURCE_DIRECTORY ; \
 	fi )
 
 # pre/post-steps hooks
@@ -1648,9 +1669,11 @@ DL_TOOLS_DEPENDENCIES += $$(call extractor-system-dependency,$$($(2)_SOURCE))
 	$(HIDDEN_PREFIX)-$(1)-show-info \
 	$(HIDDEN_PREFIX)-$(1)-show-version
 
+ifeq ($$($(2)_ENABLE_TARBALL),YES)
 ifneq ($$($(2)_SOURCE),)
 ifeq ($$($(2)_SITE),)
 $$(error $(2)_SITE cannot be empty when $(2)_SOURCE is not)
+endif
 endif
 endif
 

@@ -38,9 +38,6 @@ struct aic_rgb_comp {
 };
 static struct aic_rgb_comp *g_aic_rgb_comp;
 
-static int i8080_clk[] = {20, 30, 20, 15, 20, 10, 10, 10};
-static int spi_clk[] = {72, 108, 108, 64, 96, 96, 16, 24, 24};
-
 /*TODO: static function begin*/
 
 static struct aic_rgb_comp *aic_rgb_request_drvdata(void)
@@ -53,66 +50,194 @@ static void aic_rgb_release_drvdata(void)
 
 }
 
-static int aic_rgb_send_cmd(u32 dt, const u8 *data, u32 len)
+static inline int check_order_index(unsigned int data_order)
+{
+	u32 index[] = { 0x10, 0x01, 0x12, 0x21, 0x20, 0x02 };
+	int mask, i;
+
+	mask = data_order & 0xFF;
+
+	for (i = 0; i < ARRAY_SIZE(index); i++) {
+		if (index[i] == mask)
+			return i;
+	}
+	return 0;
+}
+
+static ssize_t
+info_show(struct device *dev, struct device_attribute *devattr, char *buf)
+{
+	struct aic_rgb_comp *comp = aic_rgb_request_drvdata();
+	char *order[] = { "RGB", "RBG", "BGR", "BRG", "GRB", "GBR" };
+	struct panel_rgb *rgb = comp->rgb;
+	int length;
+
+	length = sprintf(buf, "RGB INFO\n"
+			"\tmode\t\t : %d\n"
+			"\tformat\t\t : %d\n"
+			"\tclock_phase\t : %d\n"
+			"\tdata_order\t : %s\n"
+			"\tdata_mirror\t : %d\n",
+			rgb->mode,
+			rgb->format,
+			rgb->clock_phase,
+			order[check_order_index(rgb->data_order)],
+			rgb->data_mirror);
+
+	aic_rgb_release_drvdata();
+	return length;
+}
+
+static ssize_t
+format_store(struct device *dev, struct device_attribute *attr,
+			 const char *buf, size_t count)
 {
 	struct aic_rgb_comp *comp = aic_rgb_request_drvdata();
 	struct panel_rgb *rgb = comp->rgb;
+	unsigned long val;
+	int err;
 
-	if (rgb->mode == I8080)
-		i8080_cmd_wr(comp->regs, dt, len, data);
-	if (rgb->mode == SPI)
-		spi_cmd_wr(comp->regs, dt, len, data);
+	err = kstrtoul(buf, 0, &val);
+	if (err)
+		return err;
+
+	rgb->format = val;
+
+	if (rgb->mode == PRGB) {
+		reg_set_bits(comp->regs + RGB_LCD_CTL,
+				RGB_LCD_CTL_PRGB_MODE_MASK,
+				RGB_LCD_CTL_PRGB_MODE(val));
+
+		aic_rgb_release_drvdata();
+		return count;
+	}
+
+	if (val)
+		reg_set_bit(comp->regs + RGB_LCD_CTL, RGB_LCD_CTL_SRGB_MODE);
+	else
+		reg_clr_bit(comp->regs + RGB_LCD_CTL, RGB_LCD_CTL_SRGB_MODE);
 
 	aic_rgb_release_drvdata();
-	return 0;
+	return count;
 }
+
+static ssize_t
+clock_phase_store(struct device *dev, struct device_attribute *attr,
+			 const char *buf, size_t count)
+{
+	struct aic_rgb_comp *comp = aic_rgb_request_drvdata();
+	struct panel_rgb *rgb = comp->rgb;
+	unsigned long val;
+	int err;
+
+	err = kstrtoul(buf, 0, &val);
+	if (err)
+		return err;
+
+	if (val > 3) {
+		pr_err("Invalid clock phase, range [0, 3]\n");
+		aic_rgb_release_drvdata();
+		return count;
+	}
+
+	rgb->clock_phase = val;
+	reg_set_bits(comp->regs + RGB_CLK_CTL,
+		CKO_PHASE_SEL_MASK, CKO_PHASE_SEL(val));
+
+	aic_rgb_release_drvdata();
+	return count;
+}
+
+static ssize_t
+data_mirror_store(struct device *dev, struct device_attribute *attr,
+			 const char *buf, size_t count)
+{
+	struct aic_rgb_comp *comp = aic_rgb_request_drvdata();
+	struct panel_rgb *rgb = comp->rgb;
+	bool enable;
+	int ret;
+
+	ret = kstrtobool(buf, &enable);
+	if (ret)
+		return ret;
+
+	rgb->data_mirror = enable;
+	if (rgb->data_mirror)
+		reg_set_bits(comp->regs + RGB_DATA_SEQ_SEL,
+			RGB_DATA_OUT_SEL_MASK, RGB_DATA_OUT_SEL(7));
+	else
+		reg_clr_bits(comp->regs + RGB_DATA_SEQ_SEL,
+			RGB_DATA_OUT_SEL_MASK);
+
+	aic_rgb_release_drvdata();
+	return count;
+}
+
+static ssize_t
+data_order_store(struct device *dev, struct device_attribute *attr,
+			 const char *buf, size_t count)
+{
+	struct aic_rgb_comp *comp = aic_rgb_request_drvdata();
+	struct panel_rgb *rgb = comp->rgb;
+	char *order[] = { "RGB", "RBG", "BGR", "BRG", "GRB", "GBR" };
+	u32 val[] = { 0x02100210, 0x02010201, 0x00120012,
+		      0x00210021, 0x01200120, 0x01020102 };
+	int i;
+
+	for (i = 0; i < ARRAY_SIZE(order); i++)
+		if (strncasecmp(buf, order[i], strlen(order[i])) == 0)
+			break;
+
+	if (i >= ARRAY_SIZE(order)) {
+		pr_err("Invalid output order\n");
+		return count;
+	}
+
+	rgb->data_order = val[i];
+	reg_write(comp->regs + RGB_DATA_SEL, rgb->data_order);
+
+	aic_rgb_release_drvdata();
+	return count;
+}
+
+static DEVICE_ATTR_RO(info);
+static DEVICE_ATTR_WO(format);
+static DEVICE_ATTR_WO(clock_phase);
+static DEVICE_ATTR_WO(data_mirror);
+static DEVICE_ATTR_WO(data_order);
+
+static struct attribute *aic_rgb_attrs[] = {
+	&dev_attr_info.attr,
+	&dev_attr_format.attr,
+	&dev_attr_clock_phase.attr,
+	&dev_attr_data_mirror.attr,
+	&dev_attr_data_order.attr,
+	NULL
+};
+
+static const struct attribute_group aic_rgb_attr_group = {
+	.attrs = aic_rgb_attrs,
+	.name  = "debug",
+};
 
 static void aic_rgb_swap(void)
 {
 	struct aic_rgb_comp *comp = aic_rgb_request_drvdata();
 	struct panel_rgb *rgb = comp->rgb;
 
-	if (rgb->data_cfg.data_mirror)
+	if (rgb->data_mirror)
 		reg_set_bits(comp->regs + RGB_DATA_SEQ_SEL,
 			RGB_DATA_OUT_SEL_MASK, RGB_DATA_OUT_SEL(7));
 
-	if (rgb->data_cfg.data_order)
-		reg_write(comp->regs + RGB_DATA_SEL, rgb->data_cfg.data_order);
+	if (rgb->data_order)
+		reg_write(comp->regs + RGB_DATA_SEL, rgb->data_order);
 
-	if (rgb->data_cfg.clock_phase)
+	if (rgb->clock_phase)
 		reg_set_bits(comp->regs + RGB_CLK_CTL,
 			CKO_PHASE_SEL_MASK,
-			CKO_PHASE_SEL(rgb->data_cfg.clock_phase));
+			CKO_PHASE_SEL(rgb->clock_phase));
 
 	aic_rgb_release_drvdata();
-}
-
-static void aic_rgb_i8080_cfg(void)
-{
-	struct aic_rgb_comp *comp = aic_rgb_request_drvdata();
-	struct panel_rgb *rgb = comp->rgb;
-
-	if (rgb->fbtft_par.first_line || rgb->fbtft_par.other_line)
-		i8080_cmd_ctl(comp->regs, rgb->fbtft_par.first_line,
-				rgb->fbtft_par.other_line);
-}
-
-static void aic_rgb_spi_cfg(void)
-{
-	struct aic_rgb_comp *comp = aic_rgb_request_drvdata();
-	struct panel_rgb *rgb = comp->rgb;
-	struct spi_cfg *spi = rgb->fbtft_par.spi;
-
-	if (rgb->fbtft_par.first_line || rgb->fbtft_par.other_line)
-		spi_cmd_ctl(comp->regs, rgb->fbtft_par.first_line,
-				rgb->fbtft_par.other_line);
-
-	if (spi) {
-		qspi_code_cfg(comp->regs, spi->code[0],
-				spi->code[1], spi->code[2]);
-		qspi_mode_cfg(comp->regs, spi->code1_cfg,
-				spi->vbp_num, spi->qspi_mode);
-	}
 }
 
 static int aic_rgb_clk_enable(void)
@@ -169,36 +294,18 @@ static int aic_rgb_enable(void)
 		reg_set_bits(comp->regs + RGB_LCD_CTL,
 				RGB_LCD_CTL_PRGB_MODE_MASK,
 				RGB_LCD_CTL_PRGB_MODE(rgb->format));
-		aic_rgb_swap();
 		break;
 	case SRGB:
 		if (rgb->format)
 			reg_set_bit(comp->regs + RGB_LCD_CTL,
 				RGB_LCD_CTL_SRGB_MODE);
-		aic_rgb_swap();
-		break;
-	case I8080:
-		reg_set_bits(comp->regs + RGB_LCD_CTL,
-				RGB_LCD_CTL_I8080_MODE_MASK,
-				RGB_LCD_CTL_I8080_MODE(rgb->format));
-		aic_rgb_i8080_cfg();
-		break;
-	case SPI:
-		reg_set_bits(comp->regs + RGB_LCD_CTL,
-				RGB_LCD_CTL_SPI_MODE_MASK,
-				RGB_LCD_CTL_SPI_MODE(
-					rgb->format / SPI_MODE_NUM));
-		reg_set_bits(comp->regs + RGB_LCD_CTL,
-				RGB_LCD_CTL_SPI_FORMAT_MASK,
-				RGB_LCD_CTL_SPI_FORMAT(
-					rgb->format % SPI_MODE_NUM));
-		aic_rgb_spi_cfg();
 		break;
 	default:
 		dev_err(comp->dev, "Invalid mode %d\n", rgb->mode);
 		break;
 	}
 
+	aic_rgb_swap();
 	reg_set_bit(comp->regs + RGB_LCD_CTL, RGB_LCD_CTL_EN);
 	aic_rgb_release_drvdata();
 	return 0;
@@ -225,10 +332,6 @@ static int aic_rgb_pixclk2mclk(ulong pixclk)
 		comp->sclk_rate = pixclk * 4;
 	else if (rgb->mode == SRGB)
 		comp->sclk_rate = pixclk * 12;
-	else if (rgb->mode == I8080)
-		comp->sclk_rate = pixclk * i8080_clk[rgb->format];
-	else if (rgb->mode == SPI)
-		comp->sclk_rate = pixclk * spi_clk[rgb->format];
 
 	aic_rgb_release_drvdata();
 	return ret;
@@ -252,7 +355,6 @@ static int init_module_funcs(struct device *dev)
 	comp->funcs.disable = aic_rgb_disable;
 	comp->funcs.attach_panel = aic_rgb_attach_panel;
 	comp->funcs.pixclk2mclk = aic_rgb_pixclk2mclk;
-	comp->funcs.send_cmd = aic_rgb_send_cmd;
 	return 0;
 }
 
@@ -263,6 +365,7 @@ static int aic_rgb_bind(struct device *dev, struct device *master,
 	struct aic_rgb_comp *comp;
 	struct resource *res;
 	void __iomem *regs;
+	int ret;
 
 	comp = devm_kzalloc(dev, sizeof(*comp), GFP_KERNEL);
 	if (!comp)
@@ -297,6 +400,12 @@ static int aic_rgb_bind(struct device *dev, struct device *master,
 		return PTR_ERR(comp->reset);
 	}
 
+	ret = sysfs_create_group(&dev->kobj, &aic_rgb_attr_group);
+	if (ret) {
+		dev_err(dev, "Failed to create sysfs node.\n");
+		return ret;
+	}
+
 	init_module_funcs(dev);
 	return 0;
 }
@@ -304,6 +413,7 @@ static int aic_rgb_bind(struct device *dev, struct device *master,
 static void aic_rgb_unbind(struct device *dev, struct device *master,
 			void *data)
 {
+	sysfs_remove_group(&dev->kobj, &aic_rgb_attr_group);
 }
 
 static const struct component_ops aic_rgb_com_ops = {

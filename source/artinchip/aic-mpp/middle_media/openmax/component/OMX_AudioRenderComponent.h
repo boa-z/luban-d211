@@ -48,6 +48,14 @@ typedef struct AUDIO_RENDER_IN_FRAME {
 
 #define AUDIO_RENDER_INPORT_SEND_ALL_FRAME_FLAG  0x02 // consume all frame in readylist
 
+//#define AUDIO_RENDRE_DUMP_ENABLE
+
+#ifdef AUDIO_RENDRE_DUMP_ENABLE
+#define  AUDIO_RENDRE_DUMP_FILEPATH "/sdcard/audio.pcm"
+#endif
+
+#define AUDIO_RENDER_WAIT_FRAME_INTERVAL (10*1000*1000)
+#define AUDIO_RENDER_WAIT_FRAME_MAX_TIME (8*1000*1000)
 
 typedef struct AUDIO_RENDER_DATA_TYPE {
 	OMX_STATETYPE state;
@@ -94,6 +102,14 @@ typedef struct AUDIO_RENDER_DATA_TYPE {
 	OMX_TICKS sPreCorrectMediaTime;
 
 	OMX_TIME_CLOCKSTATE eClockState;
+
+#ifdef AUDIO_RENDRE_DUMP_ENABLE
+	OMX_S32 nDumpAudioFd;
+	OMX_S8  *pDumpAudioFilePath;
+#endif
+
+	OMX_S32 nWaitReayFrameFlag;
+
 }AUDIO_RENDER_DATA_TYPE;
 #endif
 

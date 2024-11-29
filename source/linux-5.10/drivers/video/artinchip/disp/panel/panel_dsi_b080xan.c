@@ -18,7 +18,7 @@
 
 static int panel_enable(struct aic_panel *panel)
 {
-	u8 cmd[2] = {DSI_DCS_EXIT_SLEEP_MODE, DSI_DCS_SET_DISPLAY_ON};
+	int ret;
 
 	if (unlikely(!panel->callbacks.di_send_cmd))
 		panic("Have no send_cmd() API for DSI.\n");
@@ -26,9 +26,18 @@ static int panel_enable(struct aic_panel *panel)
 	panel_di_enable(panel, 0);
 	panel_dsi_send_perpare(panel);
 
-	panel->callbacks.di_send_cmd(DSI_DT_DCS_WR_P0, &cmd[0], 1);
+	ret = panel_dsi_dcs_exit_sleep_mode(panel);
+	if (ret < 0) {
+		pr_err("Failed to exit sleep mode: %d\n", ret);
+		return ret;
+	}
 	aic_delay_ms(200);
-	panel->callbacks.di_send_cmd(DSI_DT_DCS_WR_P0, &cmd[1], 1);
+
+	ret = panel_dsi_dcs_set_display_on(panel);
+	if (ret < 0) {
+		pr_err("Failed to set display on: %d\n", ret);
+		return ret;
+	}
 	aic_delay_ms(200);
 
 	panel_dsi_setup_realmode(panel);

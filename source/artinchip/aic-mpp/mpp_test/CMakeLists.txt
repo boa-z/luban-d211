@@ -162,3 +162,36 @@ set_target_properties(jpeg_encode_test PROPERTIES INSTALL_RPATH "/usr/local/lib"
 if(DEFINED CMAKE_INSTALL_FULL_LIBDIR)
     install(TARGETS jpeg_encode_test RUNTIME DESTINATION "${CMAKE_INSTALL_FULL_BINDIR}")
 endif() # CMAKE_INSTALL_FULL_LIBDIR
+
+############################### jpeg_decode_test #######################################
+add_executable(jpeg_decode_test_1606 jpeg_decode_test_1606.c)
+
+target_link_libraries(jpeg_decode_test_1606 mpp_decoder)
+
+set_target_properties(jpeg_decode_test_1606 PROPERTIES INSTALL_RPATH "/usr/local/lib")
+
+if(DEFINED CMAKE_INSTALL_FULL_LIBDIR)
+    install(TARGETS jpeg_decode_test_1606 RUNTIME DESTINATION "${CMAKE_INSTALL_FULL_BINDIR}")
+endif() # CMAKE_INSTALL_FULL_LIBDIR
+
+############################### jpeg_encode #######################################
+add_executable(jpeg_encode_test_1606 jpeg_encode_test_1606.c)
+
+target_link_libraries(jpeg_encode_test_1606 mpp_encoder)
+
+set_target_properties(jpeg_encode_test_1606 PROPERTIES INSTALL_RPATH "/usr/local/lib")
+
+if(DEFINED CMAKE_INSTALL_FULL_LIBDIR)
+    install(TARGETS jpeg_encode_test_1606 RUNTIME DESTINATION "${CMAKE_INSTALL_FULL_BINDIR}")
+endif() # CMAKE_INSTALL_FULL_LIBDIR
+
+############################### mpp_video #######################################
+add_executable(mpp_video_test mpp_video.c mpp_video_test.c bit_stream_parser.c)
+
+target_link_libraries(mpp_video_test mpp_decoder pthread)
+
+set_target_properties(mpp_video_test PROPERTIES INSTALL_RPATH "/usr/local/lib")
+
+if(DEFINED CMAKE_INSTALL_FULL_LIBDIR)
+    install(TARGETS mpp_video_test RUNTIME DESTINATION "${CMAKE_INSTALL_FULL_BINDIR}")
+endif() # CMAKE_INSTALL_FULL_LIBDIR

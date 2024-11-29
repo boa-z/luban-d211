@@ -67,6 +67,19 @@ enum aic_pwm_action_type {
 	PWM_ACT_NUM
 };
 
+enum aic_pwm_cmp_write_type {
+	PWM_SET_CMPA = 0,
+	PWM_SET_CMPB,
+	PWM_SET_CMPA_CMPB
+};
+
+enum aic_pwm_int_event {
+	PWM_CMPA_UP = 0,
+	PWM_CMPA_DOWN,
+	PWM_CMPB_UP,
+	PWM_CMPB_DOWN
+};
+
 #define PWM_DEFAULT_TB_CLK_RATE	24000000
 #define PWM_DEFAULT_DB_RED	20
 #define PWM_DEFAULT_DB_FED	20
@@ -78,6 +91,8 @@ enum aic_pwm_action_type {
 #define PWM_MCTL_PWM_EN(n)		(PWM_MCTL_PWM0_EN << (n))
 #define PWM_CKCTL_PWM0_ON		BIT(0)
 #define PWM_CKCTL_PWM_ON(n)		(PWM_CKCTL_PWM0_ON << (n))
+#define PWM_INTCTL_PWM0_ON		BIT(0)
+#define PWM_INTCTL_PWM_ON(n)		(PWM_INTCTL_PWM0_ON << (n))
 #define PWM_TBCTL_CLKDIV_MAX		0xFFF
 #define PWM_TBCTL_CLKDIV_SHIFT		16
 #define PWM_TBCTL_CTR_MODE_MASK		GENMASK(1, 0)
@@ -89,6 +104,9 @@ enum aic_pwm_action_type {
 #define PWM_AQCTL_CAU_SHIFT		4
 #define PWM_AQCTL_PRD_SHIFT		2
 #define PWM_AQCTL_MASK			0x3
+#define PWM_ETSEL_INTEN			BIT(3)
+#define PWM_ETSEL_INTSEL_SHIFT		0
+#define PWM_SHADOW_SEL_ZRQ_PRD		0xa
 
 struct aic_pwm_action {
 	enum aic_pwm_action_type CBD;
@@ -124,6 +142,14 @@ struct aic_pwm_chip {
 	struct reset_control *rst;
 	u32 irq;
 };
+
+struct aic_pwm_pulse_para {
+	u32 prd_ns;
+	u32 duty_ns;
+	u32 irq_mode;
+	u32 pulse_cnt;
+};
+struct aic_pwm_pulse_para g_pulse_para[AIC_PWM_CH_NUM] = {0};
 
 static void aic_pwm_ch_info(char *buf, u32 ch, u32 en, struct aic_pwm_arg *arg)
 {
@@ -176,6 +202,7 @@ static DEVICE_ATTR_RO(status);
 
 static int aic_pwm_enable(struct pwm_chip *chip, struct pwm_device *pwm);
 static void aic_pwm_disable(struct pwm_chip *chip, struct pwm_device *pwm);
+static void pwm_reg_enable(void __iomem *base, int offset, int bit, int enable);
 
 static ssize_t config_store(struct device *dev, struct device_attribute *attr,
 			    const char *buf, size_t len)
@@ -233,9 +260,170 @@ static ssize_t config_store(struct device *dev, struct device_attribute *attr,
 }
 static DEVICE_ATTR_WO(config);
 
+static int aic_pwm_set_prd_duty(struct aic_pwm_chip *apwm, u32 ch,
+			u32 prd_ns, u32 duty_ns, enum aic_pwm_cmp_write_type type)
+{
+	u32 prd;
+	u64 duty;
+	struct aic_pwm_arg *arg = &apwm->args[ch];
+
+	if (!arg->available) {
+		dev_err(apwm->chip.dev, "%s() ch%d is unavailable!\n", __func__, ch);
+		return -ENODEV;
+	}
+	dev_dbg(apwm->chip.dev, "ch%d config: duty %d period %d\n",
+		ch, duty_ns, prd_ns);
+	if ((prd_ns < 1) || (prd_ns > NSEC_PER_SEC)) {
+		dev_err(apwm->chip.dev, "ch%d invalid period %d\n", ch, prd_ns);
+		return -ERANGE;
+	}
+
+	arg->freq = NSEC_PER_SEC / prd_ns;
+	prd = arg->tb_clk_rate / arg->freq;
+	if (arg->mode == PWM_MODE_UP_DOWN_COUNT)
+		prd >>= 1;
+	else
+		prd--;
+
+	if (prd > PWM_TBPRD_MAX) {
+		dev_err(apwm->chip.dev, "ch%d period %d is too big\n", ch, prd);
+		return -ERANGE;
+	}
+	arg->period = prd;
+	writel(prd, apwm->regs + PWM_TBPRD(ch));
+
+	duty = (u64)duty_ns*(u64)prd;
+	do_div(duty, prd_ns);
+	if (duty == prd)
+		duty++;
+
+	switch (type) {
+	case PWM_SET_CMPA:
+		writel((u32)duty, apwm->regs + PWM_CMPA(ch));
+		dev_dbg(apwm->chip.dev, "Set CMPA %llu/%u\n", duty, arg->period);
+		break;
+	case PWM_SET_CMPB:
+		writel((u32)duty, apwm->regs + PWM_CMPB(ch));
+		dev_dbg(apwm->chip.dev, "Set CMPB %llu/%u\n", duty, arg->period);
+		break;
+	case PWM_SET_CMPA_CMPB:
+		writel((u32)duty, apwm->regs + PWM_CMPA(ch));
+		writel((u32)duty, apwm->regs + PWM_CMPB(ch));
+	dev_dbg(apwm->chip.dev, "Set CMPA&B %llu/%u\n", duty, arg->period);
+		break;
+	default:
+		break;
+	}
+
+	return 0;
+}
+
+static ssize_t output0_store(struct device *dev, struct device_attribute *attr,
+			    const char *buf, size_t len)
+{
+	struct aic_pwm_chip *apwm = dev_get_drvdata(dev);
+	u32 ch = 0, prd_ns = 0, duty_ns = 0, ret = 0;
+
+	if (len < 5) {
+		dev_err(dev, "The input string maybe too short: %s", buf);
+		return -EINVAL;
+	}
+	dev_dbg(dev, "Input argument: %s", buf);
+
+	ret = sscanf(buf, "%u %u %u\n", &ch, &prd_ns, &duty_ns);
+	if (ret < 3) {
+		dev_err(dev, "There are not enough valid argument");
+		return -EINVAL;
+	}
+
+	AIC_PWM_VALID(dev, ch, 0, AIC_PWM_CH_NUM, "ch");
+
+	aic_pwm_set_prd_duty(apwm, ch, prd_ns, duty_ns, PWM_SET_CMPA);
+
+	return len;
+}
+static DEVICE_ATTR_WO(output0);
+
+static ssize_t output1_store(struct device *dev, struct device_attribute *attr,
+			    const char *buf, size_t len)
+{
+	struct aic_pwm_chip *apwm = dev_get_drvdata(dev);
+	u32 ch = 0, prd_ns = 0, duty_ns = 0, ret = 0;
+
+	if (len < 5) {
+		dev_err(dev, "The input string maybe too short: %s", buf);
+		return -EINVAL;
+	}
+	dev_dbg(dev, "Input argument: %s", buf);
+
+	ret = sscanf(buf, "%u %u %u\n", &ch, &prd_ns, &duty_ns);
+	if (ret < 3) {
+		dev_err(dev, "There are not enough valid argument");
+		return -EINVAL;
+	}
+
+	AIC_PWM_VALID(dev, ch, 0, AIC_PWM_CH_NUM, "ch");
+
+	aic_pwm_set_prd_duty(apwm, ch, prd_ns, duty_ns, PWM_SET_CMPB);
+
+	return len;
+}
+static DEVICE_ATTR_WO(output1);
+
+static ssize_t pulse_store(struct device *dev, struct device_attribute *attr,
+			    const char *buf, size_t len)
+{
+	struct aic_pwm_chip *apwm = dev_get_drvdata(dev);
+	u32 ch = 0, irq_mode = 0, prd_ns = 0, duty_ns = 0, pulse_cnt = 0, ret = 0;
+
+	if (len < 5) {
+		dev_err(dev, "The input string maybe too short: %s", buf);
+		return -EINVAL;
+	}
+	dev_dbg(dev, "Input argument: %s", buf);
+
+	ret = sscanf(buf, "%u %u %u %u %u\n", &ch, &irq_mode, &prd_ns, &duty_ns, &pulse_cnt);
+	if (ret < 5) {
+		dev_err(dev, "There are not enough valid argument");
+		return -EINVAL;
+	}
+
+	AIC_PWM_VALID(dev, ch, 0, AIC_PWM_CH_NUM, "ch");
+
+	if ((irq_mode > PWM_CMPB_DOWN) || (irq_mode < PWM_CMPA_UP)) {
+		dev_err(dev, "irq mode error");
+		return -EINVAL;
+	}
+
+	memset(g_pulse_para, 0, sizeof(g_pulse_para));
+
+	g_pulse_para[ch].pulse_cnt = pulse_cnt;
+	g_pulse_para[ch].duty_ns = duty_ns;
+	g_pulse_para[ch].prd_ns = prd_ns;
+	g_pulse_para[ch].irq_mode = irq_mode;
+
+	aic_pwm_disable(&apwm->chip, &apwm->chip.pwms[ch]);
+
+	if ((irq_mode == PWM_CMPA_UP) || (irq_mode == PWM_CMPA_DOWN))
+		aic_pwm_set_prd_duty(apwm, ch, prd_ns, duty_ns, PWM_SET_CMPA);
+	if ((irq_mode == PWM_CMPB_UP) || (irq_mode == PWM_CMPB_DOWN))
+		aic_pwm_set_prd_duty(apwm, ch, prd_ns, duty_ns, PWM_SET_CMPB);
+
+	writel(PWM_ETSEL_INTEN | ((irq_mode + 4) << PWM_ETSEL_INTSEL_SHIFT), apwm->regs + PWM_ETSEL(ch));
+	pwm_reg_enable(apwm->regs, PWM_INTCTL, PWM_INTCTL_PWM_ON(ch), 1);
+
+	aic_pwm_enable(&apwm->chip, &apwm->chip.pwms[ch]);
+
+	return len;
+}
+static DEVICE_ATTR_WO(pulse);
+
 static struct attribute *aic_pwm_attr[] = {
 	&dev_attr_status.attr,
 	&dev_attr_config.attr,
+	&dev_attr_output0.attr,
+	&dev_attr_output1.attr,
+	&dev_attr_pulse.attr,
 	NULL
 };
 
@@ -297,43 +485,13 @@ static int aic_pwm_config(struct pwm_chip *chip, struct pwm_device *pwm,
 			     int duty_ns, int period_ns)
 {
 	struct aic_pwm_chip *apwm = to_aic_pwm_dev(chip);
-	u32 prd, ch = pwm->hwpwm;
-	u64 duty;
-	struct aic_pwm_arg *arg = &apwm->args[ch];
+	u32 ch = pwm->hwpwm;
+	u32 ret;
 
-	if (!arg->available) {
-		dev_err(chip->dev, "%s() ch%d is unavailable!\n", __func__, ch);
-		return -ENODEV;
-	}
-	dev_dbg(chip->dev, "ch%d config: duty %d period %d\n",
-		ch, duty_ns, period_ns);
-	if ((period_ns < 1) || (period_ns > NSEC_PER_SEC)) {
-		dev_err(chip->dev, "ch%d invalid period %d\n", ch, period_ns);
-		return -ERANGE;
-	}
+	ret = aic_pwm_set_prd_duty(apwm, ch, period_ns, duty_ns, PWM_SET_CMPA_CMPB);
+	if (ret < 0)
+		return ret;
 
-	arg->freq = NSEC_PER_SEC / period_ns;
-	prd = arg->tb_clk_rate / arg->freq;
-	if (arg->mode == PWM_MODE_UP_DOWN_COUNT)
-		prd >>= 1;
-	else
-		prd--;
-
-	if (prd > PWM_TBPRD_MAX) {
-		dev_err(chip->dev, "ch%d period %d is too big\n", ch, prd);
-		return -ERANGE;
-	}
-	arg->period = prd;
-	writel(prd, apwm->regs + PWM_TBPRD(ch));
-
-	duty = (u64)duty_ns * (u64)prd;
-	do_div(duty, period_ns);
-	if (duty == prd)
-		duty--;
-
-	dev_dbg(chip->dev, "Set CMP %llu/%u\n", duty, prd);
-	writel((u32)duty, apwm->regs + PWM_CMPA(ch));
-	writel((u32)duty, apwm->regs + PWM_CMPB(ch));
 	return 0;
 }
 
@@ -432,7 +590,30 @@ static const struct pwm_ops aic_pwm_ops = {
 
 static irqreturn_t aic_pwm_isr(int irq, void *dev_id)
 {
-//	struct aic_pwm_chip *apwm = dev_id;
+	struct aic_pwm_chip *apwm = dev_id;
+	static u32 isr_cnt[AIC_PWM_CH_NUM] = {0};
+	u32 stat;
+	int i;
+
+	stat = readl(apwm->regs + PWM_INTSTS);
+
+	for (i = 0; i < AIC_PWM_CH_NUM; i++) {
+		if (stat & (1 << i)) {
+			isr_cnt[i]++;
+			if (isr_cnt[i] == g_pulse_para[i].pulse_cnt) {
+				if ((g_pulse_para[i].irq_mode == PWM_CMPA_UP) || (g_pulse_para[i].irq_mode == PWM_CMPA_DOWN))
+					aic_pwm_set_prd_duty(apwm, i, g_pulse_para[i].prd_ns, g_pulse_para[i].prd_ns, PWM_SET_CMPA);
+				if ((g_pulse_para[i].irq_mode == PWM_CMPB_UP) || (g_pulse_para[i].irq_mode == PWM_CMPB_DOWN))
+					aic_pwm_set_prd_duty(apwm, i, g_pulse_para[i].prd_ns, g_pulse_para[i].prd_ns, PWM_SET_CMPB);
+				pwm_reg_enable(apwm->regs, PWM_ETSEL(i), PWM_ETSEL_INTEN, 0);
+				pwm_reg_enable(apwm->regs, PWM_INTCTL, PWM_INTCTL_PWM_ON(i), 0);
+				dev_info(apwm->chip.dev, "isr cnt:%d,disabled the pwm%d interrupt now.\n", isr_cnt[i], i);
+				isr_cnt[i] = 0;
+			}
+		}
+	}
+
+	writel(stat, apwm->regs + PWM_INTSTS);
 
 	return IRQ_HANDLED;
 }
@@ -511,6 +692,7 @@ static int aic_pwm_parse_dt(struct device *dev)
 		}
 		dev_dbg(dev, "ch%d is available\n", i);
 		pwm_reg_enable(apwm->regs, PWM_CKCTL, PWM_CKCTL_PWM_ON(i), 1);
+		writel(PWM_SHADOW_SEL_ZRQ_PRD, apwm->regs + PWM_CMPCTL(i));
 
 		ret = of_property_read_u32(child, "aic,tb-clk-rate",
 					   (u32 *)&arg->tb_clk_rate);

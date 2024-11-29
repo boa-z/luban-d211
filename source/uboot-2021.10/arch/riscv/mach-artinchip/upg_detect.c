@@ -33,6 +33,9 @@ DECLARE_GLOBAL_DATA_PTR;
 #define BOOTINFO1_REASON_MSK      (0xF << 4)
 #define RTC_REBOOT_REASON_UPGRADE (4)
 
+#define RTC_SYS_BAK_BASE	  (BASE_RTC + 0x104)
+#define RTC_SYS_BAK_REG(id)	  (RTC_SYS_BAK_BASE + (id) * 0x04)
+
 #define GPIO_IE                   (1 << 16)
 #define GPIO_PULLUP               (3 << 8)
 #define GPIO_PULLDOWN             (2 << 8)
@@ -144,6 +147,23 @@ static int rtc_upg_flag_check(void)
 	}
 
 	return 0;
+}
+
+void rtc_upg_succ_cnt(void)
+{
+	u32 val;
+
+	val = readl(RTC_CMU_REG);
+	if (!(val & RTC_CMU_BUS_EN_MSK))
+		writel(RTC_CMU_BUS_EN_MSK, RTC_CMU_REG);
+
+	writel(RTC_WRITE_KEY_VALUE, RTC_WRITE_KEY_REG);
+	val = readl(RTC_SYS_BAK_REG(14));
+	val += 1;
+	writel(val, RTC_SYS_BAK_REG(14));
+	writel(0, RTC_WRITE_KEY_REG);
+
+	pr_info("Successfully burned %d times.\n", val);
 }
 
 int aic_upg_mode_detect(void)

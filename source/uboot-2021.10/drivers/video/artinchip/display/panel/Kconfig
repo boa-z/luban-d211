@@ -14,22 +14,28 @@ config AIC_PANEL_LVDS_GENERAL
 	help
 	  ArtInChip general LVDS panel
 
+config AIC_PANEL_DSI_SIMPLE
+	tristate "ArtInChip dsi simple panel driver"
+	depends on AIC_DISP_MIPI_DSI
+	help
+	  ArtInChip MIPI DSI simple panel
+
 config AIC_PANEL_DSI_B080XAN
-	tristate "ArtInChip panel driver for B080XAN"
+	tristate "ArtInChip dsi panel driver for B080XAN"
 	depends on AIC_DISP_MIPI_DSI
 	help
 	  Say Y here if you want to enable support for the B080XAN
 	  768x1024 MIPI DSI panel.
 
 config AIC_PANEL_DSI_WUXGA_7IN
-	tristate "ArtInChip panel driver for WUXGA_7IN"
+	tristate "ArtInChip dsi panel driver for WUXGA_7IN"
 	depends on AIC_DISP_MIPI_DSI
 	help
 	  Say Y here if you want to enable support for the WUXGA_7IN
 	  1200x1920 MIPI DSI panel.
 
 config AIC_PANEL_DSI_HX8394_5IN
-	tristate "ArtInChip panel driver for HX8394_5IN"
+	tristate "ArtInChip dsi panel driver for HX8394_5IN"
 	depends on AIC_DISP_MIPI_DSI
 	help
 	  Say Y here if you want to enable support for the HX8394_5IN
@@ -48,5 +54,43 @@ config AIC_PANEL_DSI_XM91080
 	help
 	  Say Y here if you want to enable support for the XM91080
 	  1080x1920 MIPI DSI panel.
+
+config AIC_PANEL_DSI_ILI9881C
+	tristate "ArtInChip dsi panel driver for ili9881c"
+	depends on AIC_DISP_MIPI_DSI
+	help
+	  Say Y here if you want to enable support for the ili9881c
+	  800x1280 MIPI DSI panel.
+
+config AIC_PANEL_DSI_S070WV20
+	tristate "ArtInChip dsi panel driver for s070wv20"
+	depends on AIC_DISP_MIPI_DSI
+	help
+	  Say Y here if you want to enable support for the s070wv20
+	  800x480 MIPI DSI panel.
+
+config AIC_PANEL_DBI_ILI9486L
+	tristate "ArtInChip dbi panel driver for ILI9486L"
+	depends on AIC_DISP_MIPI_DBI
+	help
+	  ArtInChip MIPI DBI Type B (I8080) panel driver for ILI9486L
+
+config AIC_PANEL_DBI_ILI9488
+	tristate "ArtInChip dbi panel driver for ILI9488"
+	depends on AIC_DISP_MIPI_DBI
+	help
+	  ArtInChip MIPI DBI Type B (I8080) panel driver for ILI9488
+
+config AIC_PANEL_DBI_ILI9341
+	tristate "ArtInChip dbi panel driver for ILI9341"
+	depends on AIC_DISP_MIPI_DBI
+	help
+	  ArtInChip MIPI DBI Type C (SPI) panel driver for ILI9341
+
+config AIC_PANEL_DBI_ST77903
+	tristate "ArtInChip dbi panel driver for ST77903"
+	depends on AIC_DISP_MIPI_DBI
+	help
+	  ArtInChip MIPI DBI Type C (SPI) panel driver for ST77903
 
 endchoice

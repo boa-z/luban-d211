@@ -6,11 +6,11 @@ project(test-uart LANGUAGES C)
 set(ignore ${BUILD_DOC}	${BUILD_DOCS} ${BUILD_EXAMPLE} ${BUILD_EXAMPLES}
 	${BUILD_SHARED_LIBS}${BUILD_TEST}${BUILD_TESTING}${BUILD_TESTS})
 
-add_compile_options(-Wall -Werror)
+add_compile_options(-Wall)
 
-add_executable(aic_uart testuart.c)
+add_executable(test_uart test_uart.c)
 
-target_link_libraries(aic_uart pthread)
+target_link_libraries(test_uart pthread)
 
 # Install
 # install directories
@@ -20,5 +20,5 @@ endif()
 include(GNUInstallDirs)
 
 if(DEFINED CMAKE_INSTALL_FULL_LIBDIR)
-	install(TARGETS aic_uart RUNTIME DESTINATION "${CMAKE_INSTALL_FULL_BINDIR}")
+	install(TARGETS test_uart RUNTIME DESTINATION "${CMAKE_INSTALL_FULL_BINDIR}")
 endif() # CMAKE_INSTALL_FULL_LIBDIR

@@ -32,6 +32,10 @@
 #include <artinchip_ve.h>
 #include <artinchip/artinchip_fb.h>
 
+#ifdef CONFIG_AUTO_CALCULATE_PART_CONFIG
+#include <generated/image_cfg_part_config.h>
+#endif
+
 DECLARE_GLOBAL_DATA_PTR;
 
 struct spinand_device *spl_spinand_init(void)
@@ -275,8 +279,10 @@ static int spi_nand_show_logo(struct spinand_device *spinand)
 
 	if (dst[1] == 'P' || dst[2] == 'N' || dst[3] == 'G')
 		aic_png_decode(dst, len);
+	else if (dst[0] == 0xff || dst[1] == 0xd8)
+		aic_jpeg_decode(dst, len);
 	else
-		pr_err("not support logo file format, need a png image\n");
+		pr_err("Invaild logo file format, need a png/jpeg image\n");
 
 out:
 	aicfb_update_ui_layer(dev);

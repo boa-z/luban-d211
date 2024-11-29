@@ -65,6 +65,7 @@ config BR2_PACKAGE_GST1_PLUGINS_GOOD_PLUGIN_AUPARSE
 
 config BR2_PACKAGE_GST1_PLUGINS_GOOD_PLUGIN_AUTODETECT
 	bool "autodetect"
+	default y
 	help
 	  Plugin contains auto-detection plugins for video/audio in-
 	  and outputs
@@ -107,6 +108,7 @@ config BR2_PACKAGE_GST1_PLUGINS_GOOD_PLUGIN_EQUALIZER
 
 config BR2_PACKAGE_GST1_PLUGINS_GOOD_PLUGIN_FLV
 	bool "flv"
+	default y
 	help
 	  FLV muxing and demuxing plugin
 
@@ -132,6 +134,7 @@ config BR2_PACKAGE_GST1_PLUGINS_GOOD_PLUGIN_ICYDEMUX
 
 config BR2_PACKAGE_GST1_PLUGINS_GOOD_PLUGIN_ID3DEMUX
 	bool "id3demux (*.mp3 audio)"
+	default y
 	help
 	  Demux ID3v1 and ID3v2 tags from a file
 
@@ -161,6 +164,7 @@ config BR2_PACKAGE_GST1_PLUGINS_GOOD_PLUGIN_LEVEL
 
 config BR2_PACKAGE_GST1_PLUGINS_GOOD_PLUGIN_MATROSKA
 	bool "matroska"
+	default y
 	help
 	  Matroska and WebM stream handling
 
@@ -199,6 +203,11 @@ config BR2_PACKAGE_GST1_PLUGINS_GOOD_PLUGIN_RTSP
 	help
 	  transfer data via RTSP
 
+config BR2_PACKAGE_GST1_PLUGINS_GOOD_PLUGIN_UDP
+	bool "udp"
+	help
+	  transfer data via UDP
+
 config BR2_PACKAGE_GST1_PLUGINS_GOOD_PLUGIN_SHAPEWIPE
 	bool "shapewipe"
 	help
@@ -213,11 +222,6 @@ config BR2_PACKAGE_GST1_PLUGINS_GOOD_PLUGIN_SPECTRUM
 	bool "spectrum"
 	help
 	  Run an FFT on the audio signal, output spectrum data
-
-config BR2_PACKAGE_GST1_PLUGINS_GOOD_PLUGIN_UDP
-	bool "udp"
-	help
-	  transfer data via UDP
 
 config BR2_PACKAGE_GST1_PLUGINS_GOOD_PLUGIN_VIDEOBOX
 	bool "videobox"

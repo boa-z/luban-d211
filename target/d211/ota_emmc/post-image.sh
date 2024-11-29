@@ -1,9 +1,9 @@
 #!/bin/bash
 
-MKIMAGEPY=scripts/tools/mk_image.py
-MKRESPRIVPY=scripts/tools/mk_private_resource.py
+MKIMAGEPY=tools/scripts/mk_image.py
+MKRESPRIVPY=tools/scripts/mk_private_resource.py
 MKENVIMAGE=${HOST_DIR}/bin/mkenvimage
-PINMUXCHECKPY=scripts/tools/pinmux_check.py
+PINMUXCHECKPY=tools/scripts/pinmux_check.py
 DTBDIR=${BINARIES_DIR}/u-boot.dtb
 
 COLOR_BEGIN="\033["

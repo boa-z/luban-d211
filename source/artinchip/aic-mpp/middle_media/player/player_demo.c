@@ -73,17 +73,17 @@ static int read_dir(char* path, struct file_list *files)
 	char* ptr = NULL;
 	struct dirent* dir_file;
 	DIR* dir = opendir(path);
-	if(dir == NULL) {
+	if (dir == NULL) {
 		loge("read dir failed");
 		return -1;
 	}
 
 	while((dir_file = readdir(dir))) {
-		if(strcmp(dir_file->d_name, ".") == 0 || strcmp(dir_file->d_name, "..") == 0)
+		if (strcmp(dir_file->d_name, ".") == 0 || strcmp(dir_file->d_name, "..") == 0)
 			continue;
 
 		ptr = strrchr(dir_file->d_name, '.');
-		if(ptr == NULL)
+		if (ptr == NULL)
 			continue;
 
 		if (strcmp(ptr, ".h264") && strcmp(ptr, ".264") && strcmp(ptr, ".mp4") )
@@ -96,7 +96,7 @@ static int read_dir(char* path, struct file_list *files)
 		logd("i: %d, filename: %s", files->file_num, files->file_path[files->file_num]);
 		files->file_num ++;
 
-		if(files->file_num >= PLAYER_DEMO_FILE_MAX_NUM)
+		if (files->file_num >= PLAYER_DEMO_FILE_MAX_NUM)
 			break;
 	}
 	return 0;
@@ -105,7 +105,7 @@ static int read_dir(char* path, struct file_list *files)
 s32 event_handle( void* app_data,s32 event,s32 data1,s32 data2)
 {
 	int ret = 0;
-	switch(event){
+	switch(event) {
 		case AIC_PLAYER_EVENT_PLAY_END:
 			g_player_end = 1;
 			logd("g_player_end\n");
@@ -113,14 +113,14 @@ s32 event_handle( void* app_data,s32 event,s32 data1,s32 data2)
 		case AIC_PLAYER_EVENT_PLAY_TIME:
 			break;
 		case AIC_PLAYER_EVENT_DEMUXER_FORMAT_DETECTED:
-			if(AIC_PLAYER_PREPARE_ASYNC == g_sync_flag){
+			if (AIC_PLAYER_PREPARE_ASYNC == g_sync_flag) {
 				g_demuxer_detected_flag = 1;
 				logd("AIC_PLAYER_EVENT_DEMUXER_FORMAT_DETECTED\n");
 			}
 			break;
 
 		case AIC_PLAYER_EVENT_DEMUXER_FORMAT_NOT_DETECTED:
-			if(AIC_PLAYER_PREPARE_ASYNC == g_sync_flag){
+			if (AIC_PLAYER_PREPARE_ASYNC == g_sync_flag) {
 				logd("AIC_PLAYER_EVENT_DEMUXER_FORMAT_NOT_DETECTED\n");
 				logd("cur file format not detected,play next file!!!!!!\n");
 				g_player_end = 1;
@@ -135,13 +135,13 @@ s32 event_handle( void* app_data,s32 event,s32 data1,s32 data2)
 
 static int set_volume(struct aic_player *player,int volume)
 {
-	if(volume < 0){
+	if (volume < 0) {
 		volume = 0;
 	}
-	else if(volume < 101){
+	else if (volume < 101) {
 
 	}
-	else{
+	else {
 		volume = 100;
 	}
 	logd("volume:%d\n",volume);
@@ -152,29 +152,52 @@ static int do_seek(struct aic_player *player,int forward)
 {
 	s64 pos;
 	pos = aic_player_get_play_time(player);
-	if(pos == -1){
+	if (pos == -1) {
 		loge("aic_player_get_play_time error!!!!\n");
 		return -1;
 	}
-	if(forward == 1){
+	if (forward == 1) {
 		pos += 8*1000*1000;//+8s
-	}else{
+	} else {
 		pos -= 8*1000*1000;//-8s
 	}
 
-	if(pos < 0){
+	if (pos < 0) {
 		pos = 0;
-	}else if(pos < g_media_info.duration){
+	} else if (pos < g_media_info.duration) {
 
-	}else{
+	} else {
 		pos = g_media_info.duration;
 	}
 
-	if(aic_player_seek(player,pos) != 0){
+	if (aic_player_seek(player,pos) != 0) {
 		loge("aic_player_seek error!!!!\n");
 		return -1;
 	}
 	logd("aic_player_seek ok\n");
+	return 0;
+}
+
+static int do_rotation(struct aic_player *player)
+{
+	static int index = 0;
+	int rotation = MPP_ROTATION_0;
+
+	if (index % 4 == 0) {
+		rotation = MPP_ROTATION_90;
+		logd("*********MPP_ROTATION_90***************\n");
+	} else if(index % 4 == 1) {
+		rotation = MPP_ROTATION_180;
+		logd("*********MPP_ROTATION_180***************\n");
+	} else if(index % 4 == 2) {
+		rotation = MPP_ROTATION_270;
+		logd("*********MPP_ROTATION_270***************\n");
+	} else if(index % 4 == 3) {
+		rotation = MPP_ROTATION_0;
+		logd("*********MPP_ROTATION_0***************\n");
+	}
+	aic_player_set_rotation(player,rotation);
+	index++;
 	return 0;
 }
 
@@ -186,14 +209,14 @@ static int start_play(struct aic_player *player,int volume)
 	struct mpp_rect disp_rect;
 
 	ret = aic_player_start(player);
-	if(ret != 0){
+	if (ret != 0) {
 		loge("aic_player_start error!!!!\n");
 		return -1;
 	}
 	logd("aic_player_start ok\n");
 
 	ret =  aic_player_get_media_info(player,&media_info);
-	if(ret != 0){
+	if (ret != 0) {
 		loge("aic_player_get_media_info error!!!!\n");
 		return -1;
 	}
@@ -211,9 +234,9 @@ static int start_play(struct aic_player *player,int volume)
 		,media_info.audio_stream.nb_channel
 		,media_info.audio_stream.sample_rate);
 
-	if(media_info.has_video){
+	if (media_info.has_video) {
 		ret = aic_player_get_screen_size(player, &screen_size);
-		if(ret != 0){
+		if (ret != 0) {
 			loge("aic_player_get_screen_size error!!!!\n");
 			return -1;
 		}
@@ -223,23 +246,23 @@ static int start_play(struct aic_player *player,int volume)
 		disp_rect.width = 600;
 		disp_rect.height = 500;
 		ret = aic_player_set_disp_rect(player, &disp_rect);//attention:disp not exceed screen_size
-		if(ret != 0){
+		if (ret != 0) {
 			loge("aic_player_set_disp_rect error\n");
 			return -1;
 		}
 		logd("aic_player_set_disp_rect  ok\n");
 	}
 
-	if(media_info.has_audio){
+	if (media_info.has_audio) {
 		ret = set_volume(player,volume);
-		if(ret != 0){
+		if (ret != 0) {
 			loge("set_volume error!!!!\n");
 			return -1;
 		}
 	}
 
 	ret = aic_player_play(player);
-	if(ret != 0){
+	if (ret != 0) {
 		loge("aic_player_play error!!!!\n");
 		return -1;
 	}
@@ -261,7 +284,7 @@ int main(int argc,char*argv[])
 	struct aic_player *player = NULL;
 	int volume = 50;
 	struct aic_capture_info   capture_info;
-	char file_path[255] = {"/mnt/video/capture.jpg"};
+	char file_path[255] = {"/mnt/video/capture.jpg"} ;
 
 	//default capture_info
 	capture_info.file_path = (s8 *)file_path;
@@ -308,13 +331,13 @@ int main(int argc,char*argv[])
 		}
 	}
 
-	if(files.file_num == 0) {
+	if (files.file_num == 0) {
 		print_help(argv[0]);
 		return -1;
 	}
 
 	player = aic_player_create(NULL);
-	if(player == NULL){
+	if (player == NULL) {
 		loge("aic_player_create fail!!!\n");
 		return -1;
 	}
@@ -325,99 +348,107 @@ int main(int argc,char*argv[])
 	flag |= O_NONBLOCK;
 	fcntl(STDIN_FILENO,F_SETFL,flag);
 
-	for(i = 0;i < loop_time; i++){
-		for(j = 0; j < files.file_num; j++){
+	for(i = 0;i < loop_time; i++) {
+		for(j = 0; j < files.file_num; j++) {
 			aic_player_set_uri(player,files.file_path[j]);
-			if(g_sync_flag == AIC_PLAYER_PREPARE_ASYNC){
+			if (g_sync_flag == AIC_PLAYER_PREPARE_ASYNC) {
 				ret = aic_player_prepare_async(player);
-			}else{
+			} else {
 				ret = aic_player_prepare_sync(player);
 			}
-			if(ret){
+			if (ret) {
 				loge("aic_player_prepare error!!!!\n");
 				g_player_end = 1;
 				goto _NEXT_FILE_;
 			}
 
 
-			if(g_sync_flag == AIC_PLAYER_PREPARE_SYNC){
-				if(start_play(player,volume) != 0){
+			if (g_sync_flag == AIC_PLAYER_PREPARE_SYNC) {
+				if (start_play(player,volume) != 0) {
 					g_player_end = 1;
 					goto _NEXT_FILE_;
 				}
 			}
 
 			while(1)
-			{
+			 {
 	_NEXT_FILE_:
-				if(g_player_end == 1){
+				if (g_player_end == 1) {
 					logd("play file:%s end!!!!\n",files.file_path[j]);
 					ret = aic_player_stop(player);
 					g_player_end = 0;
 					break;
 				}
 
-				if(g_sync_flag == AIC_PLAYER_PREPARE_ASYNC && g_demuxer_detected_flag == 1){
+				if (g_sync_flag == AIC_PLAYER_PREPARE_ASYNC && g_demuxer_detected_flag == 1) {
 					g_demuxer_detected_flag = 0;
-					if(start_play(player,volume) != 0){
+					if (start_play(player,volume) != 0) {
 						g_player_end = 1;
 						goto _NEXT_FILE_;
 					}
 				}
 
-				if(read(STDIN_FILENO, buffer, BUFFER_LEN) > 0){
-					if(buffer[0] == 0x20){// pause
+				if (read(STDIN_FILENO, buffer, BUFFER_LEN) > 0) {
+					if (buffer[0] == 0x20) {// pause
 						logd("*********enter pause ***************\n");
 						aic_player_pause(player);
-					}else if(buffer[0] == 'd'){//stop cur, star next
+					} else if (buffer[0] == 'd') {//stop cur, star next
 						logd("*********enter down ***************\n");
 						aic_player_stop(player);
 						break;
-					}else if(buffer[0] == 'u'){//stop cur, star pre
+					} else if (buffer[0] == 'u') {//stop cur, star pre
 						logd("*********enter up j:%d***************\n",j);
 						aic_player_stop(player);
 						j -= 2;
 						j = (j < -1)?(-1):(j);
 						break;
-					}else if(buffer[0] == '-'){
+					} else if (buffer[0] == '-') {
 						logd("*********enter volume--**************\n");
 						volume -= 5;
 						set_volume(player,volume);
-					}else if(buffer[0] == '+'){
+					} else if (buffer[0] == '+') {
 						logd("*********enter volume++***************\n");
 						volume += 5;
 						set_volume(player,volume);
-					}else if(buffer[0] == 'm'){
+					} else if (buffer[0] == 'm') {
 						logd("*********enter/exit mute***************\n");
 							aic_player_set_mute(player);
-					}else if(buffer[0] == 'c'){
+					} else if (buffer[0] == 'c') {
 						logd("*********capture***************\n");
-						if(aic_player_capture(player,&capture_info) == 0){
+						if (aic_player_capture(player,&capture_info) == 0) {
 							logd("*********aic_player_capture ok***************\n");
-						}else{
+						} else {
 							loge("*********aic_player_capture fail ***************\n");
 						}
-					}else if(buffer[0] == 'f'){
+					} else if (buffer[0] == 'f') {
 						logd("*********forward***************\n");
 						do_seek(player,1);//+8s
-					}else if(buffer[0] == 'b'){
+					} else if (buffer[0] == 'b') {
 						logd("*********back***************\n");
 						do_seek(player,0);//-8s
-					}else if(buffer[0] == 'z'){
-						if(aic_player_seek(player,0) != 0){
+					} else if (buffer[0] == 'z') {
+						if (aic_player_seek(player,0) != 0) {
 							loge("aic_player_seek error!!!!\n");
-						}else{
+						} else {
 							logd("aic_player_seek ok\n");
 						}
-					}else{
+					} else if (buffer[0] == 'r') {
+						do_rotation(player);
+					} else if(buffer[0] == 's') {//set display rect
+
+					} else if(buffer[0] == 'e') {
+						aic_player_stop(player);
+						goto _EXIT0_;
+					} else {
+
 					}
-				}else{
+				} else {
 					usleep(1000*1000);
 				}
 			}
 		}
 	}
-
+_EXIT0_:
 	aic_player_destroy(player);
 	return ret;
 }

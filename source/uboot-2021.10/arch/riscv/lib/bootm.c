@@ -81,24 +81,9 @@ static void boot_prep_linux(bootm_headers_t *images)
 	}
 }
 
-static void boot_jump_linux(bootm_headers_t *images, int flag)
-{
-	void (*kernel)(ulong hart, void *dtb);
-	int fake = (flag & BOOTM_STATE_OS_FAKE_GO);
-#ifdef CONFIG_SMP
-	int ret;
-#endif
-
-	kernel = (void (*)(ulong, void *))images->ep;
-
-	bootstage_mark(BOOTSTAGE_ID_RUN_OS);
-
-	debug("## Transferring control to kernel (at address %08lx) ...\n",
-	      (ulong)kernel);
-
-	announce_and_cleanup(fake);
-
 #ifdef CONFIG_ARTINCHIP_DEBUG_BOOT_TIME
+static void show_start_time(void)
+{
 	unsigned long time_s, time_us;
 	u32 *ptm;
 
@@ -142,6 +127,28 @@ static void boot_jump_linux(bootm_headers_t *images, int flag)
 	time_s = time_us / 1000000;
 	time_us -= (time_s * 1000000);
 	printf("[%5lu.%06lu] U-Boot start kernel\n", time_s, time_us);
+}
+#endif
+
+static void boot_jump_linux(bootm_headers_t *images, int flag)
+{
+	void (*kernel)(ulong hart, void *dtb);
+	int fake = (flag & BOOTM_STATE_OS_FAKE_GO);
+#ifdef CONFIG_SMP
+	int ret;
+#endif
+
+	kernel = (void (*)(ulong, void *))images->ep;
+
+	bootstage_mark(BOOTSTAGE_ID_RUN_OS);
+
+	debug("## Transferring control to kernel (at address %08lx) ...\n",
+	      (ulong)kernel);
+
+	announce_and_cleanup(fake);
+
+#ifdef CONFIG_ARTINCHIP_DEBUG_BOOT_TIME
+	show_start_time();
 #endif
 	if (!fake) {
 		if (IMAGE_ENABLE_OF_LIBFDT && images->ft_len) {
@@ -182,4 +189,17 @@ int do_bootm_vxworks(int flag, int argc, char *const argv[],
 		     bootm_headers_t *images)
 {
 	return do_bootm_linux(flag, argc, argv, images);
+}
+
+static ulong get_sp(void)
+{
+	ulong ret;
+
+	asm("mv %0, sp" : "=r"(ret) : );
+	return ret;
+}
+
+void arch_lmb_reserve(struct lmb *lmb)
+{
+	arch_lmb_reserve_generic(lmb, get_sp(), gd->ram_top, 4096);
 }

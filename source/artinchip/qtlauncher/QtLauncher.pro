@@ -23,7 +23,7 @@ SMALL_MEMORY = $$(QTLAUNCHER_SMALL_MEMORY)
 contains(GE_SUPPORT,YES){
 DEFINES += QTLAUNCHER_GE_SUPPORT
 target.path += /usr/local/launcher
-LIBS += -L$$(STAGING_DIR)/usr/local/lib/ -lmpp_decoder -lmpp_ge
+LIBS += -L$$(STAGING_DIR)/usr/local/lib/ -lmpp_decoder -lmpp_ge -lmpp_ve -lmpp_base
 INCLUDEPATH += $$(STAGING_DIR)/usr/include/
 INCLUDEPATH += $$(STAGING_DIR)/usr/local/include/
 INSTALLS += target

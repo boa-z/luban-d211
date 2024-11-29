@@ -332,10 +332,12 @@ static int video_post_probe(struct udevice *dev)
 {
 	struct video_uc_plat *plat = dev_get_uclass_plat(dev);
 	struct video_priv *priv = dev_get_uclass_priv(dev);
+#ifdef CONFIG_CONSOLE_NORMAL
 	char name[30], drv[15], *str;
 	const char *drv_name = drv;
 	struct udevice *cons;
 	int ret;
+#endif
 
 	/* Set up the line and display size */
 	priv->fb = map_sysmem(plat->base, plat->size);
@@ -353,6 +355,7 @@ static int video_post_probe(struct udevice *dev)
 	if (!CONFIG_IS_ENABLED(NO_FB_CLEAR))
 		video_clear(dev);
 
+#ifdef CONFIG_CONSOLE_NORMAL
 	/*
 	 * Create a text console device. For now we always do this, although
 	 * it might be useful to support only bitmap drawing on the device
@@ -391,6 +394,7 @@ static int video_post_probe(struct udevice *dev)
 		debug("%s: Cannot probe console driver\n", __func__);
 		return ret;
 	}
+#endif
 
 	return 0;
 };

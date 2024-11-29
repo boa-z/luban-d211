@@ -16,6 +16,7 @@ VERBOSE = False
 DATA_SECT_TYPE_DRAM = int("0x41490001",16)
 DATA_SECT_TYPE_SYS_UART  = int("0x41490002",16)
 DATA_SECT_TYPE_SYS_JTAG  = int("0x41490003",16)
+DATA_SECT_TYPE_SYS_UPGMODE  = int("0x41490004",16)
 DATA_SECT_TYPE_END  = int("0x4149FFFF",16)
 
 def parse_private_data_cfg(cfgfile):
@@ -32,7 +33,7 @@ def parse_private_data_cfg(cfgfile):
                 continue
             slash_start = sline.find("//")
             if slash_start > 0:
-                jsonstr += sline[0:slash_start]
+                jsonstr += sline[0:slash_start].strip()
             else:
                 jsonstr += sline
         # Use OrderedDict is important, we need to iterate FWC in order.
@@ -92,7 +93,7 @@ struct ddr {
 };
 struct dram_data {
     u32 data_type;
-    u32 data_len;
+    u32 data_len; // length of rest of this structure
     u32 entry_cnt;
     struct ddr param[entry_cnt];
 };
@@ -100,7 +101,8 @@ struct dram_data {
 """
 def gen_ddr_init_data(dram):
     data_type = int_to_u32_bytes(DATA_SECT_TYPE_DRAM)
-    data = int_to_u32_bytes(len(dram))
+    entry_cnt = len(dram)
+    data = int_to_u32_bytes(entry_cnt)
     for entry_name in dram.keys():
         entry = dram[entry_name]
         data += param_str_to_u32_bytes(entry["type"])
@@ -149,7 +151,7 @@ struct system_uart {
 };
 struct system_uart_data {
     u32 data_type;
-    u32 data_len;
+    u32 data_len; // length of rest of this structure
     struct system_uart param[entry_cnt];
 };
 
@@ -163,8 +165,8 @@ def gen_system_uart_data(uart):
     return data
 
 def gen_system_uart(sys_uart):
-    data = bytes()
     data_type = int_to_u32_bytes(DATA_SECT_TYPE_SYS_UART)
+    data = bytes()
     for uarti in sys_uart.keys():
         data += gen_system_uart_data(sys_uart[uarti])
     data_len = int_to_u32_bytes(len(data))
@@ -184,7 +186,7 @@ struct system_jtag {
 };
 struct system_jtag_data {
     u32 data_type;
-    u32 data_len;
+    u32 data_len; // length of rest of this structure
     u32 jtag_only;
     struct system_jtag param[entry_cnt];
 };
@@ -203,15 +205,51 @@ def gen_system_jtag_data(jtag):
     return data
 
 def gen_system_jtag(sys_jtag):
-    data = bytes()
     data_type = int_to_u32_bytes(DATA_SECT_TYPE_SYS_JTAG)
+    data = bytes()
     jtag_only = param_str_to_u32_bytes(sys_jtag["jtag_only"])
+    data += jtag_only
 
     for jtagi in sys_jtag.keys():
         if isinstance(sys_jtag[jtagi], OrderedDict):
             data += gen_system_jtag_data(sys_jtag[jtagi])
     data_len = int_to_u32_bytes(len(data))
-    return data_type + data_len + jtag_only + data
+    return data_type + data_len + data
+"""
+struct system_upgmode {
+    u32 upgmode_pin_cfg_reg;
+    u32 upgmode_pin_cfg_val;
+    u32 upgmode_pin_input_reg;
+    u32 upgmode_pin_input_msk;
+    u32 upgmode_pin_input_val;
+    u32 upgmode_pin_pullup_dly;
+};
+struct system_jtag_data {
+    u32 data_type;
+    u32 data_len; // length of rest of this structure
+    struct system_upgmode;
+};
+"""
+def gen_system_upgmode_data(upgmode):
+    data  = param_str_to_u32_bytes(upgmode["upgmode_pin_cfg_reg"])
+    data += param_str_to_u32_bytes(upgmode["upgmode_pin_cfg_val"])
+    data += param_str_to_u32_bytes(upgmode["upgmode_pin_input_reg"])
+    data += param_str_to_u32_bytes(upgmode["upgmode_pin_input_msk"])
+    data += param_str_to_u32_bytes(upgmode["upgmode_pin_input_val"])
+
+    # upgmode_pin_pullup_dly is new add element, need to compatible with json
+    # without upgmode_pin_pullup_dly
+    if "upgmode_pin_pullup_dly" in upgmode:
+        data += param_str_to_u32_bytes(upgmode["upgmode_pin_pullup_dly"])
+    else:
+        data += param_str_to_u32_bytes("500")
+    return data
+def gen_system_upgmode(sys_upgmode):
+    data = bytes()
+    data_type = int_to_u32_bytes(DATA_SECT_TYPE_SYS_UPGMODE)
+    data += gen_system_upgmode_data(sys_upgmode)
+    data_len = int_to_u32_bytes(len(data))
+    return data_type + data_len + data
 
 def gen_end_flag():
     data_type = int_to_u32_bytes(DATA_SECT_TYPE_END)
@@ -226,6 +264,8 @@ def gen_private_data(cfg):
             data += gen_ddr_init_data(cfg[item])
         if item == "system":
             for sysi in cfg[item].keys():
+                if sysi == "upgmode":
+                    data += gen_system_upgmode(cfg[item][sysi])
                 if sysi == "uart":
                     data += gen_system_uart(cfg[item][sysi])
                 if sysi == "jtag":

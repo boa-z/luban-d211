@@ -33,6 +33,9 @@
 #include <fdt_support.h>
 #include <bootcount.h>
 #include <wdt.h>
+#ifdef CONFIG_ARCH_ARTINCHIP
+#include <asm/arch/boot_param.h>
+#endif
 
 DECLARE_GLOBAL_DATA_PTR;
 
@@ -84,7 +87,6 @@ __weak int dram_init_banksize(void)
  * 0 to not start u-boot
  * positive if u-boot should start
  */
-#ifdef CONFIG_SPL_OS_BOOT
 __weak int spl_start_uboot(void)
 {
 	puts(SPL_TPL_PROMPT
@@ -101,7 +103,6 @@ int __weak bootz_setup(ulong image, ulong *start, ulong *end)
 {
 	 return 1;
 }
-#endif
 
 /* Weak default function for arch/board-specific fixups to the spl_image_info */
 void __weak spl_perform_fixups(struct spl_image_info *spl_image)
@@ -661,6 +662,32 @@ void board_init_f(ulong dummy)
 }
 #endif
 
+#ifdef CONFIG_ARTINCHIP_DEBUG_BOOT_TIME
+static void show_start_time(void)
+{
+	unsigned long time_s, time_us;
+	u32 *ptm;
+
+	ptm = (u32 *)BOOT_TIME_SPL_START;
+	time_us = *ptm;
+	time_s = time_us / 1000000;
+	time_us -= (time_s * 1000000);
+	printf("[%5lu.%06lu] SPL start\n", time_s, time_us);
+
+	ptm = (u32 *)BOOT_TIME_SPL_LOAD_IMAGE_START;
+	time_us = *ptm;
+	time_s = time_us / 1000000;
+	time_us -= (time_s * 1000000);
+	printf("[%5lu.%06lu] SPL load image start\n", time_s, time_us);
+
+	ptm = (u32 *)BOOT_TIME_SPL_LOAD_IMAGE_DONE;
+	time_us = *ptm;
+	time_s = time_us / 1000000;
+	time_us -= (time_s * 1000000);
+	printf("[%5lu.%06lu] SPL load image end\n", time_s, time_us);
+}
+#endif
+
 void board_init_r(gd_t *dummy1, ulong dummy2)
 {
 	u32 spl_boot_list[] = {
@@ -733,6 +760,12 @@ void board_init_r(gd_t *dummy1, ulong dummy2)
 	spl_image.boot_device = BOOT_DEVICE_NONE;
 	board_boot_order(spl_boot_list);
 
+#ifdef CONFIG_ARTINCHIP_DEBUG_BOOT_TIME
+	u32 *p = (u32 *)BOOT_TIME_SPL_LOAD_IMAGE_START;
+	/* SPL load image start */
+	*p = aic_timer_get_us();
+#endif
+
 	ret = boot_from_devices(&spl_image, spl_boot_list,
 				ARRAY_SIZE(spl_boot_list));
 	if (ret) {
@@ -744,6 +777,14 @@ void board_init_r(gd_t *dummy1, ulong dummy2)
 			puts(SPL_TPL_PROMPT "failed to boot from all boot devices\n");
 		hang();
 	}
+
+#ifdef CONFIG_ARTINCHIP_DEBUG_BOOT_TIME
+	u32 *sp = (u32 *)BOOT_TIME_SPL_LOAD_IMAGE_DONE;
+	/* SPL load image end */
+	*sp = aic_timer_get_us();
+
+	show_start_time();
+#endif
 
 	spl_perform_fixups(&spl_image);
 	if (CONFIG_IS_ENABLED(HANDOFF)) {

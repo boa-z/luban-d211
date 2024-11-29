@@ -41,6 +41,12 @@ config BR2_TARGET_ROOTFS_EXT2_REV
 	default 0   if BR2_TARGET_ROOTFS_EXT2_2r0
 	default 1   if !BR2_TARGET_ROOTFS_EXT2_2r0
 
+config BR2_TARGET_ROOTFS_EXT2_TO_SPARSE
+	bool "generate sparse format filesystem"
+	default y
+	select BR2_PACKAGE_HOST_ANDROID_TOOLS
+	select BR2_PACKAGE_HOST_ANDROID_TOOLS_EXT4_UTILS
+
 config BR2_TARGET_ROOTFS_EXT2_LABEL
 	string "filesystem label"
 	default "rootfs"

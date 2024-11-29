@@ -964,3 +964,9 @@ function _search_in_list()
 _mark_topdir
 
 export PATH=$PATH:${LUBAN_PRJ_TOP_DIR}/tools/scripts/bin
+
+# Avoid conflict with Luban-Lite me command
+type me | grep alias > /dev/null
+if [ $? -eq 0 ]; then
+	unalias me
+fi

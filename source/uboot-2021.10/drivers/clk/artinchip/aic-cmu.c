@@ -14,6 +14,7 @@
 #include <dm/lists.h>
 #include <dm/uclass-internal.h>
 #include "clk-aic.h"
+#include <dt-bindings/clock/artinchip,aic-cmu.h>
 
 #define PLL_INT0_GEN_REG (0x0000)
 #define PLL_INT1_GEN_REG (0x0004)
@@ -163,22 +164,22 @@ static u32 cpu_src_sels[] = {CLK_OSC24M, CLK_PLL_INT0};
 #endif
 
 static struct aic_sys_clk clk_syss[] = {
-	CLK_SYS(CLK_AXI0, CLK_AXI0_REG, axi0_src_sels,
+	CLK_SYS_BUS(CLK_AXI0, CLK_AXI0_REG, axi0_src_sels,
 		ARRAY_SIZE(axi0_src_sels), 8, 1, 0, 5),
-	CLK_SYS(CLK_AHB0, CLK_AHB0_REG, ahb0_src_sels,
+	CLK_SYS_BUS(CLK_AHB0, CLK_AHB0_REG, ahb0_src_sels,
 		ARRAY_SIZE(ahb0_src_sels), 8, 1, 0, 5),
-	CLK_SYS(CLK_APB0, CLK_APB0_REG, apb0_src_sels,
+	CLK_SYS_BUS(CLK_APB0, CLK_APB0_REG, apb0_src_sels,
 		ARRAY_SIZE(apb0_src_sels), 8, 1, 0, 5),
 #ifdef CONFIG_CLK_ARTINCHIP_V0_1
-	CLK_SYS(CLK_APB1, CLK_APB1_REG, apb1_src_sels,
+	CLK_SYS_BUS(CLK_APB1, CLK_APB1_REG, apb1_src_sels,
 		ARRAY_SIZE(apb1_src_sels), 8, 1, 0, 5),
-	CLK_SYS(CLK_CPU, CLK_CPU_REG, cpu_src_sels,
+	CLK_SYS_BUS(CLK_CPU, CLK_CPU_REG, cpu_src_sels,
 		ARRAY_SIZE(cpu_src_sels), 8, 2, 0, 5),
 
 #else
-	CLK_SYS(CLK_APB1, CLK_APB1_REG, apb1_src_sels,
+	CLK_SYS_BUS(CLK_APB1, CLK_APB1_REG, apb1_src_sels,
 		ARRAY_SIZE(apb1_src_sels), 8, 1, 0, 0),
-	CLK_SYS(CLK_CPU, CLK_CPU_REG, cpu_src_sels,
+	CLK_SYS_BUS(CLK_CPU, CLK_CPU_REG, cpu_src_sels,
 		ARRAY_SIZE(cpu_src_sels), 8, 1, 0, 5),
 #endif
 };
@@ -221,12 +222,12 @@ static struct aic_periph_clk clk_periphs[] = {
 	AIC_CLK_PERIPH(CLK_I2S0,            CLK_PLL_FRA1,   CLK_I2S0_REG),
 	AIC_CLK_PERIPH(CLK_I2S1,            CLK_PLL_FRA1,   CLK_I2S1_REG),
 	AIC_CLK_PERIPH(CLK_CODEC,           CLK_PLL_FRA1,   CLK_CODEC_REG),
-	AIC_CLK_PERIPH(CLK_GE,              CLK_PLL_INT1,   CLK_GE_REG),
 #endif
 	AIC_CLK_PERIPH(CLK_RGB,             CLK_SCLK,	    CLK_RGB_REG),
 	AIC_CLK_PERIPH(CLK_LVDS,            CLK_SCLK,	    CLK_LVDS_REG),
 	AIC_CLK_PERIPH(CLK_MIPIDSI,         CLK_SCLK,	    CLK_MIPIDSI_REG),
 	AIC_CLK_PERIPH(CLK_DE,              CLK_PLL_INT1,   CLK_DE_REG),
+	AIC_CLK_PERIPH(CLK_GE,              CLK_PLL_INT1,   CLK_GE_REG),
 	AIC_CLK_PERIPH(CLK_VE,              CLK_PLL_INT1,   CLK_VE_REG),
 	AIC_CLK_PERIPH(CLK_PWM,             CLK_PLL_INT1,   CLK_PWM_REG),
 #ifdef CONFIG_CLK_ARTINCHIP_V0_1
@@ -550,11 +551,13 @@ static int aic_clk_probe(struct udevice *dev)
 
 static const struct udevice_id aic_clk_ids[] = {
 	{ .compatible = "artinchip,aic-cmu-v1.0", },
+	{ .compatible = "artinchip,aic-cmu-v1.3", },
 	{ }
 };
 
 U_BOOT_DRIVER(artinchip_cmu) = {
 	.name                     = "artinchip_aic_cmu_v1_0",
+	//.name                     = "artinchip_aic_cmu_v1_3",
 	.id                       = UCLASS_CLK,
 	.of_match                 = aic_clk_ids,
 	.probe                    = aic_clk_probe,

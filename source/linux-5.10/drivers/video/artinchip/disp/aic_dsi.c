@@ -21,10 +21,16 @@
 #include <linux/interrupt.h>
 #include "hw/dsi_reg.h"
 #include "hw/reg_util.h"
+#include <video/mipi_display.h>
 #include "aic_com.h"
 
 #define LANES_MAX_NUM	4
 #define LN_ASSIGN_WIDTH	4
+
+struct dsi_command {
+	u8 *buf;
+	size_t len;
+};
 
 struct aic_dsi_comp {
 	/* di_funcs must be the first member */
@@ -35,9 +41,12 @@ struct aic_dsi_comp {
 	struct clk *mclk;
 	struct clk *sclk;
 	struct panel_dsi *dsi;
+	struct videomode *vm;
+	struct dsi_command commands;
 	u32 ln_assign;
 	u32 ln_polrs;
 	bool dc_inv;
+	bool command_on;
 	ulong sclk_rate;
 	s32 irq;
 	u32 vc_num;
@@ -207,9 +216,38 @@ static int aic_dsi_set_vm(struct videomode *vm, int enable)
 	return 0;
 }
 
+static void aic_dsi_send_debug_cmd(struct aic_dsi_comp *comp)
+{
+	struct dsi_command *commands = &comp->commands;
+	unsigned int i = 0;
+
+	if (!comp->command_on || !commands->buf)
+		return;
+
+	aic_dsi_set_vm(comp->vm, false);
+	while (i < commands->len) {
+		u8 command = commands->buf[i++];
+		u8 num_parameters = commands->buf[i++];
+		const u8 *parameters = &commands->buf[i];
+
+		if (command == 0x00 && num_parameters == 1)
+			aic_delay_ms(parameters[0]);
+		else
+			dsi_cmd_wr(comp->regs, command, comp->vc_num, parameters, num_parameters);
+
+		i += num_parameters;
+	}
+	aic_dsi_set_vm(comp->vm, true);
+}
+
 static int aic_dsi_send_cmd(u32 dt, const u8 *data, u32 len)
 {
 	struct aic_dsi_comp *comp = aic_dsi_request_drvdata();
+
+	if (comp->command_on) {
+		aic_dsi_send_debug_cmd(comp);
+		return 0;
+	}
 
 	dsi_cmd_wr(comp->regs, dt, comp->vc_num, data, len);
 	aic_dsi_release_drvdata();
@@ -230,6 +268,7 @@ static int aic_dsi_attach_panel(struct aic_panel *panel)
 	}
 
 	comp->dsi = panel->dsi;
+	comp->vm = panel->vm;
 	return 0;
 }
 
@@ -254,6 +293,153 @@ static irqreturn_t aic_dsi_handler(int irq, void *ctx)
 	// TODO: check interrupt
 	return IRQ_HANDLED;
 }
+
+static ssize_t
+reg_show(struct device *dev, struct device_attribute *devattr, char *buf)
+{
+	struct aic_dsi_comp *comp = aic_dsi_request_drvdata();
+	return sprintf(buf, "%#x\n", readl(comp->regs + DSI_GEN_PD_CFG));
+}
+static ssize_t reg_store(struct device *dev, struct device_attribute *attr,
+			 const char *buf, size_t count)
+{
+	struct aic_dsi_comp *comp = aic_dsi_request_drvdata();
+	unsigned long val;
+	int err;
+
+	err = kstrtoul(buf, 0, &val);
+	if (err)
+		return err;
+
+	dsi_cmd_wr(comp->regs, MIPI_DSI_DCS_READ, 0, (u8[]){ val }, 1);
+	return count;
+}
+static DEVICE_ATTR_RW(reg);
+
+static ssize_t
+command_on_show(struct device *dev, struct device_attribute *devattr, char *buf)
+{
+	struct aic_dsi_comp *comp = aic_dsi_request_drvdata();
+	return sprintf(buf, "command on: %d\n", comp->command_on);
+}
+static ssize_t command_on_store(struct device *dev, struct device_attribute *attr,
+			 const char *buf, size_t count)
+{
+	struct aic_dsi_comp *comp = aic_dsi_request_drvdata();
+	bool enable;
+	int err;
+
+	err = kstrtobool(buf, &enable);
+	if (err)
+		return err;
+
+	comp->command_on = enable;
+	return count;
+}
+static DEVICE_ATTR_RW(command_on);
+
+static ssize_t commands_store(struct device *dev, struct device_attribute *attr,
+			 const char *buf, size_t count)
+{
+	struct aic_dsi_comp *comp = aic_dsi_request_drvdata();
+	struct dsi_command *commands = &comp->commands;
+
+	if (commands->buf)
+		kfree(commands->buf);
+
+	commands->buf = kmalloc(count, GFP_KERNEL);
+	if (!commands->buf) {
+		pr_err("field to malloc commands buf\n");
+		return count;
+	}
+	memcpy(commands->buf, buf, count);
+	commands->len = count;
+
+	return count;
+}
+static DEVICE_ATTR_WO(commands);
+
+#define DSI_LINE_CFG(field)						\
+static ssize_t								\
+field##_show(struct device *dev, struct device_attribute *devattr, char *buf) \
+{									\
+	struct aic_dsi_comp *comp = aic_dsi_request_drvdata();		\
+	return sprintf(buf, "%#x\n", comp->field);			\
+}									\
+static ssize_t								\
+field##_store(struct device *dev, struct device_attribute *attr,	\
+			 const char *buf, size_t count)			\
+{									\
+	struct aic_dsi_comp *comp = aic_dsi_request_drvdata();		\
+	unsigned long val;						\
+	int err;							\
+									\
+	err = kstrtoul(buf, 0, &val);					\
+	if (err)							\
+		return err;						\
+									\
+	comp->field = val;						\
+									\
+	aic_dsi_release_drvdata();					\
+	return count;							\
+}									\
+static DEVICE_ATTR_RW(field);						\
+
+#define DSI_CFG(field)							\
+static ssize_t								\
+field##_show(struct device *dev, struct device_attribute *devattr, char *buf) \
+{									\
+	struct aic_dsi_comp *comp = aic_dsi_request_drvdata();		\
+	struct panel_dsi *dsi = comp->dsi;				\
+	return sprintf(buf, "%#x\n", dsi->field);			\
+}									\
+static ssize_t								\
+field##_store(struct device *dev, struct device_attribute *attr,	\
+			 const char *buf, size_t count)			\
+{									\
+	struct aic_dsi_comp *comp = aic_dsi_request_drvdata();		\
+	struct panel_dsi *dsi = comp->dsi;				\
+	unsigned long val;						\
+	int err;							\
+									\
+	err = kstrtoul(buf, 0, &val);					\
+	if (err)							\
+		return err;						\
+									\
+	dsi->field = val;						\
+									\
+	aic_dsi_release_drvdata();					\
+	return count;							\
+}									\
+static DEVICE_ATTR_RW(field);						\
+
+DSI_LINE_CFG(ln_assign);
+DSI_LINE_CFG(ln_polrs);
+DSI_LINE_CFG(dc_inv);
+DSI_LINE_CFG(vc_num);
+
+DSI_CFG(mode);
+DSI_CFG(format);
+DSI_CFG(lane_num);
+
+static struct attribute *aic_dsi_attrs[] = {
+	&dev_attr_reg.attr,
+	&dev_attr_mode.attr,
+	&dev_attr_format.attr,
+	&dev_attr_lane_num.attr,
+	&dev_attr_ln_assign.attr,
+	&dev_attr_ln_polrs.attr,
+	&dev_attr_dc_inv.attr,
+	&dev_attr_vc_num.attr,
+	&dev_attr_commands.attr,
+	&dev_attr_command_on.attr,
+	NULL
+};
+
+static const struct attribute_group aic_dsi_attr_group = {
+	.attrs = aic_dsi_attrs,
+	.name = "debug",
+};
 
 static int aic_dsi_bind(struct device *dev, struct device *master,
 		     void *data)
@@ -315,6 +501,12 @@ static int aic_dsi_bind(struct device *dev, struct device *master,
 	if (ret)
 		return ret;
 
+	ret = sysfs_create_group(&dev->kobj, &aic_dsi_attr_group);
+	if (ret) {
+		dev_err(dev, "Failed to create sysfs node.\n");
+		return ret;
+	}
+
 	aic_dsi_register_funcs(comp);
 	return 0;
 }
@@ -327,6 +519,7 @@ static void aic_dsi_unbind(struct device *dev, struct device *master,
 	clk_disable_unprepare(comp->mclk);
 	clk_put(comp->mclk);
 	comp->mclk = NULL;
+	sysfs_remove_group(&dev->kobj, &aic_dsi_attr_group);
 
 	aic_dsi_release_drvdata();
 }

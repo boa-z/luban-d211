@@ -33,13 +33,13 @@ static void panel_gpio_init(struct aic_panel *panel)
 	struct hx8394 *hx8394 = panel_to_hx8394(panel);
 
 	aic_delay_ms(30);
-	gpiod_set_value(panel->iovcc, 1);
+	gpiod_direction_output(hx8394->iovcc, 1);
 	aic_delay_ms(60);
-	gpiod_set_value(panel->vdden, 1);
+	gpiod_direction_output(hx8394->vdden, 1);
 	aic_delay_ms(60);
-	gpiod_set_value(panel->reset, 1);
+	gpiod_direction_output(hx8394->reset, 1);
 	aic_delay_ms(60);
-	gpiod_set_value(panel->blen, 1);
+	gpiod_direction_output(hx8394->blen, 1);
 	aic_delay_ms(60);
 }
 
@@ -203,19 +203,19 @@ static int panel_bind(struct device *dev, struct device *master, void *data)
 	hx8394->reset = devm_gpiod_get(dev, "reset", GPIOD_ASIS);
 	if (IS_ERR(hx8394->reset)) {
 		dev_err(dev, "failed to get reset gpio\n");
-		return PTR_ERR(reset);
+		return PTR_ERR(hx8394->reset);
 	}
 
 	hx8394->iovcc = devm_gpiod_get(dev, "iovcc", GPIOD_ASIS);
-	if (IS_ERR(reset)) {
+	if (IS_ERR(hx8394->iovcc)) {
 		dev_err(dev, "failed to get reset gpio\n");
-		return PTR_ERR(hx8394->reset);
+		return PTR_ERR(hx8394->iovcc);
 	}
 
 	hx8394->blen = devm_gpiod_get(dev, "blen", GPIOD_ASIS);
-	if (IS_ERR(hx8394->reset)) {
+	if (IS_ERR(hx8394->blen)) {
 		dev_err(dev, "failed to get reset gpio\n");
-		return PTR_ERR(hx8394->reset);
+		return PTR_ERR(hx8394->blen);
 	}
 
 	p->panel.dsi = &dsi;

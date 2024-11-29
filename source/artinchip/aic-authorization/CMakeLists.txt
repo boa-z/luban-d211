@@ -6,7 +6,7 @@ project(aic-authorization LANGUAGES C)
 set(ignore ${BUILD_DOC}	${BUILD_DOCS} ${BUILD_EXAMPLE} ${BUILD_EXAMPLES}
 	${BUILD_SHARED_LIBS}${BUILD_TEST}${BUILD_TESTING}${BUILD_TESTS})
 
-add_compile_options(-Wall -Werror)
+add_compile_options(-Wall)
 
 # Install
 # install directories

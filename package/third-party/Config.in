@@ -17,9 +17,17 @@ menu "Third-party packages"
 	source package/third-party/gperf/Config.in
 	source package/third-party/udev/Config.in
 	source package/third-party/eudev/Config.in
+	source package/third-party/musl-compat-headers/Config.in
+	source package/third-party/gmp/Config.in
+	source package/third-party/gdb/Config.in
+	source package/third-party/binutils/Config.in
+	source package/third-party/sqlite/Config.in
+	source package/third-party/libatomic_ops/Config.in
 	comment "************************ Multimedia **************************"
 	source package/third-party/alsa-lib/Config.in
 	source package/third-party/alsa-utils/Config.in
+	source package/third-party/pulseaudio/Config.in
+	source package/third-party/libsamplerate/Config.in
 	source package/third-party/directfb/Config.in
 	source package/third-party/directfb-examples/Config.in
 	source package/third-party/freetype/Config.in
@@ -29,7 +37,6 @@ menu "Third-party packages"
 	source package/third-party/libsndfile/Config.in
 	source package/third-party/qt/Config.in
 	source package/third-party/qt5/Config.in
-	source package/third-party/lvgl/Config.in
 	source package/third-party/gstreamer1/Config.in
 	source package/third-party/fbdump/Config.in
 	source package/third-party/libmad/Config.in
@@ -39,6 +46,8 @@ menu "Third-party packages"
 	source package/third-party/pixman/Config.in
 	source package/third-party/faad2/Config.in
 	source package/third-party/lame/Config.in
+	source package/third-party/mpg123/Config.in
+	source package/third-party/libpjsip/Config.in
 	comment "************************ Network *****************************"
 	source package/third-party/can-utils/Config.in
 	source package/third-party/ethtool/Config.in
@@ -53,6 +62,9 @@ menu "Third-party packages"
 	source package/third-party/libpcap/Config.in
 	source package/third-party/hostapd/Config.in
 	comment "************************ Security ****************************"
+	source package/third-party/libselinux/Config.in
+	source package/third-party/libsepol/Config.in
+	source package/third-party/libsrtp/Config.in
 	source package/third-party/libkcapi/Config.in
 	source package/third-party/openssl/Config.in
 	source package/third-party/cryptsetup/Config.in
@@ -94,6 +106,7 @@ menu "Third-party packages"
 	source package/third-party/android-tools/Config.in
 	source package/third-party/bzip2/Config.in
 	source package/third-party/gzip/Config.in
+	source package/third-party/lrzsz/Config.in
 	source package/third-party/lz4/Config.in
 	source package/third-party/lzip/Config.in
 	source package/third-party/lzo/Config.in
@@ -115,5 +128,6 @@ menu "Third-party packages"
 	source package/third-party/swupdate/Config.in
 	source package/third-party/perl/Config.in
 	source package/third-party/openssh/Config.in
+	source package/third-party/cJSON/Config.in
 
 endmenu

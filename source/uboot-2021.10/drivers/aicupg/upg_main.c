@@ -13,7 +13,7 @@
 #define GPT_HEADER_SIZE  (34 * 512)
 #define GPT_CMD_BUF_SIZE 2048
 
-static struct upg_internal upg_info = {
+struct upg_internal upg_info = {
 	.cur_cmd = NULL,
 	.dev_type = UPG_DEV_TYPE_RAM,
 	.dev_id = 0,
@@ -97,6 +97,12 @@ s32 aicupg_set_upg_cfg(struct upg_cfg *cfg)
 	printf("%s, mode = %s\n", __func__,
 	       get_upg_mode_name(upg_info.cfg.mode));
 
+	return 0;
+}
+
+s32 aicupg_initialize(struct upg_init *param)
+{
+	upg_info.init.mode = param->mode;
 	return 0;
 }
 
@@ -539,23 +545,22 @@ s32 aicupg_mmc_create_gpt_part(u32 mmc_id, bool is_sdupg)
 		ret = -1;
 		goto out;
 	}
-	limit = 2048;
+	limit = GPT_CMD_BUF_SIZE;
 	p = cmdbuf;
 	snprintf(p, limit, "gpt write mmc %d \"", mmc_id);
 	p = cmdbuf + strlen(cmdbuf);
-	limit = 2048 - strlen(cmdbuf);
 	item = parts;
 	while (item) {
 		if (item->size > 0)
 			snprintf(p, limit, "name=%s,start=%lld,size=%lld;",
 				 item->name, item->start, item->size);
 		else
-			snprintf(p, limit, "name=%s,start=%lld,size=-;\"",
+			snprintf(p, limit, "name=%s,start=%lld,size=-;",
 				 item->name, item->start);
 		p = cmdbuf + strlen(cmdbuf);
-		limit = GPT_CMD_BUF_SIZE - strlen(cmdbuf);
 		item = item->next;
 	}
+	snprintf(p, limit, "\"");
 
 	/*
 	 * Step3: Create GPT partitions

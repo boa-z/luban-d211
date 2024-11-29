@@ -79,7 +79,7 @@ static int panel_probe(struct udevice *dev)
 	if (ret < 0)
 		return ret;
 
-	panel_init(priv, dev, &panel_vm, &panel_funcs);
+	panel_init(priv, dev, &panel_vm, &panel_funcs, NULL);
 
 	return 0;
 }

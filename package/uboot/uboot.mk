@@ -199,12 +199,20 @@ UBOOT_CUSTOM_DTS_PATH = $(call qstrip,$(BR2_TARGET_UBOOT_CUSTOM_DTS_PATH))
 define UBOOT_PREPARE_DTS
 	$(Q)ln -sf $(TARGET_CHIP_DIR)/common/*.dtsi $(UBOOT_SRCDIR)/arch/$(KERNEL_ARCH)/dts/
 	$(Q)ln -sf $(TARGET_BOARD_DIR)/board.dts $(UBOOT_SRCDIR)/arch/$(KERNEL_ARCH)/dts/artinchip-board.dts
-	$(Q)ln -sf $(TARGET_BOARD_DIR)/board-u-boot.dtsi $(UBOOT_SRCDIR)/arch/$(KERNEL_ARCH)/dts/artinchip-board-u-boot.dtsi
+	$(Q)ln -sf $(TARGET_BOARD_DIR)/image_cfg.json $(UBOOT_SRCDIR)/include/configs/image_cfg.json
 	$(Q)ln -sf $(LINUX_SRCDIR)/include/dt-bindings/clock/artinchip*.h $(UBOOT_SRCDIR)/include/dt-bindings/clock/
 	$(Q)ln -sf $(LINUX_SRCDIR)/include/dt-bindings/reset/artinchip*.h $(UBOOT_SRCDIR)/include/dt-bindings/reset/
 	$(Q)ln -sf $(LINUX_SRCDIR)/include/dt-bindings/display/artinchip*.h $(UBOOT_SRCDIR)/include/dt-bindings/display/
+	$(Q)if [ -f $(TARGET_BOARD_DIR)/board-u-boot.dtsi ]; then \
+		ln -sf $(TARGET_BOARD_DIR)/board-u-boot.dtsi $(UBOOT_SRCDIR)/arch/$(KERNEL_ARCH)/dts/artinchip-board-u-boot.dtsi; \
+	else \
+		rm -rf $(UBOOT_SRCDIR)/arch/$(KERNEL_ARCH)/dts/artinchip-board-u-boot.dtsi; \
+	fi
 	$(Q)if [ -f $(TARGET_BOARD_DIR)/u-boot.its.dtsi ]; then \
 		ln -sf $(TARGET_BOARD_DIR)/u-boot.its.dtsi $(UBOOT_SRCDIR)/arch/$(KERNEL_ARCH)/dts/u-boot.its.dtsi; \
+	fi
+	$(Q)if [ -f $(TARGET_BOARD_DIR)/kernel.its.dtsi ]; then \
+		ln -sf $(TARGET_BOARD_DIR)/kernel.its.dtsi $(UBOOT_SRCDIR)/arch/$(KERNEL_ARCH)/dts/kernel.its.dtsi; \
 	fi
 endef
 
@@ -246,6 +254,12 @@ define UBOOT_INSTALL_IMAGES_CMDS
 			$(Q)cp -dpf $(@D)/$(f) $(BINARIES_DIR)/
 		)
 	)
+	$(Q)if [ -f $(@D)/u-boot.its ]; then \
+		cp -dpf $(@D)/u-boot.its $(BINARIES_DIR)/; \
+	fi
+	$(Q)if [ -f $(@D)/kernel.its ]; then \
+		cp -dpf $(@D)/kernel.its $(BINARIES_DIR)/; \
+	fi
 	$(Q)cd $(BINARIES_DIR) && echo In $(BINARIES_DIR) && \
 		ls -og --time-style=iso u-boot*
 endef

@@ -29,16 +29,17 @@ G_BEGIN_DECLS
 typedef struct _Gstfbsink      Gstfbsink;
 typedef struct _GstfbsinkClass GstfbsinkClass;
 
+#define FRAME_NUM (2)
 struct _Gstfbsink {
 	GstVideoSink videosink;
 
-	int fb_fd;
+	struct gst_aicfb* aicfb;
 	int dmabuf_fd;
-	struct mpp_buf buf;
+	struct mpp_buf buf[FRAME_NUM];
 	int alloc_flag;
+	int cur_frame_id; // id of current displayed frame
 
-	int screen_width;
-	int screen_height;
+	GstMemory *prev_mem;
 };
 
 struct _GstfbsinkClass {

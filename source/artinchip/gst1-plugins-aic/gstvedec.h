@@ -8,6 +8,7 @@
 
 #include <gst/video/gstvideodecoder.h>
 #include "mpp_decoder.h"
+#include "gstmppallocator.h"
 
 G_BEGIN_DECLS
 
@@ -30,18 +31,13 @@ struct VeFrame {
 	int system_frame_number; // system_frame_number in struct GstVideoCodecFrame
 };
 
-#define RENDER_FRAME_NUM (10)
-struct frame_info {
-	struct mpp_frame frame;
-	int used;
-};
-
-#define USE_RETURN_BUF (0)
 struct _GstVeDec {
 	GstVideoDecoder decoder;
 
 	enum mpp_codec_type dec_type;
 	struct mpp_decoder *mpp_dec;
+
+	GstMppAllocator *allocator;
 
 	GstVideoCodecState *input_state;
 
@@ -52,10 +48,6 @@ struct _GstVeDec {
 
 	GHashTable *pts2frame;
 
-#if USE_RETURN_BUF
-	pthread_mutex_t frames_lock;
-	struct frame_info render_frames[RENDER_FRAME_NUM];
-#endif
 	// system_frame_number in struct GstVideoCodecFrame
 	GList *system_frame_number_in_ve;
 	int task_ret;

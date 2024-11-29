@@ -11,6 +11,8 @@
 #include <stdio_dev.h>
 #include <linux/errno.h>
 
+#define CTRL(ch) ((ch) - '@')
+
 extern char console_buffer[];
 
 /* common/console.c */

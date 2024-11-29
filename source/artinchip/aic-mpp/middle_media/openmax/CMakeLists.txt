@@ -20,6 +20,14 @@ set(OPENMAX_CLOCK
     component/OMX_ClockComponent.c
 )
 
+set(OPENMAX_MUXER
+    component/OMX_MuxerComponent.c
+)
+
+set(OPENMAX_VENC
+    component/OMX_VencComponent.c
+)
+
 add_library(openmax SHARED
     ${OPENMAX_DEMUXER}
     ${OPENMAX_VDEC}
@@ -27,8 +35,14 @@ add_library(openmax SHARED
     ${OPENMAX_ADEC}
     ${OPENMAX_AUDIO_RENDER}
     ${OPENMAX_CLOCK}
+    ${OPENMAX_MUXER}
+    ${OPENMAX_VENC}
 	OMX_Core.c
 )
+
+if (AAC_DECODER)
+	set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -DAAC_DECODER")
+endif()
 
 target_link_libraries(openmax mpp_audio_decoder mpp_decoder mpp_encoder mpp_ge openmax_base mpp_base)
 

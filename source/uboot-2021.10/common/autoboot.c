@@ -472,10 +472,24 @@ const char *bootdelay_process(void)
 	return s;
 }
 
+/*
+ * bootdelay:
+ *  >= 0: uboot wait <delay value> second, and will stop booting if any key input is detected
+ *  = -1: uboot always stop booting and run to command line
+ *  = -2: uboot skip boot delay phase, directly to run boot command
+ *  = -3: uboot only stop booting when the input is "CTRL + C"
+ */
 void autoboot_command(const char *s)
 {
 	debug("### main_loop: bootcmd=\"%s\"\n", s ? s : "<UNDEFINED>");
 
+	if (s && (stored_bootdelay == -3)) {
+		/* CTRL+C to stop */
+		if (tstc() && (getchar() == CTRL('C'))) {
+			printf("Stop by CTRL+C\n");
+			return;
+		}
+	}
 	if (s && (stored_bootdelay == -2 ||
 		 (stored_bootdelay != -1 && !abortboot(stored_bootdelay)))) {
 		bool lock;

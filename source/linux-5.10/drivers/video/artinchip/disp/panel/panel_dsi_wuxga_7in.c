@@ -27,36 +27,18 @@ static inline struct wuxga *panel_to_wuxga(struct aic_panel *panel)
 	return (struct wuxga *)panel->panel_private;
 }
 
-static u8 init_sequence[] = {
-	2, DSI_DT_DCS_WR_P0,	DSI_DCS_SOFT_RESET,
-	1, 5,
-	3, DSI_DT_GEN_WR_P2,	0xb0, 0x00,
-	7, DSI_DT_GEN_LONG_WR,	0xb3, 0x04, 0x08, 0x00, 0x22, 0x00,
-	3, DSI_DT_GEN_LONG_WR,	0xb4, 0x0c,
-	4, DSI_DT_GEN_LONG_WR,	0xb6, 0x3a, 0xd3,
-	3, DSI_DT_DCS_WR_P1,	0x51, 0xE6,
-	3, DSI_DT_DCS_WR_P1,	0x53, 0x2c,
-	3, DSI_DT_DCS_WR_P1,	DSI_DCS_SET_PIXEL_FORMAT,   0x77,
-	3, DSI_DT_DCS_WR_P1,	DSI_DCS_SET_ADDRESS_MODE,   0x00,
-	6, DSI_DT_DCS_LONG_WR,	DSI_DCS_SET_COLUMN_ADDRESS, 0x00, 0x00, 0x04, 0xaf,
-	6, DSI_DT_DCS_LONG_WR,	DSI_DCS_SET_PAGE_ADDRESS, 0x00, 0x00, 0x07, 0x7f,
-	2, DSI_DT_DCS_WR_P0,	DSI_DCS_EXIT_SLEEP_MODE,
-	1, 120,
-	2, DSI_DT_DCS_WR_P0,	DSI_DCS_SET_DISPLAY_ON
-};
-
 static int panel_gpio_init(struct aic_panel *panel)
 {
 	struct wuxga *wuxga = panel_to_wuxga(panel);
 
 	aic_delay_ms(10);
-	gpiod_set_value(wuxga->dcdc_en, 1);
+	gpiod_direction_output(wuxga->dcdc_en, 1);
 	aic_delay_ms(20);
-	gpiod_set_value(wuxga->reset, 1);
+	gpiod_direction_output(wuxga->reset, 1);
 	aic_delay_ms(10);
-	gpiod_set_value(wuxga->dcdc_en, 0);
+	gpiod_direction_output(wuxga->dcdc_en, 0);
 	aic_delay_ms(120);
-	gpiod_set_value(wuxga->dcdc_en, 1);
+	gpiod_direction_output(wuxga->dcdc_en, 1);
 	aic_delay_ms(20);
 	return 0;
 }
@@ -64,11 +46,7 @@ static int panel_gpio_init(struct aic_panel *panel)
 static int panel_enable(struct aic_panel *panel)
 {
 	enum dsi_mode mode = panel->dsi->mode;
-
-	u8 para_vid[] = {7, DSI_DT_GEN_LONG_WR, 0xb3, 0x14, 0x08, 0x00, 0x22, 0x00,
-			 1, 120};
-	u8 para_cmd[] = {3, DSI_DT_DCS_WR_P1, DSI_DCS_SET_TEAR_ON, 0x00,
-			 1, 120};
+	int ret;
 
 
 	if (panel_gpio_init(panel) < 0)
@@ -76,13 +54,39 @@ static int panel_enable(struct aic_panel *panel)
 
 	panel_di_enable(panel, 0);
 	panel_dsi_send_perpare(panel);
-	panel_send_command(init_sequence, ARRAY_SIZE(init_sequence), panel);
+
+	panel_dsi_dcs_send_seq(panel, DSI_DCS_SOFT_RESET);
+	aic_delay_ms(5);
+	panel_dsi_dcs_send_seq(panel, 0xb0, 0x00);
+	panel_dsi_dcs_send_seq(panel, 0xb3, 0x04, 0x08, 0x00, 0x22, 0x00);
+	panel_dsi_dcs_send_seq(panel, 0xb4, 0x0c);
+	panel_dsi_dcs_send_seq(panel, 0xb6, 0x3a, 0xd3);
+	panel_dsi_dcs_send_seq(panel, 0x51, 0xE6);
+	panel_dsi_dcs_send_seq(panel, 0x53, 0x2c);
+	panel_dsi_dcs_send_seq(panel, DSI_DCS_SET_PIXEL_FORMAT, 0x77);
+	panel_dsi_dcs_send_seq(panel, DSI_DCS_SET_ADDRESS_MODE, 0x00);
+	panel_dsi_dcs_send_seq(panel, DSI_DCS_SET_COLUMN_ADDRESS, 0x00, 0x00, 0x04, 0xaf);
+	panel_dsi_dcs_send_seq(panel, DSI_DCS_SET_PAGE_ADDRESS, 0x00, 0x00, 0x07, 0x7f);
+
+	ret = panel_dsi_dcs_exit_sleep_mode(panel);
+	if (ret < 0) {
+		pr_err("Failed to exit sleep mode: %d\n", ret);
+		return ret;
+	}
+	aic_delay_ms(120);
+
+	ret = panel_dsi_dcs_set_display_on(panel);
+	if (ret < 0) {
+		pr_err("Failed to set display on: %d\n", ret);
+		return ret;
+	}
 
 	if (mode == DSI_MOD_CMD_MODE)
-		panel_send_command(para_cmd, ARRAY_SIZE(para_cmd), panel);
+		panel_dsi_dcs_send_seq(panel, DSI_DCS_SET_TEAR_ON, 0x00);
 	else
-		panel_send_command(para_vid, ARRAY_SIZE(para_vid), panel);
+		panel_dsi_dcs_send_seq(panel, 0xb3, 0x14, 0x08, 0x00, 0x22, 0x00);
 
+	aic_delay_ms(120);
 	panel_dsi_setup_realmode(panel);
 	panel_de_timing_enable(panel, 0);
 	return 0;

@@ -20,6 +20,10 @@
 #include <sys/mman.h>
 #include <inttypes.h>
 
+#include <sys/types.h>
+#include <sys/syscall.h>
+#include <unistd.h>
+
 #include "OMX_Types.h"
 #include "OMX_Core.h"
 #include "OMX_CoreExt1.h"
@@ -48,6 +52,11 @@ typedef struct VIDEO_RENDER_IN_FRAME {
 	struct mpp_list  sList;
 }VIDEO_RENDER_IN_FRAME;
 
+typedef struct VIDEO_RENDER_DMA_FD {
+	int   fd[3];
+	struct mpp_list  sList;
+}VIDEO_RENDER_DMA_FD;
+
 #define VIDEO_RENDER_FRAME_NUM_MAX 16
 #define VIDEO_RENDER_FRAME_ONE_TIME_CREATE_NUM 4
 
@@ -55,6 +64,8 @@ typedef struct VIDEO_RENDER_IN_FRAME {
 
 #define VIDEO_RENDER_INPORT_SEND_ALL_FRAME_FLAG  0x02 // consume all frame in readylist
 
+#define VIDEO_RENDER_WAIT_FRAME_INTERVAL (10*1000*1000)
+#define VIDEO_RENDER_WAIT_FRAME_MAX_TIME (8*1000*1000)
 
 typedef struct VIDEO_RENDER_DATA_TYPE {
 	OMX_STATETYPE state;
@@ -103,10 +114,22 @@ typedef struct VIDEO_RENDER_DATA_TYPE {
 
 	OMX_TICKS sPreFramePts;
 
-
 	OMX_S32 nDumpIndex;
 
 	OMX_TIME_CLOCKSTATE eClockState;
+
+	OMX_S32 nWaitReayFrameFlag;
+
+	//rotation
+	OMX_S32 nInitRotationParam; // -1-init fail,0-not init,1-init ok
+	OMX_S32 nRotationAngleChange;
+	OMX_S32 nRotationAngle;
+	OMX_S32 nDMAFd;
+	struct mpp_frame sRotationFrames[2];
+	struct mpp_frame *pCurDisplayFrame;
+	struct mpp_ge *sGeHandle;
+	struct mpp_list sDMAFd;
+	OMX_U32 nRotationIndex;
 }VIDEO_RENDER_DATA_TYPE;
 
 

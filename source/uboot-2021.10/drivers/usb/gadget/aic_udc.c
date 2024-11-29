@@ -2565,9 +2565,10 @@ static int aic_udc_gg_reset_init(struct udevice *dev,
 	ret = reset_assert_bulk(resets);
 
 	if (!ret) {
-		udelay(2);
+		udelay(600);
 		ret = reset_deassert_bulk(resets);
 	}
+	udelay(600);
 	if (ret) {
 		reset_release_bulk(resets);
 		return ret;
@@ -2595,7 +2596,7 @@ static int aic_udc_gg_clk_init(struct udevice *dev,
 	}
 
 	/* wait USB-PHY work stable */
-	udelay(60);
+	udelay(600);
 
 	return 0;
 }

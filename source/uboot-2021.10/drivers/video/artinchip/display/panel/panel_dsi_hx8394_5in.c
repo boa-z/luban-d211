@@ -17,63 +17,39 @@
 
 #define PANEL_DEV_NAME		"dsi_panel_hx8394_5in"
 
-static int panel_gpio_init(struct aic_panel *panel)
-{
-	int ret;
+struct hx8394 {
 	struct gpio_desc vdden;
 	struct gpio_desc reset;
 	struct gpio_desc iovcc;
 	struct gpio_desc blen;
+};
 
-	ret = gpio_request_by_name(panel->dev, "vdden-gpios", 0, &vdden,
-			GPIOD_IS_OUT);
-	if (ret) {
-		dev_err(panel->dev, "Failed to get vdden gpio\n");
-		return ret;
-	}
+static inline struct hx8394 *panel_to_hx8394(struct aic_panel *panel)
+{
+	return (struct hx8394 *)panel->panel_private;
+}
 
-	ret = gpio_request_by_name(panel->dev, "reset-gpios", 0, &reset,
-			GPIOD_IS_OUT);
-	if (ret) {
-		dev_err(panel->dev, "Failed to get reset gpio\n");
-		return ret;
-	}
-
-	ret = gpio_request_by_name(panel->dev, "iovcc-gpios", 0, &iovcc,
-			GPIOD_IS_OUT);
-	if (ret) {
-		dev_err(panel->dev, "Failed to get iovcc gpio\n");
-		return ret;
-	}
-
-	ret = gpio_request_by_name(panel->dev, "blen-gpios", 0, &blen,
-			GPIOD_IS_OUT);
-	if (ret) {
-		dev_err(panel->dev, "Failed to get blen gpio\n");
-		return ret;
-	}
+static void panel_gpio_init(struct aic_panel *panel)
+{
+	struct hx8394 *hx8394 = panel_to_hx8394(panel);
 
 	aic_delay_ms(30);
-	dm_gpio_set_value(&iovcc, 1);
+	dm_gpio_set_value(&hx8394->iovcc, 1);
 	aic_delay_ms(60);
-	dm_gpio_set_value(&vdden, 1);
+	dm_gpio_set_value(&hx8394->vdden, 1);
 	aic_delay_ms(60);
-	dm_gpio_set_value(&reset, 1);
+	dm_gpio_set_value(&hx8394->reset, 1);
 	aic_delay_ms(20);
-	dm_gpio_set_value(&blen, 1);
+	dm_gpio_set_value(&hx8394->blen, 1);
 	aic_delay_ms(20);
-
-	return 0;
 }
 
 static int panel_enable(struct aic_panel *panel)
 {
 	int ret;
 
-	if (panel_gpio_init(panel) < 0)
-		return -ENODEV;
+	panel_gpio_init(panel);
 
-	printf("%s, %d\n", __func__, __LINE__);
 	panel_di_enable(panel, 0);
 	panel_dsi_send_perpare(panel);
 
@@ -190,33 +166,57 @@ static struct fb_videomode panel_vm = {
 		DISPLAY_FLAGS_DE_HIGH | DISPLAY_FLAGS_PIXDATA_POSEDGE
 };
 
+static struct panel_dsi dsi = {
+	.format = DSI_FMT_RGB888,
+	.mode = DSI_MOD_VID_PULSE,
+	.lane_num = 4,
+};
+
 static int panel_probe(struct udevice *dev)
 {
 	struct panel_priv *priv = dev_get_priv(dev);
-	ofnode node = dev_ofnode(dev);
-	struct panel_dsi *dsi;
-	const char *str;
+	struct hx8394 *hx8394;
+	int ret;
 
-	dsi = malloc(sizeof(*dsi));
-	if (!dsi)
+	hx8394 = malloc(sizeof(*hx8394));
+	if (!hx8394)
 		return -ENOMEM;
 
 	if (panel_parse_dts(dev) < 0) {
-		free(dsi);
+		free(hx8394);
 		return -1;
 	}
 
-	str = ofnode_read_string(node, "dsi,mode");
-	if (!str)
-		dsi->mode = DSI_MOD_VID_BURST;
-	else
-		dsi->mode = panel_dsi_str2mode(str);
+	ret = gpio_request_by_name(dev, "vdden-gpios", 0, &hx8394->vdden,
+				GPIOD_IS_OUT);
+	if (ret) {
+		dev_err(dev, "Failed to get vdden gpio\n");
+		return ret;
+	}
 
-	dsi->format = DSI_FMT_RGB888;
-	dsi->lane_num = 4;
-	priv->panel.dsi = dsi;
+	ret = gpio_request_by_name(dev, "reset-gpios", 0, &hx8394->reset,
+				GPIOD_IS_OUT);
+	if (ret) {
+		dev_err(dev, "Failed to get reset gpio\n");
+		return ret;
+	}
 
-	panel_init(priv, dev, &panel_vm, &panel_funcs);
+	ret = gpio_request_by_name(dev, "iovcc-gpios", 0, &hx8394->iovcc,
+				GPIOD_IS_OUT);
+	if (ret) {
+		dev_err(dev, "Failed to get iovcc gpio\n");
+		return ret;
+	}
+
+	ret = gpio_request_by_name(dev, "blen-gpios", 0, &hx8394->blen,
+				GPIOD_IS_OUT);
+	if (ret) {
+		dev_err(dev, "Failed to get blen gpio\n");
+		return ret;
+	}
+
+	priv->panel.dsi = &dsi;
+	panel_init(priv, dev, &panel_vm, &panel_funcs, hx8394);
 
 	return 0;
 }
@@ -226,7 +226,7 @@ static const struct udevice_id panel_match_ids[] = {
 	{ /* sentinel */}
 };
 
-U_BOOT_DRIVER(panel_dsi_wuxga_7in) = {
+U_BOOT_DRIVER(panel_dsi_hx8394_5in) = {
 	.name      = PANEL_DEV_NAME,
 	.id        = UCLASS_PANEL,
 	.of_match  = panel_match_ids,

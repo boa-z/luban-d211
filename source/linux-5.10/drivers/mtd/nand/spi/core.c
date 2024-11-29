@@ -814,6 +814,9 @@ static const struct spinand_manufacturer *spinand_manufacturers[] = {
 	&zbit_spinand_manufacturer,
 	&elite_spinand_manufacturer,
 	&esmt_spinand_manufacturer,
+	&umtek_spinand_manufacturer,
+	&byte_spinand_manufacturer,
+	&xtx_spinand_manufacturer,
 };
 
 static int spinand_manufacturer_match(struct spinand_device *spinand,

@@ -246,7 +246,7 @@ static int aic_ve_png(struct udevice *dev, void *src, unsigned int size)
 	return __png_decode(dev, src, size);
 }
 
-#ifndef CONFIG_SPL_BUILD
+#ifdef CONFIG_JPEG_LOGO_IMAGE
 static int aic_ve_jpeg(struct udevice *dev, void *src, unsigned int size)
 {
 	return __jpeg_decode(dev, src, size);
@@ -351,7 +351,7 @@ static const struct decoder_ops aic_ve_ops = {
 	.decompress_init = aic_ve_gunzip_init,
 	.decompress = aic_ve_gunzip,
 	.png_decode = aic_ve_png,
-#ifndef CONFIG_SPL_BUILD
+#ifdef CONFIG_JPEG_LOGO_IMAGE
 	.jpeg_decode = aic_ve_jpeg,
 #endif
 	.release = aic_ve_release,

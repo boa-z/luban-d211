@@ -35,11 +35,27 @@ config VIDEO_ARTINCHIP_MAX_BPP
 	  framebuffer during device-model binding/probing.
 
 config LOGO_IMAGE_SIZE
-	int "Boot logo image size (size in Kilo Bytes)"
+	int "logo itb image size (size in Kilo Bytes) in nor"
 	depends on VIDEO_ARTINCHIP
-	default 36
+	depends on DM_SPI_FLASH
+	default 512
 	help
-	  Boot logo image size.
+	  logo.itb image size.
+
+config LOGO_PART_OFFSET
+	hex "logo partition start offset in nor"
+	depends on VIDEO_ARTINCHIP
+	depends on DM_SPI_FLASH
+	default 0x120000
+	help
+	  logo partition start offset in nor
+
+config JPEG_LOGO_IMAGE
+	bool "Support JPEG BOOT LOGO"
+	depends on VIDEO_ARTINCHIP
+	default n
+	help
+	  Enable JPEG BOOT LOGO
 
 config AIC_DISP_RGB
 	bool "ArtInChip display rgb support"
@@ -68,6 +84,13 @@ config AIC_DISP_MIPI_DSI_V1_0
 	depends on AIC_DISP_MIPI_DSI && RISCV
 	help
 	  Artinchip display mipi-dsi v1.0
+
+config AIC_DISP_MIPI_DBI
+	bool "ArtInChip display mipi-dbi support"
+	depends on VIDEO_ARTINCHIP
+	default n
+	help
+	  ArtInChip display mipi-dbi support
 
 if VIDEO_ARTINCHIP
 

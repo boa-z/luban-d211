@@ -34,7 +34,7 @@ struct ve_device_info {
 	int reg_size;
 };
 
-static pthread_mutex_t 	g_ve_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t 	g_ve_mutex = PTHREAD_MUTEX_INITIALIZER;
 int 			g_ve_ref = 0;
 struct ve_device_info 	g_ve_info;
 
@@ -43,20 +43,20 @@ int ve_open_device(void)
 	pthread_mutex_lock(&g_ve_mutex);
 
 	if(g_ve_ref == 0) {
-		//* 1. open /dev/aic_ve
+		// 1. open /dev/aic_ve
 		g_ve_info.ve_fd = open(VE_DEV, O_RDWR);
-		if(g_ve_ref < 0) {
+		if(g_ve_info.ve_fd < 0) {
 			loge("open %s failed!", VE_DEV);
 			pthread_mutex_unlock(&g_ve_mutex);
 			return -1;
 		}
 
-		//* 2. get register space size
+		// 2. get register space size
 		struct ve_info info = {0};
 		ioctl(g_ve_info.ve_fd, IOC_VE_GET_INFO, &info);
 		g_ve_info.reg_size = info.reg_size;
 
-		//* 3. map register space to virtual space
+		// 3. map register space to virtual space
 		g_ve_info.reg_base = (unsigned long)mmap(NULL,
 						info.reg_size,
 						PROT_READ | PROT_WRITE, MAP_SHARED,
@@ -75,6 +75,11 @@ int ve_open_device(void)
 void ve_close_device()
 {
 	pthread_mutex_lock(&g_ve_mutex);
+	if (g_ve_ref == 0) {
+		logd("ve has been closed\n");
+		pthread_mutex_unlock(&g_ve_mutex);
+		return;
+	}
 	g_ve_ref --;
 
 	if(g_ve_ref == 0) {

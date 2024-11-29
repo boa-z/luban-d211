@@ -359,7 +359,7 @@ static bool ubi_mtd_valid_check(struct aicupg_ubi_mtd *ubi_list,
 	return true;
 }
 
-static s32 ubi_device_is_attached(char *name)
+static s32 ubi_device_is_attached(char *mtdname)
 {
 	struct ubi_device *ubi;
 	int i, attached;
@@ -369,7 +369,7 @@ static s32 ubi_device_is_attached(char *name)
 		ubi = ubi_get_device(i);
 		if (!ubi)
 			continue;
-		if (strcmp(name, ubi->mtd->name) == 0) {
+		if (strcmp(mtdname, ubi->mtd->name) == 0) {
 			attached = true;
 			ubi_put_device(ubi);
 			break;
@@ -571,26 +571,40 @@ static s32 create_ubi_volumes(struct ubi_device *ubidev,
 	return ret;
 }
 
-static s32 prepare_ubi_volumes(struct aicupg_ubi_mtd *ubi_list)
+static s32 prepare_ubi_volumes(char *mtdname)
 {
 	struct aicupg_ubi_mtd *ubi = NULL;
 	struct ubi_device *ubidev = NULL;
+	struct aicupg_ubi_mtd *ubi_list;
+	char *ubivols;
 	s32 ret = -1;
 
-	/* Ensure there is no attach UBI */
-	ubi_exit();
-	ubi_init();
-
+	ubivols = env_get("UBI");
+	if (!ubivols) {
+		pr_err("Get UBI volume table from ENV failed.\n");
+		return -ENODEV;
+	}
+	ubi_list = build_ubi_list(ubivols);
+	if (!ubi_list) {
+		pr_err("Parse ubivols error.\n");
+		return -1;
+	}
 	ubi = ubi_list;
 
 	while (ubi) {
-		if (ubi_device_is_attached(ubi->name) == false) {
-			ret = ubi_attach_mtd(ubi->name);
-			if (ret) {
-				pr_err("UBI attach mtd %s failed.\n",
-				       ubi->name);
-				return ret;
-			}
+		if (strcmp(mtdname, ubi->name)) {
+			ubi = ubi->next;
+			continue;
+		}
+		if (ubi_device_is_attached(ubi->name)) {
+			ubi = ubi->next;
+			continue;
+		}
+
+		ret = ubi_attach_mtd(ubi->name);
+		if (ret) {
+			pr_err("UBI attach mtd %s failed.\n", ubi->name);
+			return ret;
 		}
 		ubidev = ubi_get_device_by_name(ubi->name);
 		if (!ubidev) {
@@ -610,6 +624,8 @@ static s32 prepare_ubi_volumes(struct aicupg_ubi_mtd *ubi_list)
 out_put_dev:
 	if (ubidev)
 		ubi_put_device(ubidev);
+	if (ubi_list)
+		free_ubi_list(ubi_list);
 	return ret;
 }
 
@@ -786,14 +802,10 @@ s32 nand_fwc_prepare(struct fwc_info *fwc, u32 id)
 		goto out;
 	}
 
-	ret = nand_fwc_spl_reserve_blocks();
-	if (ret) {
-		pr_err("Reserve blocks for SPL failed.\n");
-		goto out;
-	}
-	ret = prepare_ubi_volumes(ubi_list);
-	if (ret)
-		goto out;
+	/* Ensure there is no attach UBI */
+	ubi_exit();
+	ubi_init();
+
 	set_nand_prepare_status(true);
 out:
 	if (mtd_list)
@@ -822,7 +834,7 @@ static s32 nand_fwc_get_mtd_partitions(struct fwc_info *fwc,
 		name[cnt] = *p;
 		p++;
 		cnt++;
-		if (*p == ';' || *p == '\0') {
+		if (*p == ';' || *p == ':' || *p == '\0') {
 			name[cnt] = '\0';
 			priv->mtds[idx] = get_mtd_device_nm(name);
 			if (IS_ERR_OR_NULL(priv->mtds[idx])) {
@@ -831,6 +843,10 @@ static s32 nand_fwc_get_mtd_partitions(struct fwc_info *fwc,
 			}
 			idx++;
 			cnt = 0;
+		}
+		if (*p == ':') {
+			while (*p != ';' && *p != '\0')
+				p++;
 		}
 		if (*p == ';')
 			p++;
@@ -961,6 +977,21 @@ void nand_fwc_start(struct fwc_info *fwc)
 			}
 		}
 	} else if (attr & FWC_ATTR_DEV_UBI) {
+		ret = nand_fwc_get_mtd_partitions(fwc, priv);
+		if (ret) {
+			pr_err("Get MTD partitions failed.\n");
+			goto err;
+		}
+		for (i = 0; i < MAX_DUPLICATED_PART; i++) {
+			if (!priv->mtds[i])
+				continue;
+			if (i && (priv->mtds[i] == priv->mtds[0])) {
+				/* Point to the same partition, skip it */
+				priv->mtds[i] = NULL;
+				continue;
+			}
+			prepare_ubi_volumes(priv->mtds[i]->name);
+		}
 		ret = nand_fwc_get_ubi_volumes(fwc, priv);
 		if (ret) {
 			pr_err("Get UBI Volumes failed.\n");

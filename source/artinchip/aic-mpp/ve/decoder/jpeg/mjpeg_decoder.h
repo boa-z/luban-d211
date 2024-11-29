@@ -110,6 +110,7 @@ struct mjpeg_dec_ctx {
 	int sos_length;
 	struct ve_buffer *sos_buf;
 #endif
+	int extra_frame_num;
 };
 
 #endif /* MJPEG_DECODER_H */

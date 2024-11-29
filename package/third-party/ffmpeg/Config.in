@@ -75,6 +75,7 @@ config BR2_PACKAGE_FFMPEG_SWSCALE
 	bool "Build libswscale"
 	help
 	  Swscale is a library of video scaling routines.
+	default y 
 
 config BR2_PACKAGE_FFMPEG_ENCODERS
 	string "Enabled encoders"

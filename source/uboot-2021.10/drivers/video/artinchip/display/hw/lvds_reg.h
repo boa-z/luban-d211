@@ -13,7 +13,8 @@
 struct lvds_info {
 	u32 pols;
 	u32 phys;
-	u32 swap;
+	u32 lines;
+	u32 link_swap;
 };
 
 /* lvds common mode voltage enum */

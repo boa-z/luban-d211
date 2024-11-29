@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * Driver for general DSI panel.
+ * Driver for DSI b080xan panel.
  *
  * Copyright (C) 2020-2021 ArtInChip Technology Co., Ltd.
  * Authors:  Matteo <duanmt@artinchip.com>
+ *	     Huahui Mai <huahui.mai@artinchip.com>
  */
 
 #include <common.h>
@@ -19,21 +20,28 @@
 
 static int panel_enable(struct aic_panel *panel)
 {
-	u8 cmd[2] = {DSI_DCS_EXIT_SLEEP_MODE, DSI_DCS_SET_DISPLAY_ON};
-
-	if (unlikely(!panel->callbacks.di_send_cmd))
-		panic("Have no send_cmd() API for DSI.\n");
+	int ret;
 
 	panel_di_enable(panel, 0);
 	panel_dsi_send_perpare(panel);
 
-	panel->callbacks.di_send_cmd(DSI_DT_DCS_WR_P0, &cmd[0], 1);
+	ret = panel_dsi_dcs_exit_sleep_mode(panel);
+	if (ret < 0) {
+		pr_err("Failed to exit sleep mode: %d\n", ret);
+		return ret;
+	}
 	aic_delay_ms(200);
-	panel->callbacks.di_send_cmd(DSI_DT_DCS_WR_P0, &cmd[1], 1);
+
+	ret = panel_dsi_dcs_set_display_on(panel);
+	if (ret < 0) {
+		pr_err("Failed to set display on: %d\n", ret);
+		return ret;
+	}
 	aic_delay_ms(200);
 
 	panel_dsi_setup_realmode(panel);
 	panel_de_timing_enable(panel, 0);
+	panel_backlight_enable(panel, 0);
 	return 0;
 }
 
@@ -59,26 +67,21 @@ static struct fb_videomode panel_vm = {
 		DISPLAY_FLAGS_DE_HIGH | DISPLAY_FLAGS_PIXDATA_POSEDGE
 };
 
+static struct panel_dsi dsi = {
+	.format = DSI_FMT_RGB888,
+	.mode = DSI_MOD_VID_PULSE,
+	.lane_num = 4,
+};
+
 static int panel_probe(struct udevice *dev)
 {
 	struct panel_priv *priv = dev_get_priv(dev);
-	struct panel_dsi *dsi;
 
-	dsi = malloc(sizeof(*dsi));
-	if (!dsi)
-		return -ENOMEM;
-
-	if (panel_parse_dts(dev) < 0) {
-		free(dsi);
+	if (panel_parse_dts(dev) < 0)
 		return -1;
-	}
 
-	dsi->format = DSI_FMT_RGB888;
-	dsi->mode = DSI_MOD_VID_PULSE;
-	dsi->lane_num = 4;
-	priv->panel.dsi = dsi;
-
-	panel_init(priv, dev, &panel_vm, &panel_funcs);
+	priv->panel.dsi = &dsi;
+	panel_init(priv, dev, &panel_vm, &panel_funcs, NULL);
 
 	return 0;
 }

@@ -24,15 +24,15 @@ struct frame_dma_buf_info {
 	s32 frame_id;
 	s32 fd[3];		// dma-buf fd
 	s32 fd_num;		// number of dma-buf
-	s32 used;		// if the dma-buf of this frame add to de drive
+	s32 used;		// ifthe dma-buf of this frame add to de drive
 };
 
-struct frame_dma_buf_info_list{
+struct frame_dma_buf_info_list {
 	struct frame_dma_buf_info dma_buf_info;
 	struct mpp_list list;
 };
 
-struct aic_fb_video_render{
+struct aic_fb_video_render {
 	struct aic_video_render base;
 	struct aicfb_layer_data layer;
 	s32 fd;
@@ -66,12 +66,12 @@ static s32 fb_video_render_destroy(struct aic_video_render *render)
 	if (ioctl(fb_render->fd, AICFB_UPDATE_LAYER_CONFIG, &fb_render->layer) < 0)
 		loge("fb ioctl() AICFB_UPDATE_LAYER_CONFIG failed!");
 
-	if(!mpp_list_empty(&fb_render->dma_list)){
+	if (!mpp_list_empty(&fb_render->dma_list)) {
 		struct frame_dma_buf_info_list *dma_buf_node = NULL,*dma_buf_node1 = NULL;
-		mpp_list_for_each_entry_safe(dma_buf_node,dma_buf_node1, &fb_render->dma_list, list){
+		mpp_list_for_each_entry_safe(dma_buf_node,dma_buf_node1, &fb_render->dma_list, list) {
 			mpp_list_del(&dma_buf_node->list);
-			if(dma_buf_node->dma_buf_info.used == 1){
-				for(i = 0;i < dma_buf_node->dma_buf_info.fd_num;i++){
+			if (dma_buf_node->dma_buf_info.used == 1) {
+				for(i = 0;i < dma_buf_node->dma_buf_info.fd_num;i++) {
 					dmabuf_fd[i].fd =dma_buf_node->dma_buf_info.fd[i];
 					ioctl(fb_render->fd, AICFB_RM_DMABUF, &dmabuf_fd[i]);
 					logd("AICFB_RM_DMABUF frame_id:%d\n",dmabuf_fd[i].fd);
@@ -81,12 +81,37 @@ static s32 fb_video_render_destroy(struct aic_video_render *render)
 		}
 	}
 
-	if(fb_render->fd > 0){
+	if (fb_render->fd > 0) {
 		close(fb_render->fd);
 	}
 
 	mpp_free(fb_render);
 	return 0;
+}
+
+static s32 get_component_num(enum mpp_pixel_format format)
+{
+	int component_num = 0;
+		if (format == MPP_FMT_ARGB_8888) {
+			component_num = 1;
+		} else if (format == MPP_FMT_RGBA_8888) {
+			component_num = 1;
+		} else if (format == MPP_FMT_RGB_888) {
+			component_num = 1;
+		} else if (format == MPP_FMT_YUV420P) {
+			component_num = 3;
+		} else if (format == MPP_FMT_NV12 || format == MPP_FMT_NV21) {
+			component_num = 2;
+		} else if (format == MPP_FMT_YUV444P) {
+			component_num = 3;
+		} else if (format == MPP_FMT_YUV422P) {
+			component_num = 3;
+		} else if (format == MPP_FMT_YUV400) {
+			component_num = 1;
+		} else {
+			loge("no support picture foramt %d, default argb8888", format);
+		}
+		return component_num;
 }
 
 static s32 fb_video_render_rend(struct aic_video_render *render,struct mpp_frame *frame_info)
@@ -96,56 +121,91 @@ static s32 fb_video_render_rend(struct aic_video_render *render,struct mpp_frame
 	int dmabuf_num = 0;
 	s32 find = 0;
 	struct dma_buf_info dmabuf_fd[3];
-	struct frame_dma_buf_info_list * dma_buf_node = NULL;
-	if(frame_info == NULL){
+	struct frame_dma_buf_info_list * dma_buf_node = NULL,*dma_buf_node1 = NULL;
+	if (frame_info == NULL) {
 		loge("frame_info=NULL\n");
 		return -1;
 	}
-
-	if(!mpp_list_empty(&fb_render->dma_list)){
-		mpp_list_for_each_entry(dma_buf_node, &fb_render->dma_list, list){
-			if((dma_buf_node->dma_buf_info.frame_id == frame_info->id) && (dma_buf_node->dma_buf_info.used==1)){
-				logw("dma buff has already add de!!!\n");
-				find = 1;
-				break;
+	if (!mpp_list_empty(&fb_render->dma_list)) {
+		mpp_list_for_each_entry_safe(dma_buf_node, dma_buf_node1, &fb_render->dma_list, list) {
+			dmabuf_num = get_component_num(frame_info->buf.format);
+			if (dmabuf_num == 1) {
+				if (dma_buf_node->dma_buf_info.fd[0] == frame_info->buf.fd[0]) {
+					if (dma_buf_node->dma_buf_info.frame_id != frame_info->id) {
+						//exist dma fd,frame_id not eq,it means relloc dma,so remove last dma fd in the de
+						dmabuf_fd[0].fd = frame_info->buf.fd[0];
+						ioctl(fb_render->fd, AICFB_RM_DMABUF, &dmabuf_fd[0]);
+						mpp_list_del(&dma_buf_node->list);
+						mpp_free(dma_buf_node);
+						find = 0;
+						break;
+					}else{
+						find = 1;
+						break;
+					}
+				}
+			} else if (dmabuf_num == 2) {
+				if (dma_buf_node->dma_buf_info.fd[0] == frame_info->buf.fd[0]
+				&& dma_buf_node->dma_buf_info.fd[1] == frame_info->buf.fd[1]) {
+					if (dma_buf_node->dma_buf_info.frame_id != frame_info->id) {
+						//exist dma fd,frame_id not eq,it means relloc dma,so remove last dma fd in the de
+						dmabuf_fd[0].fd = frame_info->buf.fd[0];
+						dmabuf_fd[1].fd = frame_info->buf.fd[1];
+						ioctl(fb_render->fd, AICFB_RM_DMABUF, &dmabuf_fd[0]);
+						ioctl(fb_render->fd, AICFB_RM_DMABUF, &dmabuf_fd[1]);
+						mpp_list_del(&dma_buf_node->list);
+						mpp_free(dma_buf_node);
+						find = 0;
+						break;
+					}else{
+						find = 1;
+						break;
+					}
+				}
+			} else if (dmabuf_num == 3) {
+				if (dma_buf_node->dma_buf_info.fd[0] == frame_info->buf.fd[0]
+				&& dma_buf_node->dma_buf_info.fd[1] == frame_info->buf.fd[1]
+				&& dma_buf_node->dma_buf_info.fd[2] == frame_info->buf.fd[2]){
+					if (dma_buf_node->dma_buf_info.frame_id != frame_info->id) {
+						//exist dma fd,frame_id not eq,it means relloc dma,so remove last dma fd in the de
+						dmabuf_fd[0].fd = frame_info->buf.fd[0];
+						dmabuf_fd[1].fd = frame_info->buf.fd[1];
+						dmabuf_fd[2].fd = frame_info->buf.fd[2];
+						ioctl(fb_render->fd, AICFB_RM_DMABUF, &dmabuf_fd[0]);
+						ioctl(fb_render->fd, AICFB_RM_DMABUF, &dmabuf_fd[1]);
+						ioctl(fb_render->fd, AICFB_RM_DMABUF, &dmabuf_fd[2]);
+						printf("[%s:%d]%d,%u\n",__FUNCTION__,__LINE__,dma_buf_node->dma_buf_info.frame_id,frame_info->id);
+						mpp_list_del(&dma_buf_node->list);
+						mpp_free(dma_buf_node);
+						find = 0;
+						break;
+					}else{
+						find = 1;
+						break;
+					}
+				}
+			} else {
+				loge("no support picture foramt %d", frame_info->buf.format);
+				return -1;
 			}
 		}
 	}
 
-	if(find == 0){
+	if (find == 0) {
 		dma_buf_node = (struct frame_dma_buf_info_list *)mpp_alloc(sizeof(struct frame_dma_buf_info_list));
 		memset(dma_buf_node,0x00,sizeof(struct frame_dma_buf_info_list));
 		dma_buf_node->dma_buf_info.frame_id = frame_info->id;
+		printf("[%s:%d]%d,%u\n",__FUNCTION__,__LINE__,dma_buf_node->dma_buf_info.frame_id,frame_info->id);
 		dma_buf_node->dma_buf_info.used = 0;
-
-		if (frame_info->buf.format == MPP_FMT_ARGB_8888) {
-			dmabuf_num = 1;
-		} else if (frame_info->buf.format == MPP_FMT_RGBA_8888) {
-			dmabuf_num = 1;
-		} else if (frame_info->buf.format == MPP_FMT_RGB_888) {
-			dmabuf_num = 1;
-		} else if (frame_info->buf.format == MPP_FMT_YUV420P) {
-			dmabuf_num = 3;
-		} else if (frame_info->buf.format == MPP_FMT_NV12 || frame_info->buf.format == MPP_FMT_NV21) {
-			dmabuf_num = 2;
-		} else if (frame_info->buf.format == MPP_FMT_YUV444P) {
-			dmabuf_num = 3;
-		} else if (frame_info->buf.format == MPP_FMT_YUV422P) {
-			dmabuf_num = 3;
-		} else if (frame_info->buf.format == MPP_FMT_YUV400) {
-			dmabuf_num = 1;
-		} else {
-			loge("no support picture foramt %d, default argb8888", frame_info->buf.format);
-		}
-
+		dmabuf_num = get_component_num(frame_info->buf.format);
 		//* add dmabuf to de driver
-		logw("AICFB_ADD_DMABUF frame_id:%d!",dma_buf_node->dma_buf_info.frame_id);
+		logw("AICFB_ADD_DMABUF frame_id:%u!",dma_buf_node->dma_buf_info.frame_id);
 		for(i=0; i<dmabuf_num; i++) {
 			dma_buf_node->dma_buf_info.fd[i] = frame_info->buf.fd[i];
 			dmabuf_fd[i].fd = frame_info->buf.fd[i];
-			if (ioctl(fb_render->fd, AICFB_ADD_DMABUF, &dmabuf_fd[i]) < 0){
+			if (ioctl(fb_render->fd, AICFB_ADD_DMABUF, &dmabuf_fd[i]) < 0) {
 				loge("AICFB_ADD_DMABUF fd:%d failed!",dmabuf_fd[i].fd);
-			}else{
+			} else {
 				logw("AICFB_ADD_DMABUF fd:%d ok!",dmabuf_fd[i].fd);
 			}
 		}
@@ -170,11 +230,11 @@ static s32 get_screen_size(struct aic_video_render *render,struct mpp_size *size
 {
 	s32 ret = 0;
 	struct aic_fb_video_render *fb_render = (struct aic_fb_video_render*)render;
-	if(size == NULL){
+	if (size == NULL) {
 		loge("bad params!!!!\n");
 		return -1;
 	}
-	if (ioctl(fb_render->fd, AICFB_GET_SCREEN_SIZE, size) < 0){
+	if (ioctl(fb_render->fd, AICFB_GET_SCREEN_SIZE, size) < 0) {
 		loge("fb ioctl() AICFB_GET_SCREEN_SIZE failed!");
 		return -1;
 	}
@@ -184,7 +244,7 @@ static s32 get_screen_size(struct aic_video_render *render,struct mpp_size *size
 static s32 fb_video_render_set_dis_rect(struct aic_video_render *render,struct mpp_rect *rect)
 {
 	struct aic_fb_video_render *fb_render = (struct aic_fb_video_render*)render;
-	if(rect == NULL){
+	if (rect == NULL) {
 		loge("param error rect==NULL\n");
 		return -1;
 	}
@@ -198,7 +258,7 @@ static s32 fb_video_render_set_dis_rect(struct aic_video_render *render,struct m
 static s32 fb_video_render_get_dis_rect(struct aic_video_render *render,struct mpp_rect *rect)
 {
 	struct aic_fb_video_render *fb_render = (struct aic_fb_video_render*)render;
-	if(rect == NULL){
+	if (rect == NULL) {
 		loge("param error rect==NULL\n");
 		return -1;
 	}
@@ -219,7 +279,7 @@ static s32 fb_video_render_set_on_off(struct aic_video_render *render,s32 enable
 static s32 fb_video_render_get_on_off(struct aic_video_render *render,s32 *enable )
 {
 	struct aic_fb_video_render *fb_render = (struct aic_fb_video_render*)render;
-	if(enable == NULL){
+	if (enable == NULL) {
 		loge("param error rect==NULL\n");
 		return -1;
 	}
@@ -231,7 +291,7 @@ s32 aic_video_render_create(struct aic_video_render **render)
 {
 	struct aic_fb_video_render * fb_render;
 	fb_render = mpp_alloc(sizeof(struct aic_fb_video_render));
-	if(fb_render == NULL){
+	if (fb_render == NULL) {
 		loge("mpp_alloc fb_render fail!!!\n");
 		*render = NULL;
 		return -1;

@@ -240,7 +240,7 @@ static void mov_build_index(struct aic_mov_parser *c, struct mov_stream_ctx *st)
 				int keyframe = 0;
 				if (current_sample >= st->sample_count) {
 					loge("wrong sample count");
-					return ;
+					return;
 				}
 
 				if (!st->keyframe_count || current_sample+key_off == st->keyframes[stss_index]) {
@@ -498,8 +498,6 @@ static int mov_read_hdlr(struct aic_mov_parser *c, struct mov_atom atom)
 		st->type = MPP_MEDIA_TYPE_VIDEO;
 	else if (type == MKTAG('s','o','u','n'))
 		st->type = MPP_MEDIA_TYPE_AUDIO;
-	else
-		st->type = MPP_MEDIA_TYPE_UNKNOWN;
 
 	rb32(c->stream); /* component  manufacture */
 	rb32(c->stream); /* component flags */
@@ -817,7 +815,7 @@ static int mov_read_stsz(struct aic_mov_parser *c, struct mov_atom atom)
 	if (!entries)
 		return 0;
 
-	if (sample_size){
+	if (sample_size) {
 		st->sample_count = entries;
 		return 0;
 	}
@@ -1344,7 +1342,7 @@ int mov_peek_packet(struct aic_mov_parser *c, struct aic_parser_packet *pkt)
 	pkt->pts = get_time(sample->timestamp, st->time_scale);
 
 	if (st->ctts_data && st->ctts_index < st->ctts_count) {
-		pkt->pts = sample->timestamp + st->dts_shift + st->ctts_data[st->cur_sample_idx].duration;
+		pkt->pts = sample->timestamp + st->dts_shift + st->ctts_data[st->cur_sample_idx - 1].duration;
 
 		pkt->pts = get_time(pkt->pts, st->time_scale);
 	}
@@ -1404,7 +1402,7 @@ int mov_read_header(struct aic_mov_parser *c)
 	return 0;
 }
 
-int find_audio_index_by_pts(struct mov_stream_ctx *audio_st,s64 pts)
+int find_index_by_pts(struct mov_stream_ctx *st,s64 pts)
 {
 	int i,index = 0;
 	int64_t min = INT64_MAX;
@@ -1412,9 +1410,9 @@ int find_audio_index_by_pts(struct mov_stream_ctx *audio_st,s64 pts)
 	int64_t diff;
 	struct index_entry *cur_sample = NULL;
 
-	for (i = 0; i < audio_st->nb_index_entries; i++) {
-		cur_sample = &audio_st->index_entries[i];
-		sample_pts = get_time(cur_sample->timestamp, audio_st->time_scale);
+	for (i = 0; i < st->nb_index_entries; i++) {
+		cur_sample = &st->index_entries[i];
+		sample_pts = get_time(cur_sample->timestamp, st->time_scale);
 		diff = MPP_ABS(pts,sample_pts);
 		if (diff < min) {
 			min = diff;
@@ -1433,7 +1431,7 @@ int  find_video_index_by_pts(struct mov_stream_ctx *video_st,s64 pts)
 	int64_t diff;
 	struct index_entry *cur_sample = NULL;
 
-	for (i = 0 ;i < video_st->keyframe_count;i++ ) {
+	for (i = 0 ;i < video_st->keyframe_count;i++) {
 		k = video_st->keyframes[i]-1;
 		cur_sample = &video_st->index_entries[k];
 		sample_pts = get_time(cur_sample->timestamp, video_st->time_scale);
@@ -1453,44 +1451,38 @@ int mov_seek_packet(struct aic_mov_parser *c, s64 pts)
 	struct mov_stream_ctx *cur_st = NULL;
 	struct mov_stream_ctx *video_st = NULL;
 	struct mov_stream_ctx *audio_st = NULL;
-	int64_t video_pts;
 	struct index_entry *cur_sample = NULL;
 
 	for (i = 0; i< c->nb_streams ;i++) {
 		cur_st = c->streams[i];
 		if ((!video_st) && (cur_st->type == MPP_MEDIA_TYPE_VIDEO)) {//only support first video stream
 			video_st = c->streams[i];
-		}else if ((!audio_st) && (cur_st->type == MPP_MEDIA_TYPE_AUDIO)) {//only support first audio stream
+		} else if ((!audio_st) && (cur_st->type == MPP_MEDIA_TYPE_AUDIO)) {//only support first audio stream
 			audio_st = c->streams[i];
 		}
 	}
 
-	if (video_st && audio_st) {// video & audio
-		if (!video_st->keyframes) {
-			loge("no keyframes\n");
-			return -1;
+	if (video_st) {
+		if(video_st->id == CODEC_ID_MJPEG) {
+			video_st->cur_sample_idx = find_index_by_pts(video_st,pts);
+		} else {
+			if (!video_st->keyframes) {
+				loge("no keyframes\n");
+				return -1;
+			}
+			video_st->cur_sample_idx = find_video_index_by_pts(video_st,pts);
 		}
-		video_st->cur_sample_idx = find_video_index_by_pts(video_st,pts);
-		cur_sample = &video_st->index_entries[video_st->cur_sample_idx];
-		video_pts = get_time(cur_sample->timestamp, video_st->time_scale);
-		audio_st->cur_sample_idx = find_audio_index_by_pts(audio_st,video_pts);
-		logd("pts:%ld,video_sample_index:%d,video_pts:%ld,cur_sample_idx:%d,audio_pts:%ld\n"
-			,pts
-			,video_st->cur_sample_idx
-			,video_pts
-			,audio_st->cur_sample_idx
-			,get_time(audio_st->index_entries[audio_st->cur_sample_idx].timestamp, audio_st->time_scale));
-
-	}else if (video_st && !audio_st) {//only video
-		if (!video_st->keyframes) {
-			loge("no keyframes\n");
-			return -1;
-		}
-		video_st->cur_sample_idx = find_video_index_by_pts(video_st,pts);
-	}else if (!video_st && audio_st) {// only audio
-		audio_st->cur_sample_idx = find_audio_index_by_pts(audio_st,pts);
-	}else if (!video_st && !audio_st) {//no audio & no video
-		return -1;
 	}
+
+	if (audio_st) {
+		int64_t tmp;
+		tmp = pts;
+		if (video_st) {
+			cur_sample = &video_st->index_entries[video_st->cur_sample_idx];
+			tmp = get_time(cur_sample->timestamp, video_st->time_scale);
+		}
+		audio_st->cur_sample_idx = find_index_by_pts(audio_st,tmp);
+	}
+
 	return 0;
 }

@@ -183,11 +183,13 @@ config BR2_PACKAGE_GST1_PLUGINS_BAD_PLUGIN_MIDI
 
 config BR2_PACKAGE_GST1_PLUGINS_BAD_PLUGIN_MPEGDEMUX
 	bool "mpegdemux"
+	default y
 	help
 	  MPEG-PS demuxer
 
 config BR2_PACKAGE_GST1_PLUGINS_BAD_PLUGIN_MPEGTSDEMUX
 	bool "mpegtsdemux"
+	default y
 	help
 	  MPEG TS demuxer
 

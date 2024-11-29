@@ -24,6 +24,7 @@
 #define AICUPG_ARGS_MAX 4
 #define WAIT_UPG_MODE_TMO_US 2000000
 
+#if defined(CONFIG_MMC) || defined(CONFIG_SPL_MMC)
 static int curr_device = -1;
 
 static int image_header_check(struct image_header_pack *header)
@@ -34,6 +35,12 @@ static int image_header_check(struct image_header_pack *header)
 		return -1;
 	}
 	return 0;
+}
+#endif
+
+__weak void do_brom_upg(void)
+{
+	printf("%s is not implemented.\n", __func__);
 }
 
 static int check_upg_mode(long start_tm, long tmo)
@@ -61,19 +68,32 @@ static int do_usb_protocol_upg(int intf)
 	int ret, ck_mode;
 	long start_tm;
 	char *p;
+	struct upg_init init;
 
 	start_tm = timer_get_us();
 
 	ck_mode = 0;
+	init.mode = INIT_MODE(UPG_MODE_FULL_DISK_UPGRADE);
 	p = env_get("upg_mode");
-	if (p && (!strcmp(p, "userid") || !strcmp(p, "force"))) {
+	if (p) {
+		if (!strcmp(p, "userid")) {
+			ck_mode = 1;
+			init.mode = INIT_MODE(UPG_MODE_BURN_USER_ID);
+#ifdef CONFIG_AICUPG_FORCE_USBUPG_SUPPORT
+			/* Enter burn USERID mode also support force burn image */
+			init.mode |= INIT_MODE(UPG_MODE_BURN_IMG_FORCE);
+#endif
+		} else if (!strcmp(p, "force")) {
+			ck_mode = 1;
+			init.mode = INIT_MODE(UPG_MODE_BURN_IMG_FORCE);
+		}
 		/* Remove this information after used, avoid to be saved
 		 * to env partition
 		 */
 		env_set("upg_mode", "");
-		ck_mode = 1;
 	}
 
+	aicupg_initialize(&init);
 	ret = usb_gadget_initialize(intf);
 	if (ret) {
 		printf("USB init failed: %d\n", ret);
@@ -109,6 +129,7 @@ exit:
 	return ret;
 }
 
+#if defined(CONFIG_MMC) || defined(CONFIG_SPL_MMC)
 static struct mmc *init_mmc_device(int dev, bool force_init)
 {
 	struct mmc *mmc;
@@ -131,13 +152,15 @@ static struct mmc *init_mmc_device(int dev, bool force_init)
 #endif
 	return mmc;
 }
+#endif
 
 static int do_sdcard_upg(int intf)
 {
+	s32 ret = 0;
+#if defined(CONFIG_MMC) || defined(CONFIG_SPL_MMC)
 	struct image_header_pack *hdrpack;
 	struct mmc *mmc;
 	char *mmc_type;
-	s32 ret;
 	u32 cnt, n;
 	struct disk_partition part_info;
 
@@ -219,18 +242,22 @@ static int do_sdcard_upg(int intf)
 	}
 
 	free(hdrpack);
-	return CMD_RET_SUCCESS;
+	ret = CMD_RET_SUCCESS;
+	return ret;
 err:
 	if (hdrpack)
 		free(hdrpack);
-	return CMD_RET_FAILURE;
+	ret = CMD_RET_FAILURE;
+#endif
+	return ret;
 }
 
 static int do_fat_upg(int intf, char *const blktype)
 {
+	int ret = 0;
+#if defined(CONFIG_FS_FAT) || defined(CONFIG_SPL_FS_FAT)
 	struct image_header_pack *hdrpack;
 	struct mmc *mmc;
-	int ret;
 	loff_t actread;
 	char num_dev = 0, cur_dev = 0;
 	char *file_buf;
@@ -323,7 +350,7 @@ static int do_fat_upg(int intf, char *const blktype)
 
 	/*load header*/
 	ret = fat_read_file("bootcfg.txt", (void *)file_buf, 0, 1024, &actread);
-	if (actread == 0) {
+	if (actread == 0 || ret != 0) {
 		printf("Error:read file bootcfg.txt failed!\n");
 		goto err;
 	}
@@ -344,7 +371,7 @@ static int do_fat_upg(int intf, char *const blktype)
 
 	ret = fat_read_file(image_name, (void *)hdrpack, 0,
 			   sizeof(struct image_header_pack), &actread);
-	if (actread != sizeof(struct image_header_pack)) {
+	if (actread != sizeof(struct image_header_pack) || ret != 0) {
 		printf("Error:read file %s failed!\n", image_name);
 		goto err;
 	}
@@ -370,13 +397,16 @@ static int do_fat_upg(int intf, char *const blktype)
 
 	free(hdrpack);
 	free(file_buf);
-	return CMD_RET_SUCCESS;
+	ret = CMD_RET_SUCCESS;
+	return ret;
 err:
 	if (hdrpack)
 		free(hdrpack);
 	if (file_buf)
 		free(file_buf);
-	return CMD_RET_FAILURE;
+	ret = CMD_RET_FAILURE;
+#endif
+	return ret;
 }
 
 static int do_aicupg(struct cmd_tbl *cmdtp, int flag, int argc, char *const argv[])
@@ -384,6 +414,10 @@ static int do_aicupg(struct cmd_tbl *cmdtp, int flag, int argc, char *const argv
 	char *devtype = NULL;
 	int intf, ret = CMD_RET_USAGE;
 
+	if ((argc == 1) || ((argc == 2) && !strcmp(argv[1], "brom"))) {
+		do_brom_upg();
+		return 0;
+	}
 	if ((argc < 3) || (argc > AICUPG_ARGS_MAX))
 		return ret;
 
@@ -408,11 +442,11 @@ static int do_aicupg(struct cmd_tbl *cmdtp, int flag, int argc, char *const argv
 U_BOOT_CMD(aicupg, AICUPG_ARGS_MAX, 0, do_aicupg,
 	"ArtInChip firmware upgrade",
 	"[devtype] [interface]\n"
-	"  - devtype: should be usb, mmc, fat\n"
+	"  - devtype: should be usb, mmc, fat, brom\n"
 	"  - interface: specify the controller id\n"
 	"e.g.\n"
 	"aicupg\n"
-	"  - if no parameter is provided, it will try to detect boot device.\n"
+	"  - if no parameter is provided, it will reboot to BROM's upgmode.\n"
 	"aicupg usb 0\n"
 	"aicupg mmc 1\n"
 	"- when devtype is fat: \n"
@@ -421,4 +455,5 @@ U_BOOT_CMD(aicupg, AICUPG_ARGS_MAX, 0, do_aicupg,
 	"e.g. \n"
 	"aicupg fat udisk 0\n"
 	"aicupg fat mmc 1\n"
+	"aicupg\n"
 );

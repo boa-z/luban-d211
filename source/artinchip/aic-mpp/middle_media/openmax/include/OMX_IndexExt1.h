@@ -58,10 +58,13 @@ typedef enum OMX_INDEXEXTTYPE {
 	OMX_IndexVendorAudioRenderInit = 0x7F002000,
 	OMX_IndexVendorAudioRenderVolume = 0x7F002001,/**< reference: OMX_PARAM_AUDIO_VOLUME */
 
+	/*0x7f003000-0x7f003fff Demuxer*/
+	OMX_IndexVendorDemuxerSkipTrack = 0x7F003000, /**< reference: OMX_PARAM_SKIP_TRACK */
+
+	/*0x7f004000-0x7f004fff Muxer*/
+	OMX_IndexVendorMuxerRecorderFileInfo = 0x7F003000, /**< reference: OMX_PARAM_RECORDERFILEINFO */
 
 } OMX_INDEXEXTTYPE;
-
-
 
 typedef struct OMX_PARAM_FRAMEEND {
     OMX_U32 nSize; /**< size of the structure in bytes */
@@ -95,6 +98,23 @@ typedef struct OMX_PARAM_VIDEO_CAPTURE {
     OMX_S32 nHeight;
     OMX_S32 nQuality;
 } OMX_PARAM_VIDEO_CAPTURE;
+
+typedef struct OMX_PARAM_SKIP_TRACK {
+    OMX_U32 nSize;
+    OMX_VERSIONTYPE nVersion;
+    OMX_U32 nPortIndex;
+} OMX_PARAM_SKIP_TRACK;
+
+typedef struct OMX_PARAM_RECORDERFILEINFO {
+    OMX_U32 nSize;
+    OMX_VERSIONTYPE nVersion;
+    OMX_U32 nPortIndex;
+	OMX_S32 nFileNum;
+	OMX_S64 nDuration;
+	OMX_S32 nMuxerType;
+} OMX_PARAM_RECORDERFILEINFO;
+
+
 
 #ifdef __cplusplus
 }

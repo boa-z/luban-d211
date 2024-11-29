@@ -81,9 +81,7 @@ static gboolean gst_ve_dec_stop (GstVideoDecoder * bdec)
 
 	gst_pad_stop_task (bdec->srcpad);
 	gst_task_stop(dec->dec_task);
-#if USE_RETURN_BUF
-	pthread_mutex_destroy(&dec->frames_lock);
-#endif
+
 	return TRUE;
 }
 
@@ -125,7 +123,6 @@ static gboolean update_video_info(GstVideoDecoder * decoder, GstVideoFormat form
 static void gst_render_loop (GstVideoDecoder * decoder)
 {
 	GstVeDec *self = GST_VE_DEC (decoder);
-	GstMapInfo output_minfo;
 	GstVideoCodecFrame *out_frame;
 	struct mpp_frame frame;
 	int dec_ret = 0;
@@ -159,9 +156,8 @@ static void gst_render_loop (GstVideoDecoder * decoder)
 	}
 	g_hash_table_remove(self->pts2frame, (gpointer)frame.pts);
 
-	if (out_frame->output_buffer == NULL)
-		out_frame->output_buffer = gst_buffer_new_allocate(NULL, sizeof(struct mpp_frame), NULL);
-		//get_gst_buffer(&frame);
+	//if (out_frame->output_buffer == NULL)
+	out_frame->output_buffer = gst_buffer_new_allocate((GstAllocator*)self->allocator, sizeof(struct mpp_frame), NULL);
 
 	out_frame->output_buffer->offset = 0;
 	out_frame->output_buffer->pts = frame.pts;
@@ -170,25 +166,19 @@ static void gst_render_loop (GstVideoDecoder * decoder)
 	GST_ERROR_OBJECT(self, "frame.pts: %lld, %ld, id: %d, duration: %ld",
 		frame.pts, out_frame->pts, frame.id, out_frame->duration);
 
-	gst_buffer_map (out_frame->output_buffer, &output_minfo, GST_MAP_READ | GST_MAP_WRITE);
+	// ref_cnt of mpp_mem will increase 1, if we call gst_buffer_get_memory
+	GstMppMemory *mpp_mem = (GstMppMemory *)gst_buffer_get_memory(out_frame->output_buffer, 0);
+	memcpy(mpp_mem->frame, &frame, sizeof(struct mpp_frame));
+	gst_memory_unref((GstMemory*)mpp_mem);
 
-	memcpy(output_minfo.data, &frame, sizeof(struct mpp_frame));
-
-#if USE_RETURN_BUF
-	// find an empty frame from frame info array
-	pthread_mutex_lock(&self->frames_lock);
-	int id = frame.id;
-	if (self->render_frames[id].used) {
-		GST_ERROR_OBJECT(self, "it is used now, maybe error");
-	}
-	GST_ERROR_OBJECT(self, "render frame id: %d", id);
-	memcpy(&self->render_frames[id].frame, &frame, sizeof(struct mpp_frame));
-	self->render_frames[id].used = 1;
-	pthread_mutex_unlock(&self->frames_lock);
-#endif
-	gst_buffer_unmap (out_frame->output_buffer, &output_minfo);
 	gst_video_codec_frame_ref(out_frame);
+
 	gst_video_decoder_finish_frame(decoder, out_frame);
+
+	GST_ERROR_OBJECT(self, " mem ref_count: %d, output_buffer ref_count: %d, id: %d",
+		GST_MINI_OBJECT_REFCOUNT_VALUE(mpp_mem),
+		GST_MINI_OBJECT_REFCOUNT_VALUE(out_frame->output_buffer),
+		frame.id);
 
 	GST_DEBUG_OBJECT(self, "video dec ts: %" GST_TIME_FORMAT ", dur:%" GST_TIME_FORMAT" \n",
 		GST_TIME_ARGS (GST_BUFFER_PTS (out_frame->input_buffer)),
@@ -197,10 +187,6 @@ static void gst_render_loop (GstVideoDecoder * decoder)
 	GST_DEBUG_OBJECT(self, "out video dec ts: %" GST_TIME_FORMAT ", dur:%" GST_TIME_FORMAT" \n",
 		GST_TIME_ARGS (GST_BUFFER_PTS (out_frame->output_buffer)),
 		GST_TIME_ARGS (GST_BUFFER_DURATION (out_frame->output_buffer)));
-
-#if (!USE_RETURN_BUF)
-	mpp_decoder_put_frame(self->mpp_dec, &frame);
-#endif
 
 out:
 	if (self->task_ret != GST_FLOW_OK) {
@@ -213,7 +199,7 @@ static GstFlowReturn gst_ve_dec_handle_frame (GstVideoDecoder * bdec, GstVideoCo
 	GstVeDec *dec = GST_VE_DEC(bdec);
 	GstMapInfo input_minfo;
 	struct mpp_packet packet;
-	int timeout_us = 2000000; // 2s
+	int timeout_us = 10000000; // 10s
 	int wait_time_us = 10000;
 	GstFlowReturn ret = GST_FLOW_OK;
 	memset(&packet, 0, sizeof(struct mpp_packet));
@@ -231,6 +217,9 @@ static GstFlowReturn gst_ve_dec_handle_frame (GstVideoDecoder * bdec, GstVideoCo
 	}
 	gst_buffer_map (in_frame->input_buffer, &input_minfo, GST_MAP_READ);
 
+	//printf("===> 1. handle frame start ref: %d, sys_frm_num: %d, input_minfo.size: %d\n",
+	//	in_frame->ref_count, in_frame->system_frame_number, input_minfo.size);
+
 	GST_VIDEO_DECODER_STREAM_UNLOCK (bdec);
 	while (1) {
 		int ret = mpp_decoder_get_packet(dec->mpp_dec, &packet, input_minfo.size);
@@ -240,10 +229,9 @@ static GstFlowReturn gst_ve_dec_handle_frame (GstVideoDecoder * bdec, GstVideoCo
 		g_usleep(wait_time_us);
 		timeout_us -= wait_time_us;
 
-		if(timeout_us < 0) {
-			GST_DEBUG_OBJECT(dec, "fail to get packet");
+		if (dec->stop_flag) {
+			GST_DEBUG_OBJECT(dec, "stop");
 			ret = GST_FLOW_ERROR;
-			gst_video_decoder_release_frame (bdec, in_frame);
 			goto done;
 		}
 	}
@@ -257,9 +245,13 @@ static GstFlowReturn gst_ve_dec_handle_frame (GstVideoDecoder * bdec, GstVideoCo
 
 	GST_VIDEO_DECODER_STREAM_LOCK (bdec);
 
+
 done:
 	gst_buffer_unmap (in_frame->input_buffer, &input_minfo);
 	gst_video_codec_frame_unref (in_frame);
+
+	//printf("===> 1.1 handle frame ref: %d, sys_frm_num: %d\n",
+	//	in_frame->ref_count, in_frame->system_frame_number);
 
 	return ret == GST_FLOW_ERROR ? GST_FLOW_ERROR : dec->task_ret;
 }
@@ -282,10 +274,11 @@ static gboolean gst_ve_dec_set_format (GstVideoDecoder * bdec, GstVideoCodecStat
 		dec->mpp_dec = NULL;
 	}
 	dec->mpp_dec = mpp_decoder_create(dec->dec_type);
+	dec->allocator = gst_mpp_allocator_new(dec->mpp_dec);
 
 	struct decode_config config;
 	config.bitstream_buffer_size = 1024*1024;
-	config.extra_frame_num = 1;
+	config.extra_frame_num = 2;
 	config.packet_count = 10;
 
 	if(dec->dec_type == MPP_CODEC_VIDEO_DECODER_PNG)
@@ -293,29 +286,32 @@ static gboolean gst_ve_dec_set_format (GstVideoDecoder * bdec, GstVideoCodecStat
 	else
 		config.pix_fmt = MPP_FMT_YUV420P;
 
-	//* 2. init mpp_decoder
+	// init mpp_decoder
 	mpp_decoder_init(dec->mpp_dec, &config);
 
-	//* put extra data
+	// put extra data
 	GstMapInfo minfo;
-	gst_buffer_map (state->codec_data, &minfo, GST_MAP_READ);
+	// there is not extradata if it is ts file
+	if (state->codec_data) {
+		gst_buffer_map (state->codec_data, &minfo, GST_MAP_READ);
 
-	struct mpp_packet packet;
-	memset(&packet, 0, sizeof(struct mpp_packet));
-	mpp_decoder_get_packet(dec->mpp_dec, &packet, minfo.size);
-	memcpy(packet.data, minfo.data, minfo.size);
-	packet.size = minfo.size;
-	packet.flag = PACKET_FLAG_EXTRA_DATA;
-	mpp_decoder_put_packet(dec->mpp_dec, &packet);
+		struct mpp_packet packet;
+		memset(&packet, 0, sizeof(struct mpp_packet));
+		mpp_decoder_get_packet(dec->mpp_dec, &packet, minfo.size);
+		memcpy(packet.data, minfo.data, minfo.size);
+		packet.size = minfo.size;
+		packet.flag = PACKET_FLAG_EXTRA_DATA;
+		mpp_decoder_put_packet(dec->mpp_dec, &packet);
 
-	gst_buffer_unmap (state->codec_data, &minfo);
+		gst_buffer_unmap (state->codec_data, &minfo);
 
-	// decode extradata
-	if(mpp_decoder_decode(dec->mpp_dec) < 0) {
-		GST_ERROR_OBJECT(dec, "decode extradata failed");
+		// decode extradata
+		if(mpp_decoder_decode(dec->mpp_dec) < 0) {
+			GST_ERROR_OBJECT(dec, "decode extradata failed");
+		}
+
+		dec->input_state = gst_video_codec_state_ref (state);
 	}
-
-	dec->input_state = gst_video_codec_state_ref (state);
 
 	return TRUE;
 }
@@ -463,6 +459,8 @@ static void gst_ve_dec_finalize (GObject * object)
 	gst_task_join(self->dec_task);
 	gst_object_unref(self->dec_task);
 	g_rec_mutex_clear (&self->lock);
+	if (self->allocator)
+		gst_object_unref (self->allocator);
 
 	G_OBJECT_CLASS (parent_class)->finalize (object);
 }
@@ -474,8 +472,7 @@ static gboolean gst_ve_dec_sink_event (GstVideoDecoder * decoder,
 	GstVeDec *self = (GstVeDec*)decoder;
 
 	switch (GST_EVENT_TYPE (event)) {
-	case GST_EVENT_CUSTOM_UPSTREAM:
-	{
+	case GST_EVENT_CUSTOM_UPSTREAM: {
 		GST_ERROR_OBJECT(self, "======> sink event\n");
 	}
 
@@ -495,24 +492,13 @@ static gboolean gst_ve_dec_src_event (GstVideoDecoder * decoder,
 	GstVeDec *self = (GstVeDec*)decoder;
 
 	switch (GST_EVENT_TYPE (event)) {
-	case GST_EVENT_CUSTOM_UPSTREAM:
-	{
+	case GST_EVENT_CUSTOM_UPSTREAM: {
 		const GstStructure *str = gst_event_get_structure (event);
 
 		if (gst_structure_has_name(str, "return-frame")) {
 			int val;
 			gst_structure_get_int(str, "id", &val);
 			GST_DEBUG_OBJECT(self, "return frame.id: %d\n", val);
-#if USE_RETURN_BUF
-			int i;
-			mpp_decoder_put_frame(self->mpp_dec, &self->render_frames[val].frame);
-			pthread_mutex_lock(&self->frames_lock);
-			if (self->render_frames[val].used == 0) {
-				GST_ERROR_OBJECT(self, "this frame(%d) is not used, maybe error\n", i);
-			}
-			self->render_frames[val].used = 0;
-			pthread_mutex_unlock(&self->frames_lock);
-#endif
 		}
 	}
 
@@ -572,7 +558,4 @@ static void gst_ve_dec_init (GstVeDec * self)
 
 	g_rec_mutex_init (&self->lock);
 	gst_task_set_lock (self->dec_task, &self->lock);
-#if USE_RETURN_BUF
-	pthread_mutex_init(&self->frames_lock, NULL);
-#endif
 }

@@ -1,3 +1,82 @@
+# V1.2.3 #
+
+##新增##
+
+- 新增驱动模块：PSADC、EPWM、rx8025t
+- USB Gadget：增加f_iap功能
+- 新增器件支持：
+   - NAND：xtx
+   - WiFi：asr5505、sv6x5x
+- 新增第三方包：msnlink/zjinnova/Carbit的投屏方案适配、GDB、libpjsip、libsrtp、libatomic_ops
+- 新增方案：demo88 nor musl
+- 默认打开SD卡、U盘的自动挂载功能
+
+##优化##
+
+- 功耗优化：包括驱动、PBP等
+- Audio：支持Fade in/out
+- LVGL：优化透明度的处理性能；支持缩放和任意角度旋转的组合；
+- 启动流程全面支持自适应DDR Size处理
+- NOR方案：支持自动计算分区信息
+- USB：增加外部阻抗的参数配置
+- SPI：支持配置Sample Delay、Rx Delay
+- SID：增加时序参数可配置
+- DMA：增强通道参数的有效性检查
+- package：支持子目录、外部源码目录的编译管理
+- i2c-tools：支持10bit模式
+- 简化U-Boot的DTS配置，合并board-u-boot.dtsi到board.dts
+
+##修改##
+
+- DDR Init：默认打开展频功能，便于ESD测试
+- MPP：修正部分MP4文件的播放错误
+- test_fb增加"-b"参数显示渐变色块，方便验证硬件环境
+- test_gpio增加output的配置功能
+
+
+# V1.2.2 #
+
+## 新增 ##
+- Display：支持在线调屏
+- MPP：支持mp4封装格式
+- U-Boot：支持MIPI驱动；支持xz压缩格式；支持DDR Size自适应处理
+- FS：用户态支持jffs2、squashfs
+- 提供独立编译 linux/uboot/dtb 的示例脚本
+- 新增器件支持：
+
+  - NAND：BYTe BY5F1GQ5UAYIG
+  - NOR：gd25q256
+  - panel：sw070wv20
+- 新增第三方包：sqlite、cJSON、freetype、libkcapi-1.4、pulseaudio、libsamplerate、预编译4个常用的Benchmark、
+- 新增方案：demo88 NOR
+- OneStep新增命令：del_board
+
+## 优化 ##
+- USB：支持OTG的动态切换
+- PBP：支持Boot pin功能
+
+## 修改 ##
+- SPL：提升size限制为128KB
+- AWTK：修正若干Bug，并进行多处优化
+- LVGL：重构目录结构，支持freetype字体
+- Falcon：修正SD卡启动时的处理流程
+- 编译：NAND方案默认不再生成4K block版本的镜像；打包原始DTS文件
+- SPINAND分区 Image 大小默认从image_cfg.json 中获取，
+- 测试示例规范命名格式为：test_*
+
+
+# V1.2.1 #
+
+## 新增 ##
+- 新增AWTK的支持
+- 新增几款mipi屏的支持
+- 新增test-blkdev
+- 新增 .gitignore
+## 优化 ##
+- SPL容量策略 
+- GStreamer 播放格式添加
+## 修改 ##
+- OneStep 工具移植到tools目录
 
 # V1.2.0 #
 

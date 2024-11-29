@@ -57,4 +57,9 @@ config ARTINCHIP_DEBUG_UBI
 	select ARTINCHIP_SERIAL
 	default n
 
+config ARTINCHIP_DEBUG_AICUPG
+	bool "Show aicupg debug log"
+	select ARTINCHIP_SERIAL
+	default n
+
 endmenu

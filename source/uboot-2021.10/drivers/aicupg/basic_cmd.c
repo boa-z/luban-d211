@@ -17,7 +17,9 @@
  */
 struct hwinfo {
 	u8 magic[8];
-	u8 reserved0[32];
+	u8 reserved0[30];
+	u8 init_mode;
+	u8 curr_mode;
 	u8 boot_stage;
 	u8 reserved1[67];
 };
@@ -55,6 +57,7 @@ static s32 CMD_GET_HWINFO_read_output_data(struct upg_cmd *cmd, u8 *buf,
 	struct resp_header resp;
 	struct hwinfo hw;
 	s32 siz = 0;
+	extern struct upg_internal upg_info;
 
 	debug("%s\n", __func__);
 	if (cmd->state == CMD_STATE_START)
@@ -83,6 +86,8 @@ static s32 CMD_GET_HWINFO_read_output_data(struct upg_cmd *cmd, u8 *buf,
 		memset(&hw, 0, sizeof(hw));
 		memcpy(hw.magic, "HWINFO", 6);
 		hw.boot_stage = BOOT_STAGE_UBOOT;
+		hw.init_mode = upg_info.init.mode;
+		hw.curr_mode = upg_info.cfg.mode;
 		memcpy(buf + siz, &hw, sizeof(hw));
 		siz += sizeof(hw);
 
@@ -756,6 +761,7 @@ static void CMD_SET_UPG_CFG_end(struct upg_cmd *cmd)
 }
 
 
+extern void rtc_upg_succ_cnt(void);
 static void CMD_SET_UPG_END_start(struct upg_cmd *cmd, s32 cmd_data_len)
 {
 	if (cmd->cmd != UPG_PROTO_CMD_SET_UPG_END)
@@ -763,6 +769,7 @@ static void CMD_SET_UPG_END_start(struct upg_cmd *cmd, s32 cmd_data_len)
 	printf("End of upgrading.\n\n");
 	cmd->priv = NULL;
 	cmd_state_init(cmd, CMD_STATE_START);
+	rtc_upg_succ_cnt();
 }
 
 static s32 CMD_SET_UPG_END_write_input_data(struct upg_cmd *cmd, u8 *buf, s32 len)

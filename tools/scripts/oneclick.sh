@@ -240,6 +240,25 @@ check_gcc_ver()
 	fi
 }
 
+compile_install_make4()
+{
+	MAKE4_PKG=make-4.2.1
+	MAKE4_PKG_TAR=$MAKE4_PKG".tar.bz2"
+
+	if [ ! -f $TOPDIR/dl/make/$MAKE4_PKG_TAR ]; then
+		pr_warn $MAKE4_PKG_TAR does not exist!
+		exit $ERR_PKG_UNVAILABLE
+	fi
+	cd $TOPDIR/dl/make
+
+	run_cmd "tar xjf $MAKE4_PKG_TAR"
+	cd $MAKE4_PKG
+	run_cmd "./configure --prefix=/usr/"
+	run_cmd "make && make install"
+
+	cd - > /dev/null
+}
+
 # The version of GLIBCXX must >= 3.4.22
 # $1: Lib directory
 check_libstdc_ver()
@@ -377,7 +396,7 @@ ubuntu_install()
 		apt_install_pkg $i ask
 	done
 
-	PKGS=("rsync" "bc" "cpio" "file" "patch" "bzip2")
+	PKGS=("rsync" "bc" "cpio" "file" "patch" "bzip2" "bison" "flex" "libncurses-dev")
 	for i in ${PKGS[@]}
 	do
 		apt_install_pkg $i
@@ -386,6 +405,10 @@ ubuntu_install()
 	# Maybe depends on the other command, 'make' etc
 	check_gcc_ver "apt_install_pkg" /usr/lib
 	check_libstdc_ver /usr/lib/x86_64-linux-gnu
+
+	if [ "$OS_VER" = "14.04" ]; then
+		compile_install_make4
+	fi
 }
 
 redhat_install()
@@ -397,7 +420,7 @@ redhat_install()
 	yum_install_pkg gcc-c++ g++ ask
 
 	# The name of package is same as the command
-	PKGS=("make" "rsync" "bc" "file" "which" "perl" "patch" "zip")
+	PKGS=("make" "rsync" "bc" "file" "which" "perl" "patch" "zip" "bison" "autoconf" "flex" "ncurses-devel")
 	for i in ${PKGS[@]}
 	do
 		yum_install_pkg $i

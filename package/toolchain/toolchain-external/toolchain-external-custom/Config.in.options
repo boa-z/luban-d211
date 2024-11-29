@@ -399,3 +399,6 @@ config BR2_TOOLCHAIN_EXTERNAL_CUSTOM_MUSL
 
 endchoice
 
+config BR2_TOOLCHAIN_EXTERNAL_LIBC_VER
+	depends on BR2_TOOLCHAIN_EXTERNAL_CUSTOM_GLIBC
+	string "External toolchain C library version"

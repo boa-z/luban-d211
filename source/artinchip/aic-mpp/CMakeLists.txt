@@ -19,10 +19,14 @@ endif()
 add_compile_options(-fPIC)
 
 # Debug -Wall -w
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O0 -g -DDEBUG -Wall -Werror")
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O0 -g -DDEBUG -Wall")
 
 # Release
 #set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O3 -DNDEBUG")
+
+if (LINUX_VERSION_6)
+	set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -DLINUX_VERSION_6")
+endif()
 
 # Install
 # install directories

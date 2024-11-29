@@ -25,6 +25,9 @@ ROOTFS_EXT2_OPTS = \
 	$(ROOTFS_EXT2_MKFS_OPTS)
 
 ROOTFS_EXT2_DEPENDENCIES = host-e2fsprogs
+ifeq ($(BR2_TARGET_ROOTFS_EXT2_TO_SPARSE),y)
+ROOTFS_EXT2_DEPENDENCIES = host-android-tools
+endif
 
 define ROOTFS_EXT2_CMD
 	rm -f $@
@@ -35,6 +38,17 @@ define ROOTFS_EXT2_CMD
 	     exit $$ret; \
 	}
 endef
+
+ifeq ($(BR2_TARGET_ROOTFS_EXT2_TO_SPARSE),y)
+define ROOTFS_SPARSE_CMD
+	rm -f $(BINARIES_DIR)/rootfs.sparse
+	$(HOST_DIR)/bin/img2simg $@ $(BINARIES_DIR)/rootfs.sparse \
+	|| { ret=$$?; \
+	     echo "*** ext2 image format to sparse image format failed"; \
+	     exit $$ret; \
+	}
+endef
+endif
 
 ifneq ($(BR2_TARGET_ROOTFS_EXT2_GEN),2)
 define ROOTFS_EXT2_SYMLINK

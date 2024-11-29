@@ -4,9 +4,8 @@
  * Authors:  <qi.xu@artinchip.com>
  */
 
-#include <video/artinchip_fb.h>
+struct gst_aicfb;
 
-int gst_aicfb_open();
-void gst_aicfb_close(int fd);
-int gst_aicfb_render(int fd, struct mpp_buf* buf);
-int gst_get_screeninfo(int fd, int *width, int *height);
+struct gst_aicfb* gst_aicfb_open();
+void gst_aicfb_close(struct gst_aicfb* aicfb);
+int gst_aicfb_render(struct gst_aicfb* aicfb, struct mpp_buf* buf, int buf_id);

@@ -19,7 +19,11 @@
 #include "dma_allocator.h"
 #include "mpp_log.h"
 
-#define DMABUF_DEV  "/dev/dma_heap/mpp"
+#ifdef LINUX_VERSION_6
+	#define DMABUF_DEV  "/dev/dma_heap/reserved"
+#else
+	#define DMABUF_DEV  "/dev/dma_heap/mpp"
+#endif
 
 int dmabuf_device_open()
 {
@@ -42,6 +46,7 @@ void dmabuf_device_close(int dma_fd)
 	close(dma_fd);
 }
 
+#ifndef LINUX_VERSION_6
 void dmabuf_device_destroy(int dma_fd)
 {
 	int zero;
@@ -52,6 +57,7 @@ void dmabuf_device_destroy(int dma_fd)
 	if (ioctl(dma_fd, DMA_HEAP_IOCTL_DESTROY, &zero) < 0)
 		loge("dmabuf heap destroy failed");
 }
+#endif
 
 int dmabuf_alloc(int dma_fd, int size)
 {
@@ -125,6 +131,7 @@ int dmabuf_sync(int buf_fd, enum dma_buf_sync_flag flag)
 
 int dmabuf_sync_range(int buf_fd, unsigned char* start, int size, enum dma_buf_sync_flag flag)
 {
+#ifndef LINUX_VERSION_6
 	struct dma_buf_range sync = {0};
 
 	sync.start = (unsigned long)start;
@@ -141,7 +148,8 @@ int dmabuf_sync_range(int buf_fd, unsigned char* start, int size, enum dma_buf_s
 	int ret = ioctl(buf_fd, DMA_BUF_IOCTL_SYNC_RANGE, &sync);
 	if(ret < 0)
 		loge("dmabuf_sync_range ret: %d", ret);
-	return ret;
+#endif
+	return 0;
 }
 
 static int get_info(struct mpp_buf* buf, int *comp, int *mem_size)

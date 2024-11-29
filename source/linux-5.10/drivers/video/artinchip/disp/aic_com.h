@@ -33,6 +33,11 @@ enum AIC_COM_TYPE {
 	AIC_MIPI_COM = 0x03,  /* mipi component */
 };
 
+struct panel_dbi_commands {
+	const u8 *buf;
+	size_t len;
+};
+
 struct spi_cfg {
 	unsigned int qspi_mode;
 	unsigned int vbp_num;
@@ -40,21 +45,21 @@ struct spi_cfg {
 	unsigned int code[3];
 };
 
+struct panel_dbi {
+	unsigned int type;
+	unsigned int format;
+	unsigned int first_line;
+	unsigned int other_line;
+	struct panel_dbi_commands commands;
+	struct spi_cfg *spi;
+};
+
 struct panel_rgb {
 	unsigned int mode;
 	unsigned int format;
-	union {
-		struct {
-			unsigned int clock_phase;
-			unsigned int data_order;
-			bool data_mirror;
-		} data_cfg;
-		struct {
-			unsigned int first_line;
-			unsigned int other_line;
-			struct spi_cfg *spi;
-		} fbtft_par;
-	};
+	unsigned int clock_phase;
+	unsigned int data_order;
+	bool data_mirror;
 };
 
 enum lvds_mode {
@@ -187,7 +192,7 @@ struct de_funcs {
 	int (*set_mode)(struct aic_panel *panel, struct videomode *vm);
 	int (*clk_enable)(void);
 	int (*clk_disable)(void);
-	int (*timing_enable)(void);
+	int (*timing_enable)(u32 flags);
 	int (*timing_disable)(void);
 	int (*wait_for_vsync)(void);
 	int (*shadow_reg_ctrl)(int enable);
@@ -229,7 +234,7 @@ struct aic_panel_callbacks {
 	int (*di_disable)(void);
 	int (*di_send_cmd)(u32 dt, const u8 *data, u32 len);
 	int (*di_set_videomode)(struct videomode *vm, int enable);
-	int (*timing_enable)(void);
+	int (*timing_enable)(u32 flags);
 	int (*timing_disable)(void);
 };
 
@@ -255,6 +260,7 @@ struct aic_panel {
 		struct panel_rgb *rgb;
 		struct panel_lvds *lvds;
 		struct panel_dsi *dsi;
+		struct panel_dbi *dbi;
 	};
 	void *panel_private;
 };

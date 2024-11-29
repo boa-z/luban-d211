@@ -2,22 +2,17 @@
 * Copyright (C) 2020-2023 ArtInChip Technology Co. Ltd
 *
 *  author: <jun.ma@artinchip.com>
-*  Desc: aic_message
+*  Desc: aic_player
 */
 
 #ifndef __AIC_PLAYER_H__
 #define __AIC_PLAYER_H__
 
-#include <pthread.h>
-#include <malloc.h>
-#include <string.h>
-#include <stddef.h>
-
 #include "mpp_dec_type.h"
 
 #ifdef __cplusplus
 #if __cplusplus
-extern "C"{
+extern "C" {
 #endif
 #endif /* __cplusplus */
 
@@ -84,7 +79,7 @@ s32 aic_player_stop(struct aic_player *player);
 
 s32 aic_player_get_media_info(struct aic_player *player,struct av_media_info *media_info);
 
-s32 aic_player_set_event_callback(struct aic_player *player,void* app_data,event_handler event_handle );
+s32 aic_player_set_event_callback(struct aic_player *player,void* app_data,event_handler event_handle);
 
 s32 aic_player_get_screen_size(struct aic_player *player,struct mpp_size *screen_size);
 
@@ -104,6 +99,12 @@ s32 aic_player_seek(struct aic_player *player, u64 seek_time);
 
 /* only can capture when state in pause,so call aic_player_pause before call this function */
 s32 aic_player_capture(struct aic_player *player, struct aic_capture_info *capture_info);
+
+//MPP_ROTATION_0  MPP_ROTATION_90  MPP_ROTATION_180 MPP_ROTATION_270
+
+s32 aic_player_set_rotation(struct aic_player *player, int rotation_angle);
+
+s32 aic_player_get_rotation(struct aic_player *player);
 
 #ifdef __cplusplus
 #if __cplusplus

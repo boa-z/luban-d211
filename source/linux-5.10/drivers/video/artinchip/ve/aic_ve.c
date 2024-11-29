@@ -150,28 +150,25 @@ static int disable_ve_hw_clk(struct aic_ve_ctx *ctx)
 
 static void ve_service_power_on(struct aic_ve_ctx *ctx, struct aic_ve_service *service)
 {
-	int ret;
-
-	ret = atomic_add_unless(&service->power_on, 1, 1);
-	if (!ret)
-		return;
-
+	if (service->client_count != 0) {
+		return ;
+	}
 	enable_ve_hw_clk(ctx);
+	dev_dbg(ctx->dev, "power on\n");
+	return;
 }
 
 static void ve_service_power_off(struct aic_ve_ctx *ctx, struct aic_ve_service *service)
 {
-	int ret = atomic_add_unless(&service->power_on, -1, 0);
-
-	if (!ret)
-		return;
-
-	mutex_lock(&service->lock);
-	if (service->is_running)
+	if (service->client_count != 0) {
+		return ;
+	}
+	if (service->is_running) {
 		dev_warn(ctx->dev, "power off while service is running!\n");
-	mutex_unlock(&service->lock);
-
+	}
 	disable_ve_hw_clk(ctx);
+	dev_dbg(ctx->dev, "power off\n");
+	return;
 }
 
 #ifdef CONFIG_DMA_SHARED_BUFFER
@@ -357,20 +354,18 @@ static int aic_ve_cdev_open(struct inode *inode, struct file *filp)
 	if (!client)
 		return -ENOMEM;
 
-	ve_service_power_on(ctx, service);
 	client->pid = current->pid;
-	service->client_count++;
-
 	INIT_LIST_HEAD(&client->list_client);
 	INIT_LIST_HEAD(&client->list_dma_buf);
 	mutex_init(&client->lock);
+	filp->private_data = (void *)client;
 
 	mutex_lock(&service->lock);
+	ve_service_power_on(ctx, service);
+	service->client_count++;
 	list_add_tail(&client->list_client, &service->client);
-	filp->private_data = (void *)client;
+	dev_dbg(ctx->dev, "ve client count %d pid %d open\n", service->client_count, client->pid);
 	mutex_unlock(&service->lock);
-
-	dev_dbg(ctx->dev, "ve client count %d pid %d open", service->client_count, client->pid);
 
 	return nonseekable_open(inode, filp);
 }
@@ -415,11 +410,11 @@ static int aic_ve_cdev_release(struct inode *inode, struct file *filp)
 	if (!client)
 		return -EINVAL;
 
-	dev_dbg(ctx->dev, "ve client count %d pid %d release", service->client_count, client->pid);
+	dev_dbg(ctx->dev, "ve client count %d pid %d release\n", service->client_count, client->pid);
 
+	mutex_lock(&service->lock);
 	service->client_count--;
 	ve_service_power_off(ctx, service);
-
 	// we should release ve resource, if current client crash but still
 	// occupy the resources
 	if ((service->running_pid == client->pid) && service->is_running) {
@@ -430,17 +425,17 @@ static int aic_ve_cdev_release(struct inode *inode, struct file *filp)
 		service->running_pid = -1;
 		wake_up(&service->client_wait);
 	}
+	list_del_init(&client->list_client);
+	mutex_unlock(&service->lock);
 
-	mutex_lock(&service->lock);
 #ifdef CONFIG_DMA_SHARED_BUFFER
 	// remove all the dma-bufs if the process crash
 	remove_dma_buf(ctx, client, 0, 1);
 #endif
-	list_del_init(&client->list_client);
+
 	list_del_init(&client->list_dma_buf);
 	kfree(client);
 	filp->private_data = NULL;
-	mutex_unlock(&service->lock);
 
 	return 0;
 }
@@ -783,16 +778,16 @@ static void aic_ve_shutdown(struct platform_device *pdev)
 static int aic_ve_suspend(struct device *dev)
 {
 	struct aic_ve_ctx *ctx = dev_get_drvdata(dev);
-
 	disable_ve_hw_clk(ctx);
+	dev_dbg(ctx->dev, "aic_ve_suspend\n");
 	return 0;
 }
 
 static int aic_ve_resume(struct device *dev)
 {
 	struct aic_ve_ctx *ctx = dev_get_drvdata(dev);
-
 	enable_ve_hw_clk(ctx);
+	dev_dbg(ctx->dev, "aic_ve_resume\n");
 	return 0;
 }
 

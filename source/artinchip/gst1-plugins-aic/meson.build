@@ -30,12 +30,14 @@ gstaic_sources = [
 	'gstfbsink.c',
 	'gstplugin.c',
 	'gstaicfb.c',
+	'gstmppallocator.c',
 ]
 
 gstaic_headers = [
 	'gstaicfb.h',
 	'gstvedec.h',
 	'gstfbsink.h',
+	'gstmppallocator.h',
 ]
 
 gstaic = library('gstaic',

@@ -15,6 +15,9 @@
 #include <artinchip_ve.h>
 #include <asm/arch/boot_param.h>
 #include <image.h>
+#include <mmc.h>
+#include <spi.h>
+#include <spi_flash.h>
 #include <mtd.h>
 #include <fat.h>
 #include <cpu_func.h>
@@ -27,6 +30,7 @@
 #define CONFIG_LOGO_ITB_ADDRESS	0x42400000
 #define BOOTCFG_FILE_SIZE	1024
 
+#ifdef AICFB_CPU_DRAW
 void aicfb_draw_text(uint x_frac, uint y, int value)
 {
 	struct udevice *dev;
@@ -167,6 +171,7 @@ int aic_bmp_display(struct udevice *dev, ulong bmp_image)
 
 	return 0;
 }
+#endif
 
 static int aic_logo_decode(unsigned char *dst, unsigned int size)
 {
@@ -228,7 +233,7 @@ static int fat_load_logo(const char *name)
 	/* load bootcfg file */
 	ret = fat_read_file("bootcfg.txt", (void *)file_buf, 0,
 			BOOTCFG_FILE_SIZE, &actread);
-	if (actread == 0) {
+	if (actread == 0 || ret != 0) {
 		pr_err("Error:read file bootcfg.txt failed!\n");
 		return ret;
 	}
@@ -250,7 +255,7 @@ static int fat_load_logo(const char *name)
 	/* Load logo itb */
 	ret = fat_read_file(imgname, (void *)logo_itb,
 			offset, maxsize, &actread);
-	if (actread == 0) {
+	if (actread == 0 || ret != 0) {
 		printf("Error:read file bootcfg.txt failed!\n");
 		return ret;
 	}
@@ -380,6 +385,69 @@ out:
 	return ret;
 }
 
+static int mmc_load_logo(const char *name, int id)
+{
+#ifdef CONFIG_MMC
+	struct mmc *mmc = find_mmc_device(id);
+	struct disk_partition part_info;
+	struct udevice *dev;
+	unsigned char *fit, *dst;
+	size_t data_size;
+	const void *data;
+	int ret;
+
+	ret = uclass_first_device(UCLASS_VIDEO, &dev);
+	if (ret) {
+		pr_err("Failed to find aicfb udevice\n");
+		return ret;
+	}
+
+	ret = part_get_info_by_name(mmc_get_blk_desc(mmc), "logo", &part_info);
+	if (ret < 0) {
+		pr_err("Get logo partition information failed.\n");
+		return -EINVAL;
+	}
+
+	fit = memalign(DECODE_ALIGN, part_info.blksz * part_info.size);
+	if (!fit) {
+		pr_err("Failed to malloc for fit image!\n");
+		return -ENOMEM;
+	}
+
+	ret = blk_dread(mmc_get_blk_desc(mmc), part_info.start,
+						part_info.size, fit);
+	if (ret != part_info.size) {
+		pr_err("Failed to read logo image from MMC/SD!\n");
+		ret = -EIO;
+		goto out;
+	}
+
+	ret = fit_image_get_node_prop(fit, name, &data, &data_size);
+	if (ret) {
+		pr_err("Failed to get fit image prop\n");
+		ret = -EINVAL;
+		goto out;
+	}
+
+	dst = memalign(DECODE_ALIGN, data_size);
+	if (!dst) {
+		pr_err("Failed to malloc dst buffer\n");
+		ret = -ENOMEM;
+		goto out;
+	}
+	memcpy(dst, data, data_size);
+	flush_dcache_range((uintptr_t)dst, (uintptr_t)dst + data_size);
+
+	aic_logo_decode(dst, data_size);
+out:
+	if (fit)
+		free(fit);
+	if (dst)
+		free(dst);
+#endif
+	return ret;
+}
+
 static int bootrom_load_logo(const char *name)
 {
 	const void *fit = (void *)CONFIG_LOGO_ITB_ADDRESS;
@@ -405,13 +473,80 @@ static int bootrom_load_logo(const char *name)
 	return 0;
 }
 
+static int spinor_load_logo(const char *name)
+{
+#ifdef CONFIG_DM_SPI_FLASH
+	unsigned int bus = CONFIG_SF_DEFAULT_BUS;
+	unsigned int cs = CONFIG_SF_DEFAULT_CS;
+	unsigned char *fit = NULL, *dst = NULL;
+	struct udevice *new, *bus_dev;
+	struct spi_flash *flash;
+	size_t data_size;
+	const void *data;
+	int ret;
+
+	ret = spi_find_bus_and_cs(bus, cs, &bus_dev, &new);
+	if (ret) {
+		pr_err("Failed to find a spi device\n");
+		return -EINVAL;
+	}
+	flash = dev_get_uclass_priv(new);
+
+	fit = memalign(DECODE_ALIGN, LOGO_MAX_SIZE);
+	if (!fit) {
+		printf("Failed to malloc for logo image!\n");
+		return -ENOMEM;
+	}
+
+	ret = spi_flash_read(flash, CONFIG_LOGO_PART_OFFSET, LOGO_MAX_SIZE, fit);
+	if (ret) {
+		printf("Failed to read logo image for SPINOR\n");
+		ret = -EINVAL;
+		goto out;
+	}
+
+	ret = fit_image_get_node_prop(fit, name, &data, &data_size);
+	if (ret) {
+		printf("Failed to get fit image prop\n");
+		ret = -EINVAL;
+		goto out;
+	}
+
+	dst = memalign(DECODE_ALIGN, data_size);
+	if (!dst) {
+		printf("Failed to alloc dst buf\n");
+		ret = -ENOMEM;
+		goto out;
+	}
+	memcpy(dst, data, data_size);
+	flush_dcache_range((uintptr_t)dst, (uintptr_t)dst + data_size);
+
+	aic_logo_decode(dst, data_size);
+out:
+	if (fit)
+		free(fit);
+	if (dst)
+		free(dst);
+#endif
+	return 0;
+}
+
 int aic_disp_logo(const char *name, int boot_param)
 {
 	int ret = 0;
 
 	switch (boot_param) {
+	case BD_SDMC0:
+		ret = mmc_load_logo(name, 0);
+		break;
+	case BD_SDMC1:
+		ret = mmc_load_logo(name, 1);
+		break;
 	case BD_SPINAND:
 		ret = spinand_load_logo(name);
+		break;
+	case BD_SPINOR:
+		ret = spinor_load_logo(name);
 		break;
 	case BD_SDFAT32:
 		ret = fat_load_logo(name);

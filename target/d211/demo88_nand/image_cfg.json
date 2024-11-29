@@ -13,7 +13,7 @@
 			"kernel":   { "size": "12m" },
 			"recovery": { "size": "10m" },
 			"ubiroot":  {
-				"size": "32m",
+				"size": "64m",
 				"ubi": { // Volume in UBI device
 					"rootfs": { "size": "-" },
 				},
@@ -36,7 +36,7 @@
 				"type": "spi-nand",
 				"device_id": 0,
 				"array_organization": [
-					{ "page": "4k", "block": "256k" },
+				//	{ "page": "4k", "block": "256k" },
 					{ "page": "2k", "block": "128k" },
 				],
 			}

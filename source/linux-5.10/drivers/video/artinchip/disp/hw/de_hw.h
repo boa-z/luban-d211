@@ -16,9 +16,9 @@
 #define DE_CONFIG_UPDATE_EN                   BIT(0)
 #define DE_SOFT_RESET_EN		      BIT(16)
 #define DE_RAND_DITHER_EN                     BIT(31)
-#define OUTPUT_COLOR_DEPTH_SET(r, g, b)       ((((r) & 0x3) << 16) \
-	| (((g) & 0x3) << 8) \
-	| ((b) & 0x3))
+#define OUTPUT_COLOR_DEPTH_SET(r, g, b)       ((((~r) & 0x3) << 16) \
+	| (((~g) & 0x3) << 8) \
+	| ((~b) & 0x3))
 
 #define VIDEO_LAYER_CTRL_INPUT_FORMAT_MASK    GENMASK(14, 8)
 #define VIDEO_LAYER_CTRL_INPUT_FORMAT(x)      (((x) & 0x07f) << 8)
@@ -44,6 +44,7 @@
 
 #define UI_LAYER_CTRL_INPUT_FORMAT_MASK       GENMASK(14, 8)
 #define UI_LAYER_CTRL_INPUT_FORMAT(x)         (((x) & 0x07f) << 8)
+#define UI_LAYER_CTRL_BG_BLEND_EN             BIT(21)
 #define UI_LAYER_CTRL_ALPHA_EN                BIT(2)
 #define UI_LAYER_CTRL_COLOR_KEY_EN            BIT(1)
 #define UI_LAYER_CTRL_EN                      BIT(0)
@@ -378,7 +379,8 @@ void de_config_timing(void __iomem *base_addr,
 		      u32 active_w, u32 active_h,
 		      u32 hfp, u32 hbp,
 		      u32 vfp, u32 vbp,
-		      u32 hsync, u32 vsync);
+		      u32 hsync, u32 vsync,
+		      bool h_pol, bool v_pol);
 
 void de_set_blending_size(void __iomem *base_addr,
 			  u32 active_w, u32 active_h);
