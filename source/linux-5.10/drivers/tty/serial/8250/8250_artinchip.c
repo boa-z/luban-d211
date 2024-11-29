@@ -534,25 +534,16 @@ static int aic8250_remove(struct platform_device *pdev)
 #ifdef CONFIG_PM_SLEEP
 static int aic8250_suspend(struct device *dev)
 {
-	struct clk_hw *uart_clk_hw;
 	struct aic8250_data *data = dev_get_drvdata(dev);
 
 	serial8250_suspend_port(data->data.line);
 
-	uart_clk_hw = __clk_get_hw(data->clk);
-	if (clk_hw_is_prepared(uart_clk_hw))
-		clk_disable_unprepare(data->clk);
 	return 0;
 }
 
 static int aic8250_resume(struct device *dev)
 {
-	struct clk_hw *uart_clk_hw;
 	struct aic8250_data *data = dev_get_drvdata(dev);
-
-	uart_clk_hw = __clk_get_hw(data->clk);
-	if (!clk_hw_is_prepared(uart_clk_hw))
-		clk_prepare_enable(data->clk);
 
 	serial8250_resume_port(data->data.line);
 
@@ -565,7 +556,8 @@ static int aic8250_runtime_suspend(struct device *dev)
 {
 	struct aic8250_data *data = dev_get_drvdata(dev);
 
-	clk_disable_unprepare(data->clk);
+	if (__clk_is_enabled(data->clk))
+		clk_disable_unprepare(data->clk);
 
 	return 0;
 }
@@ -574,7 +566,8 @@ static int aic8250_runtime_resume(struct device *dev)
 {
 	struct aic8250_data *data = dev_get_drvdata(dev);
 
-	clk_prepare_enable(data->clk);
+	if (!__clk_is_enabled(data->clk))
+		clk_prepare_enable(data->clk);
 
 	return 0;
 }

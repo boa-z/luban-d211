@@ -862,7 +862,6 @@ static void aic_spi_dma_cb_tx(void *data)
 	struct aic_spi *aicspi = (struct aic_spi *)data;
 
 	spi_ctlr_dma_irq_disable(FCR_BIT_TX_DMA_EN, aicspi->base_addr);
-	spi_finalize_current_transfer(aicspi->ctlr);
 }
 
 static int aic_spi_dma_rx_cfg(struct aic_spi *aicspi, struct scatterlist *sgl,
@@ -1630,7 +1629,7 @@ static int aic_spi_mem_exec_op(struct spi_mem *mem, const struct spi_mem_op *op)
 	aicspi = spi_controller_get_devdata(mem->spi->controller);
 	base_addr = aicspi->base_addr;
 
-	head_len = op->cmd.nbytes + op->addr.nbytes;
+	head_len = op->cmd.nbytes + op->addr.nbytes + op->dummy.nbytes;
 
 	tx_buf = NULL;
 	tx_dlen = 0;
@@ -1655,7 +1654,7 @@ static int aic_spi_mem_exec_op(struct spi_mem *mem, const struct spi_mem_op *op)
 					(8 * (op->addr.nbytes - i - 1));
 	}
 	if (op->dummy.nbytes)
-		memset(tx_head + head_len, 0, op->dummy.nbytes);
+		memset(tx_head + op->cmd.nbytes + op->addr.nbytes, 0, op->dummy.nbytes);
 
 	if (op->cmd.buswidth == 4)
 		mode = QPI_MODE;
@@ -1677,55 +1676,45 @@ static int aic_spi_mem_exec_op(struct spi_mem *mem, const struct spi_mem_op *op)
 	switch (mode) {
 	case SINGLE_MODE:
 		dev_dbg(aicspi->dev, "Single mode\n");
-		/*
-		 * dummy bytes is not included in (tx_total, tx_single).
-		 * dummy will be processed by spi controller.
-		 */
 		tx_single = tx_total;
 		spi_ctlr_dual_disable(base_addr);
 		spi_ctlr_quad_disable(base_addr);
-		spi_ctlr_set_xfer_cnt(base_addr, tx_total, rx_dlen, tx_single,
-				      op->dummy.nbytes);
+		spi_ctlr_set_xfer_cnt(base_addr, tx_total, rx_dlen, tx_single, 0);
 		break;
 	case DUAL_OUTPUT_MODE:
 		dev_dbg(aicspi->dev, "DUAL OUTPUT\n");
-		tx_single = op->cmd.nbytes + op->addr.nbytes;
+		tx_single = head_len;
 		spi_ctlr_quad_disable(base_addr);
 		spi_ctlr_dual_enable(base_addr);
-		spi_ctlr_set_xfer_cnt(base_addr, tx_total, rx_dlen, tx_single,
-				      op->dummy.nbytes);
+		spi_ctlr_set_xfer_cnt(base_addr, tx_total, rx_dlen, tx_single, 0);
 		break;
 	case DUAL_IO_MODE:
 		dev_dbg(aicspi->dev, "DUAL I/O\n");
 		tx_single = op->cmd.nbytes;
 		spi_ctlr_quad_disable(base_addr);
 		spi_ctlr_dual_enable(base_addr);
-		spi_ctlr_set_xfer_cnt(base_addr, tx_total, rx_dlen, tx_single,
-				      op->dummy.nbytes);
+		spi_ctlr_set_xfer_cnt(base_addr, tx_total, rx_dlen, tx_single, 0);
 		break;
 	case QUAD_OUTPUT_MODE:
 		dev_dbg(aicspi->dev, "QUAD OUTPUT\n");
-		tx_single = op->cmd.nbytes + op->addr.nbytes;
+		tx_single = head_len;//op->cmd.nbytes + op->addr.nbytes;
 		spi_ctlr_dual_disable(base_addr);
 		spi_ctlr_quad_enable(base_addr);
-		spi_ctlr_set_xfer_cnt(base_addr, tx_total, rx_dlen, tx_single,
-				      op->dummy.nbytes);
+		spi_ctlr_set_xfer_cnt(base_addr, tx_total, rx_dlen, tx_single, 0);
 		break;
 	case QUAD_IO_MODE:
 		dev_dbg(aicspi->dev, "QUAD I/O\n");
 		tx_single = op->cmd.nbytes;
 		spi_ctlr_dual_disable(base_addr);
 		spi_ctlr_quad_enable(base_addr);
-		spi_ctlr_set_xfer_cnt(base_addr, tx_total, rx_dlen, tx_single,
-				      op->dummy.nbytes);
+		spi_ctlr_set_xfer_cnt(base_addr, tx_total, rx_dlen, tx_single, 0);
 		break;
 	case QPI_MODE:
 		dev_dbg(aicspi->dev, "QPI\n");
 		tx_single = 0;
 		spi_ctlr_dual_disable(base_addr);
 		spi_ctlr_quad_enable(base_addr);
-		spi_ctlr_set_xfer_cnt(base_addr, tx_total, rx_dlen, tx_single,
-				      op->dummy.nbytes);
+		spi_ctlr_set_xfer_cnt(base_addr, tx_total, rx_dlen, tx_single, 0);
 		break;
 	}
 
@@ -1743,13 +1732,14 @@ static int aic_spi_mem_exec_op(struct spi_mem *mem, const struct spi_mem_op *op)
 		if (ret)
 			goto out;
 
-		/* FIFO mode xfer head, then enalbe dma to xfer data */
-		spi_ctlr_irq_disable(ICR_BIT_TC, base_addr);
 		spi_ctlr_start_xfer(base_addr);
 		if (head_len)
 			spi_ctlr_fifo_write(aicspi, tx_head, head_len);
 
 		if (rx_buf) {
+			/* FIFO mode xfer head, then enalbe dma to xfer data */
+			spi_ctlr_irq_disable(ICR_BIT_TC, base_addr);
+
 			spi_ctlr_dma_rx_enable(aicspi->base_addr);
 			ret = aic_spi_dma_rx_cfg(aicspi, sg.sgl, sg.nents);
 			if (ret < 0)
@@ -1784,9 +1774,11 @@ static int aic_spi_mem_exec_op(struct spi_mem *mem, const struct spi_mem_op *op)
 			spi_ctlr_fifo_read(aicspi, rx_buf, rx_dlen);
 	}
 
-	tmo = 8LL * (tx_total + rx_dlen);
+	tmo = 8LL * (tx_total + rx_dlen) * MSEC_PER_SEC;
 	do_div(tmo, mem->spi->max_speed_hz);
-	tmo += 200;
+	tmo += tmo + 200;
+	if (tmo > UINT_MAX)
+		tmo = UINT_MAX;
 	if (!wait_for_completion_timeout(&aicspi->ctlr->xfer_completion,
 					 msecs_to_jiffies(tmo))) {
 		dev_err(aicspi->dev, "wait data xfer done timeout.\n");

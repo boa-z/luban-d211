@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-# SPDX-License-Identifier: GPL-2.0+
+# SPDX-License-Identifier: Apache-2.0
 #
-# Copyright (C) 2023 ArtInChip Technology Co., Ltd
+# Copyright (C) 2023-2024 ArtInChip Technology Co., Ltd
 # Authors: xuan.wen <xuan.wen@artinchip.com>
 #
 
@@ -27,6 +27,7 @@ br2_target_userfs_ext4_max_size = [
 userfs_num = 0
 rootfs_num = 0
 
+
 def load_fs_max_size(media_type, data, pt_name, pt_size):
     global userfs_num
     if media_type == "spi-nand":
@@ -50,11 +51,13 @@ def load_fs_max_size(media_type, data, pt_name, pt_size):
                 print("{}".format(parse_num_to_text(pt_size)))
             userfs_num += 1
 
+
 def parse_image_cfg(cfgfile):
     """ Load image configuration file
     Args:
         cfgfile: Configuration file name
     """
+
     with open(cfgfile, "r") as f:
         lines = f.readlines()
         jsonstr = ""
@@ -64,13 +67,14 @@ def parse_image_cfg(cfgfile):
                 continue
             slash_start = sline.find("//")
             if slash_start > 0:
-                jsonstr += sline[0:slash_start]
+                jsonstr += sline[0:slash_start].strip()
             else:
                 jsonstr += sline
         # Use OrderedDict is important, we need to iterate FWC in order.
         jsonstr = jsonstr.replace(",}", "}").replace(",]", "]")
         cfg = json.loads(jsonstr, object_pairs_hook=OrderedDict)
     return cfg
+
 
 def parse_text_to_num(size_str):
     if "k" in size_str or "K" in size_str:
@@ -86,11 +90,13 @@ def parse_text_to_num(size_str):
         return int(size_str, 16)
     return 0
 
-# round down: 0x4800000 to 72m
+
 def parse_num_to_text(num):
-    mnum = int(num / 1024 /1024)
+    # round down: 0x4800000 to 72m
+    mnum = int(num / 1024 / 1024)
     mnum_str = '{}m\n'.format(mnum)
     return mnum_str
+
 
 def aic_auto_calculate_part_config(cfg, data):
     global rootfs_num
@@ -170,6 +176,7 @@ def aic_auto_calculate_part_config(cfg, data):
         print("Not supported media type: {}".format(media_type))
         sys.exit(1)
     return
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

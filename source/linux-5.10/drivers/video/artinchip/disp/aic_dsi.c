@@ -22,7 +22,7 @@
 #include "hw/dsi_reg.h"
 #include "hw/reg_util.h"
 #include <video/mipi_display.h>
-#include "aic_com.h"
+#include "aic_fb.h"
 
 #define LANES_MAX_NUM	4
 #define LN_ASSIGN_WIDTH	4
@@ -162,7 +162,7 @@ static int aic_dsi_enable(void)
 
 	dsi_set_clk_div(comp->regs, comp->sclk_rate);
 	dsi_pkg_init(comp->regs);
-	dsi_phy_init(comp->regs, comp->sclk_rate, dsi->lane_num);
+	dsi_phy_init(comp->regs, comp->sclk_rate, dsi->lane_num, dsi->mode);
 	dsi_hs_clk(comp->regs, 1);
 
 	aic_dsi_release_drvdata();

@@ -94,6 +94,12 @@
 			};
 		};
 	};
+
+	key_button: adc-keys {
+		compatible = "adc-keys";
+		keyup-threshold-microvolt = <3000000>;
+	};
+
 	cpus {
 		#address-cells = <1>;
 		#size-cells = <0>;
@@ -726,6 +732,7 @@
 			interrupts-extended = <&plic0 84 IRQ_TYPE_LEVEL_HIGH>;
 			clocks = <&cmu CLK_I2C0>;
 			resets = <&rst RESET_I2C0>;
+			i2c-sda-hold-time-ns = <700>;
 			#address-cells = <1>;
 			#size-cells = <0>;
 			status = "disabled";
@@ -737,6 +744,7 @@
 			interrupts-extended = <&plic0 85 IRQ_TYPE_LEVEL_HIGH>;
 			clocks = <&cmu CLK_I2C1>;
 			resets = <&rst RESET_I2C1>;
+			i2c-sda-hold-time-ns = <700>;
 			#address-cells = <1>;
 			#size-cells = <0>;
 			status = "disabled";
@@ -748,6 +756,7 @@
 			interrupts-extended = <&plic0 86 IRQ_TYPE_LEVEL_HIGH>;
 			clocks = <&cmu CLK_I2C2>;
 			resets = <&rst RESET_I2C2>;
+			i2c-sda-hold-time-ns = <700>;
 			#address-cells = <1>;
 			#size-cells = <0>;
 			status = "disabled";
@@ -759,6 +768,7 @@
 			interrupts-extended = <&plic0 87 IRQ_TYPE_LEVEL_HIGH>;
 			clocks = <&cmu CLK_I2C3>;
 			resets = <&rst RESET_I2C3>;
+			i2c-sda-hold-time-ns = <700>;
 			#address-cells = <1>;
 			#size-cells = <0>;
 			status = "disabled";
@@ -806,6 +816,18 @@
 			status = "disabled";
 		};
 
+		cap: cap@18201000 {
+			compatible = "artinchip,aic-cap-v1.0";
+			reg = <0x0 0x18201000 0x0 0x300>, <0 0x1820F000 0x0 0x1000>;
+			interrupts-extended = <&plic0 26 IRQ_TYPE_LEVEL_HIGH>;
+			#pwm-cells = <3>;
+			clocks = <&cmu CLK_PWMCS>, <&cmu CLK_PLL_INT1>;
+			clock-names = "pwmcs", "sysclk";
+			resets = <&rst RESET_PWMCS>;
+			clock-rate = <200000000>;
+			status = "disabled";
+		};
+
 		cir: cir@19260000 {
 			compatible = "artinchip,aic-cir-v1.0";
 			reg = <0x0 0x19260000 0x0 0x400>;
@@ -848,6 +870,9 @@
 			clock-names = "lvds0", "sclk";
 			resets = <&rst RESET_LVDS>;
 			reset-names = "lvds0";
+			pols = <0x0>, <0x0>;
+			lanes = <0x43210>, <0x43210>;
+			pctrl = <0xFA>, <0xFA>;
 			status = "disabled";
 		};
 

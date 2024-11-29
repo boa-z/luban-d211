@@ -217,6 +217,7 @@ struct artinchip_mmc {
 	u32			sample_delay;
 	u32			driver_phase;
 	u32			driver_delay;
+	u32			power_gpio;
 };
 
 /* DMA ops for Internal/External DMAC interface */

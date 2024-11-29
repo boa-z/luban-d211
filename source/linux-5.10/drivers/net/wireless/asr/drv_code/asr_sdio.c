@@ -1324,6 +1324,7 @@ static const struct sdio_device_id asr_sdio_ids[] = {
 #endif
 	{},
 };
+MODULE_DEVICE_TABLE(sdio, asr_sdio_ids);
 
 #ifdef CONFIG_PM
 

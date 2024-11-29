@@ -976,16 +976,33 @@ static const struct snd_soc_component_driver aic_cpu_component = {
 	.name = "aic-codec-comp",
 };
 
+static const struct snd_pcm_hardware aic_codec_pcm_hardware = {
+	.info			= SNDRV_PCM_INFO_MMAP | SNDRV_PCM_INFO_MMAP_VALID |
+					SNDRV_PCM_INFO_INTERLEAVED,
+	.buffer_bytes_max	= 128 * 1024,
+	.period_bytes_max	= 64 * 1024,
+	.period_bytes_min	= 256,
+	.periods_max		= 255,
+	.periods_min		= 2,
+	.fifo_size		= 0,
+};
+
+static const struct snd_dmaengine_pcm_config aic_codec_dmaengine_pcm_config = {
+	.pcm_hardware = &aic_codec_pcm_hardware,
+	.prepare_slave_config = snd_dmaengine_pcm_prepare_slave_config,
+	.prealloc_buffer_size = 128 * 1024,
+};
+
 static int aic_codec_spk_event(struct snd_soc_dapm_widget *w,
 					struct snd_kcontrol *k, int event)
 {
-
-	if (SND_SOC_DAPM_EVENT_ON(event) && !IS_ERR_OR_NULL(gpiod_pa))
+	if (SND_SOC_DAPM_EVENT_ON(event) && !IS_ERR_OR_NULL(gpiod_pa)) {
+		msleep(20);
 		gpiod_set_value(gpiod_pa, 1);
-	else if (SND_SOC_DAPM_EVENT_OFF(event) && !IS_ERR_OR_NULL(gpiod_pa))
+		msleep(100);
+	} else if (SND_SOC_DAPM_EVENT_OFF(event) && !IS_ERR_OR_NULL(gpiod_pa)) {
 		gpiod_set_value(gpiod_pa, 0);
-
-	msleep(100);
+	}
 
 	return 0;
 }
@@ -1017,6 +1034,7 @@ static struct snd_soc_dai_link aic_codec_dai_link[] = {
 		.stream_name = "dmic-pcm",
 		.dai_fmt = SND_SOC_DAIFMT_I2S,
 		SND_SOC_DAILINK_REG(dmic_path),
+		.ignore_pmdown_time = 1,
 	},
 #ifdef CONFIG_SND_SOC_AIC_CODEC_V1
 	{
@@ -1122,6 +1140,11 @@ static int aic_codec_probe(struct platform_device *pdev)
 	struct aic_codec *codec;
 	void __iomem *base;
 	int ret;
+	struct device_node *np = pdev->dev.of_node;
+
+	if (of_find_property(np, "ignore-pmdown-time", NULL) != NULL) {
+		aic_codec_dai_link[0].ignore_pmdown_time = 0;
+	}
 
 	codec = devm_kzalloc(&pdev->dev, sizeof(*codec), GFP_KERNEL);
 	if (!codec)
@@ -1197,7 +1220,8 @@ static int aic_codec_probe(struct platform_device *pdev)
 		return ret;
 	}
 
-	ret = devm_snd_dmaengine_pcm_register(&pdev->dev, NULL, 0);
+	ret = devm_snd_dmaengine_pcm_register(&pdev->dev,
+						&aic_codec_dmaengine_pcm_config, 0);
 	if (ret) {
 		dev_err(&pdev->dev, "Failed to register dmaengine\n");
 		return ret;

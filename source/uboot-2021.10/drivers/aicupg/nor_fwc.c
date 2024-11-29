@@ -51,6 +51,7 @@ static s32 nor_fwc_get_mtd_partitions(struct fwc_info *fwc,
 {
 	char name[MAX_NOR_NAME], *p;
 	int cnt, idx;
+	struct mtd_info *mtd;
 
 	p = fwc->meta.partition;
 	cnt = 0;
@@ -66,13 +67,14 @@ static s32 nor_fwc_get_mtd_partitions(struct fwc_info *fwc,
 		cnt++;
 		if (*p == ';' || *p == '\0') {
 			name[cnt] = '\0';
-			priv->mtds[idx] = get_mtd_device_nm(name);
+			mtd = get_mtd_device_nm(name);
 			/*Erase address init value is 0x0*/
-			priv->erased_address[idx] = 0x0;
-			if (IS_ERR_OR_NULL(priv->mtds[idx])) {
+			if (IS_ERR_OR_NULL(mtd)) {
 				pr_err("Get mtd %s failed.\n", name);
 				return -1;
 			}
+			priv->erased_address[idx] = 0x0;
+			priv->mtds[idx] = mtd;
 			idx++;
 			cnt = 0;
 		}
@@ -195,13 +197,12 @@ void nor_fwc_start(struct fwc_info *fwc)
 		spi_enc_tweak_select(AIC_SPIENC_HW_TWEAK);
 #endif
 	fwc->block_size = mtd->writesize;
-	fwc->burn_result = 0;
-	fwc->run_result = 0;
 	debug("%s, FWC name %s\n", __func__, fwc->meta.name);
 	return;
 err:
 	pr_err("error:free(priv)\n");
 	free(priv);
+	fwc->priv = NULL;
 }
 
 /*
@@ -220,8 +221,10 @@ s32 nor_fwc_data_write(struct fwc_info *fwc, u8 *buf, s32 len)
 	size_t retlen;
 	u8 *rdbuf;
 
-	rdbuf = valloc(len);
 	priv = (struct aicupg_nor_priv *)fwc->priv;
+	if (!priv)
+		return 0;
+	rdbuf = valloc(len);
 	for (i = 0; i < MAX_DUPLICATED_PART; i++) {
 		mtd = priv->mtds[i];
 		if (!mtd)
@@ -259,7 +262,10 @@ s32 nor_fwc_data_write(struct fwc_info *fwc, u8 *buf, s32 len)
 		priv->offs[i] = offset + retlen;
 	}
 
-	calc_len = len;
+	if ((fwc->meta.size - fwc->trans_size) < len)
+		calc_len = fwc->meta.size - fwc->trans_size;
+	else
+		calc_len = len;
 
 	fwc->calc_partition_crc = crc32(fwc->calc_partition_crc, rdbuf, calc_len);
 #ifdef CONFIG_AICUPG_SINGLE_TRANS_BURN_CRC32_VERIFY
@@ -271,8 +277,6 @@ s32 nor_fwc_data_write(struct fwc_info *fwc, u8 *buf, s32 len)
 				fwc->calc_trans_crc, fwc->calc_partition_crc);
 	}
 #endif
-	fwc->burn_result = 0;
-	fwc->run_result = 0;
 	fwc->trans_size += len;
 	debug("%s, data len %d, trans len %d\n", __func__, len, fwc->trans_size);
 
@@ -289,6 +293,8 @@ s32 nor_fwc_data_read(struct fwc_info *fwc, u8 *buf, s32 len)
 	size_t retlen;
 
 	priv = (struct aicupg_nor_priv *)fwc->priv;
+	if (!priv)
+		return 0;
 	mtd = priv->mtds[0];
 	if (!mtd)
 		return 0;
@@ -301,8 +307,6 @@ s32 nor_fwc_data_read(struct fwc_info *fwc, u8 *buf, s32 len)
 	}
 	priv->offs[0] = offset + retlen;
 
-	fwc->burn_result = 0;
-	fwc->run_result = 0;
 	fwc->trans_size += len;
 	fwc->calc_partition_crc = fwc->meta.crc;
 	debug("%s, data len %d, trans len %d\n", __func__, len, fwc->trans_size);

@@ -23,6 +23,11 @@ define QTLAUNCHER_INSTALL_TARGET_CMDS
 
 	$(INSTALL) -m 0755 -D package/artinchip/qtlauncher/S99qtlauncher \
 		$(TARGET_DIR)/etc/init.d/S99qtlauncher
+
+	mkdir -p $(TARGET_DIR)/usr/local/launcher/h264/
+	$(INSTALL) -m 0644 package/artinchip/qtlauncher/h264/* \
+		$(TARGET_DIR)/usr/local/launcher/h264/
+
 endef
 
 $(eval $(qmake-package))

@@ -60,7 +60,33 @@
 
 #define RTC_CAL1_FAST_DIR		BIT(7)
 
+#define RTC_ANA0_RC1M_ISEL		BIT(7)
+#define RTC_ANA0_RC1M_EN		BIT(6)
+#define RTC_ANA0_LDO18_BYPASS		BIT(4)
+#define RTC_ANA0_LDO18_VOL_MASK		GENMASK(3, 1)
+#define RTC_ANA0_LDO18_VOL_SHIFT	(1)
+#define RTC_ANA0_LDO18_EN		BIT(0)
+
+#define RTC_ANA0_LDO18_VOL_120		7
+
+#define RTC_ANA1_PD_CUR_SEL_MASK	GENMASK(6, 5)
+#define RTC_ANA1_PD_CUR_SEL_SHIFT	(5)
+#define RTC_ANA1_PD_CUR_EN		BIT(4)
+#define RTC_ANA1_LDO11_VOL_MASK		GENMASK(3, 1)
+#define RTC_ANA1_LDO11_VOL_SHIFT	(1)
+#define RTC_ANA1_LDO11_LPEN		BIT(0)
+
+#define RTC_ANA1_PD_CUR_SEL_025		0
+#define RTC_ANA1_PD_CUR_SEL_050		1
+#define RTC_ANA1_PD_CUR_SEL_075		2
+#define RTC_ANA1_PD_CUR_SEL_100		3
+
+#define RTC_ANA1_LDO11_VOL_090		4
+#define RTC_ANA1_LDO11_VOL_080		6
+
 #define RTC_ANA2_XTAL32K_DRV_MASK	GENMASK(3, 0)
+
+#define RTC_ANA3_XTAL32K_EN		BIT(0)
 
 #define RTC_32K_DET_EN			BIT(0)
 
@@ -115,7 +141,7 @@ static enum aic_reboot_reason g_prev_reason = REBOOT_REASON_INVALID;
 static DEFINE_SPINLOCK(user_lock);
 
 static char *reason[] = {"Cold Reboot", "CMD Reboot", "CMD Shutdown",
-			 "Suspend", "Upgrade", "Fastboot", "", "",
+			 "Suspend", "Upgrade", "U-Boot Upgrade", "", "",
 			 "SW Lockup", "Hw Lockup", "Panic", "Ramdump",
 			 "", "", "", ""};
 
@@ -192,8 +218,16 @@ static DEVICE_ATTR_RO(status);
 
 static void aic_rtc_low_power(void __iomem *base)
 {
-	RTC_WRITEB(0x4f, RTC_REG_ANALOG0, base);
-	RTC_WRITEB(0x4d, RTC_REG_ANALOG1, base);
+	u8 val = 0;
+
+	val |= RTC_ANA0_RC1M_EN | RTC_ANA0_LDO18_EN;
+	val |= RTC_ANA0_LDO18_VOL_120 << RTC_ANA0_LDO18_VOL_SHIFT;
+	RTC_WRITEB(val, RTC_REG_ANALOG0, base);
+
+	val = RTC_ANA1_PD_CUR_SEL_075 << RTC_ANA1_PD_CUR_SEL_SHIFT;
+	val |= RTC_ANA1_LDO11_VOL_090 << RTC_ANA1_LDO11_VOL_SHIFT;
+	val |= RTC_ANA1_LDO11_LPEN;
+	RTC_WRITEB(val, RTC_REG_ANALOG1, base);
 }
 
 static void aic_rtc_set_32k_drv(void __iomem *base, u8 drv)
@@ -245,10 +279,15 @@ static ssize_t aicupg_store(struct device *dev,
 			    struct device_attribute *devattr,
 			    const char *buf, size_t count)
 {
-	if (strlen(buf) != 2 || strncmp(buf, "1", 1))
-		dev_info(dev, "Invalid argument: %s\n", buf);
-	else
+	if (strlen(buf) == 2 && !strncmp(buf, "1", 1)) {
+		/* Goto BROM upgmode */
 		aic_set_software_reboot_reason(REBOOT_REASON_UPGRADE);
+	} else if (strlen(buf) == 2 && !strncmp(buf, "2", 1)) {
+		/* Goto U-Boot upgmode */
+		aic_set_software_reboot_reason(REBOOT_REASON_BL_UPGRADE);
+	} else {
+		dev_info(dev, "Invalid argument: %s\n", buf);
+	}
 	return count;
 }
 static DEVICE_ATTR_WO(aicupg);

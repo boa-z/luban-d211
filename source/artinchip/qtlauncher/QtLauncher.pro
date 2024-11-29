@@ -56,6 +56,11 @@ SOURCES += main.cpp\
     views/aicimageview.cpp \
     views/aicscaleview.cpp \
     views/aicrtpview.cpp \
+    views/aicvideoview.cpp \
+    video/aicdecodethread.cpp \
+    video/aicrenderthread.cpp \
+    video/aicvideothread.cpp \
+    video/aicimagedecoder.cpp \
     views/aicdashboardview.cpp
 
 
@@ -78,6 +83,11 @@ HEADERS  += mainwindow.h \
     views/aicscaleview.h \
     utils/aicconsts.h \
     views/aicrtpview.h \
+    views/aicvideoview.h \
+    video/aicdecodethread.h \
+    video/aicrenderthread.h \
+    video/aicvideothread.h \
+    video/aicimagedecoder.h \
     views/aicdashboardview.h
 
 DISTFILES += \

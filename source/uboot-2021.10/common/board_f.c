@@ -59,6 +59,7 @@
 #ifdef CONFIG_ARCH_ARTINCHIP
 #include <asm/arch/boot_param.h>
 #endif
+#include <log_buf.h>
 
 /*
  * Pointer to initial global data area
@@ -349,7 +350,11 @@ static int setup_dest_addr(void)
 #endif
 	gd->ram_top = gd->ram_base + get_effective_memsize();
 	gd->ram_top = board_get_usable_ram_top(gd->mon_len);
+#ifdef CONFIG_DRAM_TAIL_RESERVE_SIZE
+	gd->relocaddr = gd->ram_top - CONFIG_DRAM_TAIL_RESERVE_SIZE;
+#else
 	gd->relocaddr = gd->ram_top;
+#endif
 	debug("Ram top: %08lX\n", (ulong)gd->ram_top);
 #if defined(CONFIG_MP) && (defined(CONFIG_MPC86xx) || defined(CONFIG_E500))
 	/*
@@ -955,6 +960,7 @@ void board_init_f(ulong boot_flags)
 	gd->flags = boot_flags;
 	gd->have_console = 0;
 
+	log_buf_init();
 #ifdef CONFIG_ARTINCHIP_DEBUG_BOOT_TIME
 	u32 *p = (u32 *)BOOT_TIME_UBOOT_START;
 	/* U-Boot start time */

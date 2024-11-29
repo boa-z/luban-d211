@@ -114,33 +114,7 @@ if(DEFINED CMAKE_INSTALL_FULL_LIBDIR)
 endif() # CMAKE_INSTALL_FULL_LIBDIR
 
 ############################### ge_test #######################################
-add_definitions(-DDATADIR="${CMAKE_INSTALL_FULL_DATAROOTDIR}/ge_data")
-
-file(GLOB APP_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/ge_*.c)
-foreach(sourcefile ${APP_SOURCES})
-	file(RELATIVE_PATH filename ${CMAKE_CURRENT_SOURCE_DIR} ${sourcefile})
-	string( REPLACE ".c" "" file ${filename} )
-	list (APPEND bin ${file})
-	add_executable(${file} ${filename})
-	target_link_libraries(${file} mpp_ge)
-	if(${file} STREQUAL "ge_rotate")
-		target_link_libraries(${file} m)
-	endif()
-	set_target_properties(${file} PROPERTIES INSTALL_RPATH "/usr/local/lib")
-endforeach(sourcefile ${APP_SOURCES})
-
-if(DEFINED CMAKE_INSTALL_FULL_LIBDIR)
-	foreach(binfile ${bin})
-		install(TARGETS ${binfile}
-			RUNTIME DESTINATION "${CMAKE_INSTALL_FULL_BINDIR}")
-	endforeach(binfile ${bin})
-endif() # CMAKE_INSTALL_FULL_LIBDIR
-
-if(DEFINED CMAKE_INSTALL_FULL_DATAROOTDIR)
-	install(DIRECTORY ge_data/
-		DESTINATION ${CMAKE_INSTALL_FULL_DATAROOTDIR}/ge_data)
-endif() # CMAKE_INSTALL_FULL_DATAROOTDIR
-
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/ge_test)
 ############################### vegede_test #######################################
 add_executable(vegede_test ve_ge_de_test.c)
 
@@ -195,3 +169,20 @@ set_target_properties(mpp_video_test PROPERTIES INSTALL_RPATH "/usr/local/lib")
 if(DEFINED CMAKE_INSTALL_FULL_LIBDIR)
     install(TARGETS mpp_video_test RUNTIME DESTINATION "${CMAKE_INSTALL_FULL_BINDIR}")
 endif() # CMAKE_INSTALL_FULL_LIBDIR
+
+############################### CCM_GAMMA #######################################
+execute_process(
+    COMMAND uname -r
+    OUTPUT_VARIABLE KERNEL_VERSION
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+)
+
+if("${KERNEL_VERSION}" STREQUAL "6.6")
+    add_executable(ccm_gamma ccm_gamma_test.c)
+    if(DEFINED CMAKE_INSTALL_FULL_LIBDIR)
+        install(TARGETS ccm_gamma RUNTIME DESTINATION "${CMAKE_INSTALL_FULL_BINDIR}")
+    endif()
+else()
+    message(STATUS "kernel version is 5.10")
+endif()
+

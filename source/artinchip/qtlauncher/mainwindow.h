@@ -1,3 +1,9 @@
+/*
+ * Copyright (C) 2024 ArtInChip Technology Co. Ltd
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 #ifndef MAINWINDOW_H
 #define MAINWINDOW_H
 
@@ -5,6 +11,7 @@
 #include <QVBoxLayout>
 #include <QStackedWidget>
 #include <QPoint>
+#include <QTimer>
 
 #include "aicbasewindow.h"
 #include "widgets/aicnavigationbar.h"
@@ -20,6 +27,7 @@
 #include "views/aicscaleview.h"
 #include "views/aicrtpview.h"
 #include "views/aicdashboardview.h"
+#include "views/aicvideoview.h"
 
 
 #define M_DEMO_MODE_NORMAL 0
@@ -46,6 +54,7 @@ private:
     void slideToLeft();
     void initSmallWindow(int width, int height);
     void switchView(QWidget *newWidget);
+    void checkMenuVideoStatus();
 
 
 protected slots:
@@ -65,6 +74,7 @@ protected slots:
     void onBtnAnim1Clicked();
     void onBtnAnim2Clicked();
     void onBtnAnim3Clicked();
+    void onVideoTimeout();
 
 private:
     QStackedWidget *mStackedWidget;
@@ -91,6 +101,8 @@ private:
     AiCCentralView *mCentralView;
     AiCBriefView *mBriefView;
     AiCRtpView *mRtpView;
+    AiCVideoView *mVideoView;
+    QTimer *mVideoTimer;
 
     int mDemoMode;
 

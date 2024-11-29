@@ -1,3 +1,9 @@
+/*
+ * Copyright (C) 2024 ArtInChip Technology Co. Ltd
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 #include "mainwindow.h"
 #include "aicbasewindow.h"
 #include "utils/aicconsts.h"
@@ -182,10 +188,56 @@ void MainWindow:: onBtnMusicClicked()
     qDebug() << __func__;
 }
 
+#ifdef QTLAUNCHER_GE_SUPPORT
+void MainWindow:: onBtnVideoClicked()
+{
+    QWidget *currentWidget = new AiCVideoView(QSize(AIC_CENTRAL_VIEW_WIDTH,AIC_CENTRAL_VIEW_HEIGHT));
+
+    switchView(currentWidget);
+    mVideoView = (AiCVideoView *)currentWidget;
+
+    mNavBar->disableMenu(true);
+
+    mVideoTimer = new QTimer(this);
+    mVideoTimer->setSingleShot(true);
+    mVideoTimer->setInterval(200);
+    connect(mVideoTimer, SIGNAL(timeout()), SLOT(onVideoTimeout()));
+    mVideoTimer->start();
+}
+
+void MainWindow::onVideoTimeout()
+{
+    QWidget *curWidget = mStackedWidget->currentWidget();
+    AiCVideoView *videoView = (AiCVideoView *)curWidget == mVideoView ? mVideoView : NULL;
+
+    if (videoView) {
+        videoView->geBgFill();
+        videoView->geBtnBlt();
+    }
+
+    mVideoTimer->deleteLater();
+    mVideoTimer = NULL;
+}
+#else /* QTLAUNCHER_GE_SUPPORT */
 void MainWindow:: onBtnVideoClicked()
 {
     qDebug() << __func__;
+
+    mVideoTimer = new QTimer(this);
+    mVideoTimer->setSingleShot(true);
+    mVideoTimer->setInterval(20);
+    connect(mVideoTimer, SIGNAL(timeout()), SLOT(onVideoTimeout()));
+    mVideoTimer->start();
 }
+
+void MainWindow::onVideoTimeout()
+{
+    qDebug() << __func__;
+
+    mVideoTimer->deleteLater();
+    mVideoTimer = NULL;
+}
+#endif
 
 void MainWindow:: onBtnRTPClicked()
 {
@@ -242,10 +294,21 @@ void MainWindow:: switchView(QWidget *newWidget)
     mStackedWidget->removeWidget(oldWidget);
     mStackedWidget->insertWidget(2,newWidget);
     mStackedWidget->setCurrentIndex(2);
+    mNavBar->disableMenu(false);
 
     if(oldWidget != NULL){
         delete oldWidget;
         oldWidget = NULL;
+    }
+}
+
+void MainWindow::checkMenuVideoStatus()
+{
+    QWidget *oldWidget = mStackedWidget->currentWidget();
+
+    if (oldWidget == (QWidget *)mVideoView) {
+        mVideoView->videoStop();
+        mNavBar->disableMenu(false);
     }
 }
 
@@ -256,11 +319,21 @@ void MainWindow::onMenuClicked()
 
 void MainWindow::onHomeClicked()
 {
+    if (mVideoTimer && mVideoTimer->isActive())
+        mVideoTimer->stop();
+
+    checkMenuVideoStatus();
+
     mStackedWidget->setCurrentIndex(1);
 }
 
 void MainWindow::onBackClicked()
 {
+    if (mVideoTimer && mVideoTimer->isActive())
+        mVideoTimer->stop();
+
+    checkMenuVideoStatus();
+
     mStackedWidget->setCurrentIndex(1);
 }
 
@@ -284,7 +357,7 @@ void MainWindow::mouseReleaseEvent(QMouseEvent *event)
 {
     if(mDemoMode == M_DEMO_MODE_RTP_WINDOW)
         return;
-    
+
     QPoint distance = event->pos() - mStartPoint;
     if ((abs(distance.x()) >= width()/8) && (distance.x() > 0)) {
         slideToRight();

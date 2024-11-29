@@ -95,8 +95,6 @@ void mmc_fwc_start(struct fwc_info *fwc)
 
 	pr_debug("%s, FWC name %s\n", __func__, fwc->meta.name);
 	fwc->block_size = MMC_BLOCK_SIZE;
-	fwc->burn_result = 0;
-	fwc->run_result = 0;
 	priv = malloc(sizeof(struct aicupg_mmc_priv));
 	if (!priv)
 		goto err;
@@ -120,6 +118,7 @@ void mmc_fwc_start(struct fwc_info *fwc)
 err:
 	if (priv)
 		free(priv);
+	fwc->priv = NULL;
 }
 
 s32 mmc_fwc_sparse_write(struct fwc_info *fwc, u8 *buf, s32 len)
@@ -138,18 +137,18 @@ s32 mmc_fwc_sparse_write(struct fwc_info *fwc, u8 *buf, s32 len)
 	u32 *fill_buf, fill_val, fill_buf_num_blks;
 	int i, j, break_flag = 0;
 
+	priv = (struct aicupg_mmc_priv *)fwc->priv;
+	if (!priv) {
+		pr_err("MMC FWC get priv failed.\n");
+		return 0;
+	}
+
 	wbuf = malloc(ROUNDUP(len + MMC_BLOCK_SIZE, fwc->block_size));
 	if (!wbuf) {
 		pr_err("malloc failed.\n");
 		return 0;
 	}
 	p = wbuf;
-
-	priv = (struct aicupg_mmc_priv *)fwc->priv;
-	if (!priv) {
-		pr_err("MMC FWC get priv failed.\n");
-		goto out;
-	}
 
 	if (priv->remain_len > 0) {
 		memcpy(wbuf, priv->remain_data, priv->remain_len);
@@ -198,17 +197,11 @@ s32 mmc_fwc_sparse_write(struct fwc_info *fwc, u8 *buf, s32 len)
 		/* Read and skip over chunk header */
 		cheader = (chunk_header_t *)wbuf;
 
-		if (cheader->chunk_type != CHUNK_TYPE_RAW) {
-			pr_debug("=== Chunk Header ===\n");
-			pr_debug("chunk_type: 0x%x\n", cheader->chunk_type);
-			pr_debug("chunk_data_sz: 0x%x\n", cheader->chunk_sz);
-			pr_debug("total_size: 0x%x\n", cheader->total_sz);
-		}
-
 		if (cheader->chunk_type != CHUNK_TYPE_RAW &&
 				cheader->chunk_type != CHUNK_TYPE_FILL &&
 				cheader->chunk_type != CHUNK_TYPE_DONT_CARE &&
-				cheader->chunk_type != CHUNK_TYPE_CRC32) {
+				cheader->chunk_type != CHUNK_TYPE_CRC32 &&
+				priv->cur_chunk_remain_data_sz) {
 			cheader = &(priv->chunk_header);
 			chunk_data_sz = priv->cur_chunk_remain_data_sz;
 		} else {
@@ -228,6 +221,14 @@ s32 mmc_fwc_sparse_write(struct fwc_info *fwc, u8 *buf, s32 len)
 			chunk_data_sz = ((u64)sheader->blk_sz) * cheader->chunk_sz;
 			priv->cur_chunk_remain_data_sz = chunk_data_sz;
 			priv->cur_chunk_burned_data_sz = 0;
+			pr_debug("=== Chunk Header ===\n");
+			pr_debug("chunk_type: 0x%x\n", cheader->chunk_type);
+			pr_debug("chunk_size: 0x%x\n", cheader->chunk_sz);
+			pr_debug("total_size: 0x%x\n", cheader->total_sz);
+			pr_debug("=== Chunk DEBUG ===\n");
+			pr_debug("chunk_id: %u\t", chunk);
+			pr_debug("chunk_offset: %u\t", fwc->trans_size + clen);
+			pr_debug("chunk_number: %u\n", cheader->total_sz - sheader->chunk_hdr_sz);
 		}
 
 
@@ -272,7 +273,7 @@ s32 mmc_fwc_sparse_write(struct fwc_info *fwc, u8 *buf, s32 len)
 			total_blocks += blks;
 			wbuf += blks * MMC_BLOCK_SIZE;
 			clen += blks * MMC_BLOCK_SIZE;
-			if (priv->cur_chunk_remain_data_sz > 0 && (remain > 0 && remain < MMC_BLOCK_SIZE))
+			if ((priv->cur_chunk_remain_data_sz > 0 && (remain > 0 && remain < MMC_BLOCK_SIZE)) || remain < sizeof(chunk_header_t))
 				break_flag = 1;
 			break;
 
@@ -293,6 +294,10 @@ s32 mmc_fwc_sparse_write(struct fwc_info *fwc, u8 *buf, s32 len)
 			wbuf = (char *)wbuf + sizeof(uint32_t);
 			clen += sizeof(uint32_t);
 			remain -= sizeof(uint32_t);
+			if (remain < sizeof(chunk_header_t))
+				break_flag = 1;
+
+			pr_debug("FILL with \t 0x%08x\n", fill_val);
 
 			if (priv->blkstart + chunk_blkcnt > part_info->size) {
 				pr_err("Request would exceed partition size!\n");
@@ -377,11 +382,12 @@ s32 mmc_fwc_sparse_write(struct fwc_info *fwc, u8 *buf, s32 len)
 	}
 
 	priv->remain_len = remain;
+	priv->cur_chunk = chunk;
 	if (priv->remain_len) {
-		priv->cur_chunk = chunk;
 		memcpy(priv->remain_data, wbuf, priv->remain_len);
 	}
 
+	fwc->calc_partition_crc = fwc->meta.crc;
 	fwc->trans_size += clen;
 
 	pr_debug("%s, data len %d, trans len %d\n", __func__, len, fwc->trans_size);
@@ -401,13 +407,17 @@ s32 mmc_fwc_raw_write(struct fwc_info *fwc, u8 *buf, s32 len)
 	s32 clen = 0, calc_len;
 	long n;
 
-	rdbuf = malloc(len);
 	priv = (struct aicupg_mmc_priv *)fwc->priv;
 	if (!priv) {
 		pr_err("MMC FWC get priv failed.\n");
-		goto out;
+		return 0;
 	}
 
+	rdbuf = malloc(len);
+	if (!rdbuf) {
+		pr_err("Error: malloc buffer failed.\n");
+		goto out;
+	}
 	if (mmc_getwp(priv->mmc) == 1) {
 		pr_err("Error: card is write protected!\n");
 		goto out;
@@ -429,7 +439,6 @@ s32 mmc_fwc_raw_write(struct fwc_info *fwc, u8 *buf, s32 len)
 	if (n != blkcnt) {
 		pr_err("Error, write to partition %s failed.\n",
 		      fwc->meta.partition);
-		fwc->burn_result += 1;
 		clen = n * MMC_BLOCK_SIZE;
 		fwc->trans_size += clen;
 	}
@@ -438,13 +447,12 @@ s32 mmc_fwc_raw_write(struct fwc_info *fwc, u8 *buf, s32 len)
 	if (n != blkcnt) {
 		pr_err("Error, read from partition %s failed.\n",
 		      fwc->meta.partition);
-		fwc->burn_result += 1;
 		clen = n * MMC_BLOCK_SIZE;
 		fwc->trans_size += clen;
 	}
 
 	if ((fwc->meta.size - fwc->trans_size) < len)
-		calc_len = fwc->meta.size % DEFAULT_BLOCK_ALIGNMENT_SIZE;
+		calc_len = fwc->meta.size - fwc->trans_size;
 	else
 		calc_len = len;
 
@@ -475,6 +483,9 @@ s32 mmc_fwc_data_write(struct fwc_info *fwc, u8 *buf, s32 len)
 	struct aicupg_mmc_priv *priv;
 
 	priv = (struct aicupg_mmc_priv *)fwc->priv;
+	if (!priv)
+		return 0;
+
 	if (!is_sparse_image(buf) && !priv->is_sparse) {
 		pr_debug("Not a sparse image\n");
 		return mmc_fwc_raw_write(fwc, buf, len);
@@ -516,7 +527,6 @@ s32 mmc_fwc_data_read(struct fwc_info *fwc, u8 *buf, s32 len)
 	if (n != blkcnt) {
 		pr_err("Error, Read from partition %s failed.\n",
 		      fwc->meta.partition);
-		fwc->burn_result += 1;
 		clen = n * MMC_BLOCK_SIZE;
 		fwc->trans_size += clen;
 	}

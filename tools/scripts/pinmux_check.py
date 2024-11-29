@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
 #coding=utf-8
+# SPDX-License-Identifier: Apache-2.0
+#
+# Copyright (C) 2024 ArtInChip Technology Co., Ltd
+# Author: ArtInChip
 import sys
 import os
 
@@ -76,8 +80,10 @@ def check_pinmux(dtbname):
                     func_node = dt1.get_node(phandle_dict[pinctrl.data[i]])
 
                     pinmux = []
+
                     for pins in func_node.nodes:
-                        pinmux += pins.get_property('pinmux')
+                        if pins.get_property('pinmux') is not None:
+                            pinmux += pins.get_property('pinmux')
 
                     for j in range(0, len(pinmux)):
                         port = pinmux[j] >> 16
@@ -85,6 +91,8 @@ def check_pinmux(dtbname):
                         pin_index = pinmux[j] >> 8
 
                         if pin_index in pinmux_dict:
+                            if path == pinmux_dict[pin_index]:
+                                continue
                             pinmux_conflict = True
                             print_error(node.name + \
                                         " pinmux conflicts with " + \

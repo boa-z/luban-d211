@@ -51,6 +51,7 @@ struct aic_usb_ep {
 #define EP0_MPS_LIMIT			64
 #define IRQ_RETRY_MASK			(USBINTSTS_NPTXFEMP | \
 					USBINTSTS_RXFLVL)
+#define DIS_EP_TIMOUT			100
 
 #define aic_gadget_driver_cb(_hs, _entry) \
 do { \
@@ -148,6 +149,7 @@ struct aic_usb_gadget {
 	void				*ctrl_buff;
 
 	u32				fifo_map;
+	u32				tx_fifo_map;
 	unsigned int			enabled:1;
 	unsigned int			connected:1;
 	unsigned int			remote_wakeup_allowed:1;
