@@ -1,0 +1,7 @@
+#!/bin/sh
+
+GTC_TICK=`devmem 0x19050008`
+BTIME_S=`echo "scale=6;$((GTC_TICK)) / 4000000" | bc`
+
+echo "Startup time: $(printf "%.3f" ${BTIME_S}) sec (from Power-On-Reset)"
+

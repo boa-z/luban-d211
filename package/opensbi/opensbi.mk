@@ -1,0 +1,31 @@
+
+OPENSBI_INSTALL_IMAGES = YES
+OPENSBI_ENABLE_TARBALL = NO
+OPENSBI_ENABLE_PATCH = NO
+OPENSBI_ADD_LINUX_HEADERS_DEPENDENCY = NO
+# OpenSBI supports to configure alternate build directory
+OPENSBI_SUPPORTS_OUT_SOURCE_BUILD = YES
+
+ifeq ($(LUBAN_BOARD_NAME),"qemu")
+OPENSBI_MAKE_OPTS += CROSS_COMPILE="$(TARGET_CROSS)" \
+			PLATFORM=generic \
+			FW_TEXT_START=$(BR2_PACKAGE_OPENSBI_FW_TEXT_BASE)
+else
+OPENSBI_MAKE_OPTS += CROSS_COMPILE="$(TARGET_CROSS)" \
+			PLATFORM=generic CHIP=ARCH_ARTINCHIP \
+			FW_TEXT_START=$(shell printf "0x%X" $$(($(BR2_PACKAGE_OPENSBI_FW_TEXT_BASE) + 0x3FE0000)))
+endif
+ifeq ($(LUBAN_BOARD_NAME),"qemu")
+OPENSBI_MAKE_OPTS += FW_JUMP_FDT_ADDR=0x82200000
+endif
+
+define OPENSBI_BUILD_CMDS
+	$(Q)$(TARGET_MAKE_ENV) $(MAKE1) $(OPENSBI_MAKE_OPTS) -C $(OPENSBI_SRCDIR) O=$(@D) all
+endef
+
+define OPENSBI_INSTALL_IMAGES_CMDS
+	$(Q)$(INSTALL) -m 0644 $(@D)/platform/generic/firmware/*.elf $(BINARIES_DIR)/
+	$(Q)$(INSTALL) -m 0644 $(@D)/platform/generic/firmware/*.bin $(BINARIES_DIR)/
+endef
+
+$(eval $(generic-package))
