@@ -824,18 +824,20 @@ static int aic_pwm_probe(struct platform_device *pdev)
 	pwm_reg_enable(apwm->regs, PWM_CTL, PWM_CTL_EN, 1);
 	ret = aic_pwm_parse_dt(&pdev->dev);
 	if (ret)
-		goto out_disable_rst;
+		goto out_pwmchip_remove;
 
 	ret = clk_set_rate(apwm->clk, apwm->clk_rate);
 	if (ret) {
 		dev_err(&pdev->dev, "Failed to set clk_rate %ld\n",
 			apwm->clk_rate);
-		goto out_disable_rst;
+		goto out_pwmchip_remove;
 	}
 
 	dev_info(&pdev->dev, "ArtInChip PWM Loaded.\n");
 	return 0;
 
+out_pwmchip_remove:
+	pwmchip_remove(&apwm->chip);
 out_disable_rst:
 	reset_control_assert(apwm->rst);
 out_disable_clk:

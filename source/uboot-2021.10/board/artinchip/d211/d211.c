@@ -924,12 +924,14 @@ int spl_start_uboot(void)
 		goto out;
 	}
 
+#ifdef CONFIG_SPL_SERIAL_SUPPORT
 	/* break into full u-boot with CTRL + c/C */
 	if (serial_tstc() && serial_getc() == CTRL('C')) {
 		start = START_UBOOT;
 		puts("Run U-Boot: got CTRL+C\n");
 		goto out;
 	}
+#endif
 	if (start == START_UNKNOWN) {
 #ifdef CONFIG_CMD_AICUPG
 		if (aic_upg_mode_detect()) {
@@ -1068,7 +1070,7 @@ void aic_upg_succ_cnt(void)
 	writel(val, RTC_SYS_BAK_REG(14));
 	writel(0, RTC_WRITE_KEY_REG);
 
-	pr_info("Successfully burned %d times.\n", val);
+	printf("Successfully burned %d times.\n", val);
 }
 
 int aic_upg_mode_detect(void)

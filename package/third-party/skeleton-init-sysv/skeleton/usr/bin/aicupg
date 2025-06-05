@@ -6,7 +6,7 @@ if [ "$1" == "gotobl" ]; then
 	# Goto U-Boot upgmode
 	UPGVAL=2
 fi
-cd  /sys/devices/platform/soc/*.rtc
+cd  /sys/devices/platform/soc/*.wri || exit
 echo "$UPGVAL" > aicupg
 
 echo Will reboot after 3 seconds ...

@@ -4,7 +4,12 @@ LVGL_UI_ENABLE_PATCH = NO
 LVGL_UI_INSTALL_STAGING = YES
 
 LVGL_UI_DEPENDENCIES += aic-mpp
+ifeq (${BR2_PACKAGE_TSLIB},y)
 LVGL_UI_DEPENDENCIES += tslib
+endif
+ifeq (${BR2_PACKAGE_LIBDRM},y)
+LVGL_UI_DEPENDENCIES += libdrm
+endif
 LVGL_UI_CONF_OPTS += -DCMAKE_INSTALL_PREFIX=/usr/local
 ifeq ($(BR2_TEST_LVGL_USE_RTP),y)
 LVGL_UI_CONF_OPTS += -DUSE_RTP_TSLIB=yes
@@ -34,6 +39,18 @@ ifeq ($(BR2_LVGL_V_9),y)
 LVGL_UI_CONF_OPTS += -DLVGL_V_9=yes
 else
 LVGL_UI_CONF_OPTS += -DLVGL_V_9=no
+endif
+
+ifeq ($(BR2_LVGL_FBDEV),y)
+LVGL_UI_CONF_OPTS += -DLVGL_FBDEV=yes
+else
+LVGL_UI_CONF_OPTS += -DLVGL_FBDEV=no
+endif
+
+ifeq ($(BR2_LVGL_DRM),y)
+LVGL_UI_CONF_OPTS += -DLVGL_DRM=yes
+else
+LVGL_UI_CONF_OPTS += -DLVGL_DRM=no
 endif
 
 ifeq ($(BR2_LVGL_ROTATE_0),y)
@@ -82,4 +99,6 @@ endef
 
 LVGL_UI_POST_INSTALL_TARGET_HOOKS += LVGL_UI_POST_TARGET_INSTALL
 
+ifeq ($(BR2_PACKAGE_LVGL_UI), y)
 $(eval $(cmake-package))
+endif

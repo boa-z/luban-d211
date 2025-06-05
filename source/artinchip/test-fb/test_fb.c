@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 /*
- * Copyright (C) 2020-2021 Artinchip Technology Co., Ltd.
+ * Copyright (C) 2020-2025 Artinchip Technology Co., Ltd.
  * Authors:  Matteo <duanmt@artinchip.com>
  */
 
@@ -8,13 +8,14 @@
 #include <artinchip/sample_base.h>
 #include <video/artinchip_fb.h>
 #include <stdbool.h>
+#include <sys/time.h>
 
 /* Global macro and variables */
 
 #define AICFB_LAYER_MAX_NUM	2
 #define FB_DEV "/dev/fb0"
 
-static const char sopts[] = "nscflLaAkKedC:i:w:h:m:v:bu";
+static const char sopts[] = "nscflLaAkKedC:i:w:h:m:v:bru";
 static const struct option lopts[] = {
 	{"get_layer_num",	no_argument, NULL, 'n'},
 	{"get_screen_size",	no_argument, NULL, 's'},
@@ -35,6 +36,7 @@ static const struct option lopts[] = {
 	{"mode",	  required_argument, NULL, 'm'},
 	{"value",	  required_argument, NULL, 'v'},
 	{"colorblock",		no_argument, NULL, 'b'},
+	{"repeat",		no_argument, NULL, 'r'},
 	{"usage",		no_argument, NULL, 'u'},
 	{0, 0, 0, 0}
 };
@@ -63,6 +65,7 @@ void usage(char *program)
 	printf("\t -m, --mode\t\tneed an integer argument [0, 2]\n");
 	printf("\t -v, --value\t\tneed an integer argument [0, 255]\n");
 	printf("\t -b, --colorblock\tshow a color-block image\n");
+	printf("\t -r, --repeat\ttest vsync repeatedly\n");
 	printf("\t -u, --usage \n");
 	printf("\n");
 	printf("Example: %s -l\n", program);
@@ -453,7 +456,7 @@ int show_color_block(int fd)
 
 	width  = var.xres;
 	height = var.yres;
-	printf("Framebuf: size %d, width %d, height %d, bits per pixel %d\n", 
+	printf("Framebuf: size %d, width %d, height %d, bits per pixel %d\n",
 		fix.smem_len, width, height, var.bits_per_pixel);
 
 	blk_height = height / 4;
@@ -503,6 +506,29 @@ int show_color_block(int fd)
 
 	munmap(fb_buf, fix.smem_len);
 	return 0;
+}
+
+static int test_vsync_repeat(int fd)
+{
+	int ret, i = 0;
+	struct timeval start, end;
+	unsigned long time_us;
+
+	do {
+		gettimeofday(&start, NULL);
+		ret = ioctl(fd, AICFB_WAIT_FOR_VSYNC, NULL);
+		if (ret) {
+			ERR("ioctl WAIT_FOR_VSYNC timeout, DE not working\n");
+			break;
+		}
+		gettimeofday(&end, NULL);
+
+		time_us = (end.tv_sec - start.tv_sec) * 1000000 +
+			  (end.tv_usec - start.tv_usec);
+		DBG("wait vsync time %ld us\n", time_us);
+	} while (i++ < 5);
+
+	return ret;
 }
 
 int main(int argc, char **argv)
@@ -573,6 +599,9 @@ int main(int argc, char **argv)
 			continue;
 		case 'b':
 			show_color_block(dev_fd);
+			goto end;
+		case 'r':
+			ret = test_vsync_repeat(dev_fd);
 			goto end;
 		case 'u':
 			usage(argv[0]);

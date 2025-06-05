@@ -2808,7 +2808,11 @@ static void aic_udc_v20_params(struct aic_plat_udc_data *p)
 {
 	p->usb_gusbcfg =
 		0 << 15		/* PHY Low Power Clock sel*/
+#ifdef CONFIG_FPGA_BOARD_ARTINCHIP
+		| 0x9 << 10	/* USB Turnaround time (0x9 for HS phy) */
+#else
 		| 0x5 << 10	/* USB Turnaround time (0x5 for HS phy) */
+#endif
 		| 0 << 9	/* [0:HNP disable,1:HNP enable]*/
 		| 0 << 8	/* [0:SRP disable 1:SRP enable]*/
 		| 0 << 6	/* 0: high speed utmi+, 1: full speed serial*/

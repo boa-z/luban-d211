@@ -15,6 +15,19 @@ choice
 		bool "LVGL V9"
 endchoice
 
+choice
+	prompt "Select LVGL Driver Framework"
+	default BR2_LVGL_FBDEV
+
+	config BR2_LVGL_FBDEV
+		bool "LVGL FBDEV"
+
+	config BR2_LVGL_DRM
+		bool "LVGL DRM"
+		depends on BR2_LVGL_V_9
+		select BR2_PACKAGE_LIBDRM
+endchoice
+
 config BR2_TEST_LVGL_USE_RTP
 	bool "use RTP"
 	default n

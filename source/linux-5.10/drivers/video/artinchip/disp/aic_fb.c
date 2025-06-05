@@ -1242,7 +1242,6 @@ static int aicfb_remove(struct platform_device *pdev)
 	return 0;
 }
 
-#ifdef CONFIG_PM
 static int aicfb_pm_suspend(struct device *dev)
 {
 	struct aicfb_data *fbd = dev_get_drvdata(dev);
@@ -1290,6 +1289,7 @@ static int aicfb_pm_resume(struct device *dev)
 	return 0;
 }
 
+#ifdef CONFIG_PM
 static UNIVERSAL_DEV_PM_OPS(aicfb_pm_ops, aicfb_pm_suspend,
 		aicfb_pm_resume, NULL);
 #endif

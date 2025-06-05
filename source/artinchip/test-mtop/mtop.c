@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 /*
- * Copyright (C) 2023 ArtInChip Technology Co., Ltd.
+ * Copyright (C) 2023-2025 ArtInChip Technology Co., Ltd.
  */
 
 #include <stdio.h>
@@ -17,6 +17,8 @@
 
 #define ENABLE 	1
 #define DISABLE 0
+
+#define ARRAY_SIZEOF(arr)	(sizeof(arr) / sizeof((arr[0])))
 
 struct node_info {
 	int id;
@@ -45,13 +47,21 @@ struct mtop_info {
 
 const char *group_name_v10[] = {"cpu", "dma", "de", "gvd", "ahb"};
 
-const char *group_name_v13[] = {"cpu", \
+const char *group_name_v30[] = {"cpu", \
 			"usb", "gmac", "sdmc0", "sdmc1", "qspi", "usb_h0", "usb_h1", \
 			"dvp", "de", "dma0", "dma1", "dma2", \
 			"scan0", "scan1", "prt", \
 			"jpeg0", "jpeg1", "rot", "ht", "crs0", \
 			"crs1", "pp0", "pp1", "ehc0", "ehc1", "us", "jbig0", "jbig1", \
 			"ahb"
+			};
+
+const char *group_name_v40[] = {"cpu", \
+			"dma0", "dma1", "ce", "harb0", "harb1", \
+			"r_cpu", "r_dma", \
+			"de", \
+			"dvp", "mipi_csi", \
+			"dit", "ge", "ve"
 			};
 
 struct node_info node_info_aic_v10[] = {
@@ -67,7 +77,7 @@ struct node_info node_info_aic_v10[] = {
 	{ 10, "ahb_wr", NULL, 0 },
 };
 
-struct node_info node_info_aic_v13[] = {
+struct node_info node_info_aic_v30[] = {
 	{ 1, "cpu_rd", NULL, 0 },
 	{ 2, "cpu_wr", NULL, 0 },
 
@@ -135,6 +145,42 @@ struct node_info node_info_aic_v13[] = {
 	{ 60, "ahb_wr", NULL, 0 },
 };
 
+struct node_info node_info_aic_v40[] = {
+	{ 1, "cpu_rd", NULL, 0 },
+	{ 2, "cpu_wr", NULL, 0 },
+
+	{ 3, "dma0_rd", NULL, 0 },
+	{ 4, "dma0_wr", NULL, 0 },
+	{ 5, "dma1_rd", NULL, 0 },
+	{ 6, "dma1_wr", NULL, 0 },
+	{ 7, "ce_rd", NULL, 0 },
+	{ 8, "ce_wr", NULL, 0 },
+	{ 9, "harb0_rd", NULL, 0 },
+	{ 10, "harb0_wr", NULL, 0 },
+	{ 11, "harb1_rd", NULL, 0 },
+	{ 12, "harb1_wr", NULL, 0 },
+
+	{ 13, "r_cpu_rd", NULL, 0 },
+	{ 14, "r_cpu_wr", NULL, 0 },
+	{ 15, "r_dma_rd", NULL, 0 },
+	{ 16, "r_dma_wr", NULL, 0 },
+
+	{ 17, "de_rd", NULL, 0 },
+	{ 18, "de_wr", NULL, 0 },
+
+	{ 19, "dvp_rd", NULL, 0 },
+	{ 20, "dvp_wr", NULL, 0 },
+	{ 21, "mipi_csi_rd", NULL, 0 },
+	{ 22, "mipi_csi_wr", NULL, 0 },
+
+	{ 23, "dit_rd", NULL, 0 },
+	{ 24, "dit_wr", NULL, 0 },
+	{ 25, "ge_rd", NULL, 0 },
+	{ 26, "ge_wr", NULL, 0 },
+	{ 27, "ve_rd", NULL, 0 },
+	{ 28, "ve_wr", NULL, 0 },
+};
+
 struct node_ctrl node_ctrl_aic[] = {
 	{ 0, "enable", NULL },
 	{ 1, "set_period", NULL },
@@ -147,9 +193,12 @@ static struct mtop_info mtop_data[] = {
 	  .node_info_aic = node_info_aic_v10,},
 	{ .version = "3.0",
 	  .node_num = 60,
-	  .group_name = group_name_v13,
-	  .node_info_aic = node_info_aic_v13, },
-	{},
+	  .group_name = group_name_v30,
+	  .node_info_aic = node_info_aic_v30, },
+	{ .version = "4.0",
+	  .node_num = 28,
+	  .group_name = group_name_v40,
+	  .node_info_aic = node_info_aic_v40, },
 };
 
 static struct mtop_info *mtop = NULL;
@@ -212,7 +261,7 @@ static int get_version_data()
 	}
 	fclose(file);
 
-	for (int i = 0; i < 2; i++) {
+	for (int i = 0; i < ARRAY_SIZEOF(mtop_data); i++) {
 		if (strlen(mtop_data[i].version) != (strlen(buffer) - 1))
 			continue;
 		ret = strncmp(mtop_data[i].version, buffer,

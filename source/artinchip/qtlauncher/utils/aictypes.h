@@ -1,10 +1,12 @@
 /*
- * Copyright (C) 2024 Artinchip Technology Co. Ltd
+ * Copyright (C) 2024-2025 ArtInChip Technology Co. Ltd
  *
  * SPDX-License-Identifier: Apache-2.0
  *
- * Author: artinchip
+ * Author: Keliang Liu <keliang.liu@artinchip.com>
+ *         Huahui Mai <huahui.mai@artinchip.com>
  */
+
 #ifndef AICTYPES_H
 #define AICTYPES_H
 
@@ -20,5 +22,7 @@ enum AiCFontSize {
     FONT_LARGE = 16,
 
 };
+
+#define AIC_WIFI_CONFIG_FILE "/tmp/qtlauncher.ini"
 
 #endif // AICTYPES_H

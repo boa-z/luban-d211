@@ -137,6 +137,8 @@ if(DEFINED CMAKE_INSTALL_FULL_LIBDIR)
     install(TARGETS jpeg_encode_test RUNTIME DESTINATION "${CMAKE_INSTALL_FULL_BINDIR}")
 endif() # CMAKE_INSTALL_FULL_LIBDIR
 
+############################### jpeg_decode_test #######################################
+############################### jpeg_encode #######################################
 ############################### mpp_video #######################################
 add_executable(mpp_video_test mpp_video.c mpp_video_test.c bit_stream_parser.c)
 
@@ -149,18 +151,10 @@ if(DEFINED CMAKE_INSTALL_FULL_LIBDIR)
 endif() # CMAKE_INSTALL_FULL_LIBDIR
 
 ############################### CCM_GAMMA #######################################
-execute_process(
-    COMMAND uname -r
-    OUTPUT_VARIABLE KERNEL_VERSION
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-)
-
-if("${KERNEL_VERSION}" STREQUAL "6.6")
+if (LINUX_VERSION_6)
     add_executable(ccm_gamma ccm_gamma_test.c)
     if(DEFINED CMAKE_INSTALL_FULL_LIBDIR)
         install(TARGETS ccm_gamma RUNTIME DESTINATION "${CMAKE_INSTALL_FULL_BINDIR}")
     endif()
-else()
-    message(STATUS "kernel version is 5.10")
 endif()
 

@@ -28,11 +28,15 @@ function _clear_env()
 	unset mc
 	unset aicupg
 	unset addboard
+	_unalias m
 	_unalias ab
 	_unalias ma
+	_unalias mc
 	_unalias ms
 	_unalias mu
 	_unalias mb
+	_unalias km
+	_unalias update
 }
 
 function hmm()

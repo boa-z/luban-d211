@@ -800,12 +800,12 @@ static int aic_epwm_probe(struct platform_device *pdev)
 
 	epwm->glb_regs = of_iomap(pdev->dev.of_node, 1);
 	if (IS_ERR(epwm->glb_regs))
-		goto out_disable_rst;
+		goto out_pwmchip_remove;
 
 	epwm_reg_enable(epwm->glb_regs, GLB_EPWM_EN, GLB_EPWM_EN_B, 1);
 	ret = aic_epwm_parse_dt(&pdev->dev);
 	if (ret)
-		goto out_disable_rst;
+		goto out_pwmchip_remove;
 
 	//unmap to be used by other PWMCS Submodules
 	iounmap(epwm->glb_regs);
@@ -814,12 +814,14 @@ static int aic_epwm_probe(struct platform_device *pdev)
 	if (ret) {
 		dev_err(&pdev->dev, "Failed to set clk_rate %ld\n",
 			epwm->clk_rate);
-		goto out_disable_rst;
+		goto out_pwmchip_remove;
 	}
 
 	dev_info(&pdev->dev, "ArtInChip EPWM Loaded.\n");
 	return 0;
 
+out_pwmchip_remove:
+	pwmchip_remove(&epwm->chip);
 out_disable_rst:
 	reset_control_assert(epwm->rst);
 out_disable_clk:

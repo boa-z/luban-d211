@@ -160,6 +160,7 @@
 #define FADE_CTRL1_REG						(0x5C)
 #define FADE_CTRL1_TARGET_VOL_MASK				GENMASK(14, 0)
 #define FADE_CTRL1_TARGET_VOL(vol)				((vol) << 0)
+#define FADE_CTRL1_GAIN						(0)
 
 #define GLOBE_CTL_REG						(0x60)
 #define GLOBE_GLB_RST						BIT(2)
@@ -587,6 +588,8 @@ static struct snd_soc_dai_driver aic_codec_dai[] = {
 #endif
 };
 
+static const DECLARE_TLV_DB_SCALE(aic_codec_tlv_range_scale,
+					-32767, 1, 1);
 static const DECLARE_TLV_DB_SCALE(aic_codec_dvc_scale,
 					-12000, 75, 1);
 static const DECLARE_TLV_DB_SCALE(aic_mixer_source_gain_scale,
@@ -675,9 +678,9 @@ static const struct snd_kcontrol_new aic_codec_controls[] = {
 	SOC_DOUBLE_TLV("DMICIN Capture Volume", RX_DVC_1_2_CTRL_REG,
 					RX_DVC1_GAIN, RX_DVC2_GAIN,
 					0xFF, 0, aic_codec_dvc_scale),
-	SOC_DOUBLE_TLV("AUDIO Playback Volume", TX_DVC_3_4_CTRL_REG,
-					TX_DVC3_GAIN, TX_DVC4_GAIN,
-					0xFF, 0, aic_codec_dvc_scale),
+	SOC_SINGLE_TLV("AUDIO Playback Volume", FADE_CTRL1_REG,
+					FADE_CTRL1_GAIN,
+					0x7FFF, 0, aic_codec_tlv_range_scale),
 #ifdef CONFIG_SND_SOC_AIC_CODEC_V1
 	SOC_SINGLE_TLV("ADC Capture Volume", ADC_DVC0_CTRL_REG,
 					ADC_DVC0_CTRL_DVC0_GAIN,
@@ -1253,6 +1256,7 @@ static const struct of_device_id aic_codec_match[] = {
 	{
 		.compatible = "artinchip,aic-codec-v1.0",
 	},
+	{}
 };
 
 #ifdef CONFIG_PM

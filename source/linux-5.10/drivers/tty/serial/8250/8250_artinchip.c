@@ -146,11 +146,25 @@ static void aic8250_do_pm(struct uart_port *port, unsigned int state,
 static void aic8250_set_termios(struct uart_port *p, struct ktermios *termios,
 				struct ktermios *old)
 {
+	unsigned int timeout = AIC_UART_SETTING_TIMEOUT;
+	unsigned char old_mcr = 0;
+	struct uart_8250_port *up = up_to_u8250p(p);
+
+	old_mcr = serial8250_in_MCR(up);
+	serial8250_out_MCR(up, UART_MCR_LOOP);
+
+	while (timeout--) {
+		serial8250_clear_and_reinit_fifos(up);
+		if ((serial_in(up, UART_USR) & UART_USR_BUSY) == 0)
+			break;
+	}
+
 	p->status &= ~UPSTAT_AUTOCTS;
 	if (termios->c_cflag & CRTSCTS)
 		p->status |= UPSTAT_AUTOCTS;
 
 	serial8250_do_set_termios(p, termios, old);
+	serial8250_out_MCR(up, old_mcr);
 }
 
 static void aic8250_set_ldisc(struct uart_port *p, struct ktermios *termios)

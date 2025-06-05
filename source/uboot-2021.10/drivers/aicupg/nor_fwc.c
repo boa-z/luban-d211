@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0+
 /*
- * Copyright (C) 2021 ArtInChip Technology Co., Ltd
+ * Copyright (C) 2021-2025 ArtInChip Technology Co., Ltd
  * Author: Jianfeng Li <jianfeng.li@artinchip.com>
  */
 #include <common.h>
@@ -25,6 +25,16 @@ struct aicupg_nor_priv {
 	loff_t offs[MAX_DUPLICATED_PART];
 	uint64_t erased_address[MAX_DUPLICATED_PART];
 };
+
+static bool is_all_ff(u8 *buf, s32 len)
+{
+	for (int i = 0; i < len; i++) {
+		if (buf[i] != 0xFF) {
+			return false;
+		}
+	}
+	return true;
+}
 
 /*
  * Erese one sector
@@ -237,26 +247,36 @@ s32 nor_fwc_data_write(struct fwc_info *fwc, u8 *buf, s32 len)
 		}
 		/* erase 1 sector when offset+len more than erased address */
 		while ((offset + len) > erased_addr) {
-			ret = do_mtd_erase_sector(mtd, erased_addr);
+			ret = mtd_read(mtd, erased_addr, mtd->erasesize, &retlen, rdbuf);
 			if (ret) {
-				pr_err("Mtd erse sector failed!..\n");
+				pr_err("Read mtd %s error.\n", mtd->name);
 				return 0;
+			}
+
+			if (!is_all_ff(rdbuf, len)) {
+				ret = do_mtd_erase_sector(mtd, erased_addr);
+				if (ret) {
+					pr_err("Mtd erse sector failed!..\n");
+					return 0;
+				}
 			}
 			/*Update for next erase*/
 			priv->erased_address[i] = erased_addr + mtd->erasesize;
 			erased_addr = priv->erased_address[i];
 		}
-		ret = mtd_write(mtd, offset, len, &retlen, buf);
-		if (ret) {
-			pr_err("Write mtd %s error.\n", mtd->name);
-			return 0;
+		if (!is_all_ff(buf, len)) {
+			ret = mtd_write(mtd, offset, len, &retlen, buf);
+			if (ret) {
+				pr_err("Write mtd %s error.\n", mtd->name);
+				return 0;
+			}
 		}
 
 		/* Update for next write */
 		// Read data to calc crc
 		ret = mtd_read(mtd, offset, len, &retlen, rdbuf);
 		if (ret) {
-			pr_err("Read mtd %s error.\n", mtd->name);
+			pr_err("Read mtd %s to calc crc error.\n", mtd->name);
 			return 0;
 		}
 		priv->offs[i] = offset + retlen;

@@ -45,6 +45,10 @@ config LUBAN_BOARD_D211_DEMO88_NOR
 	bool "demo88_nor"
 	depends on LUBAN_CHIP_D211
 
+config LUBAN_BOARD_D211_DEMO88_NOR_MUSL
+	bool "demo88_nor_musl"
+	depends on LUBAN_CHIP_D211
+
 config LUBAN_BOARD_D211_QC128_MMC
 	bool "qc128_mmc"
 	depends on LUBAN_CHIP_D211

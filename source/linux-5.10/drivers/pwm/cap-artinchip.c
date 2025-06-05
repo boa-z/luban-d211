@@ -333,18 +333,18 @@ static int aic_cap_probe(struct platform_device *pdev)
 
 	ret = aic_cap_parse_dt(&pdev->dev);
 	if (ret)
-		goto out_disable_rst;
+		goto out_pwmchip_remove;
 
 	ret = clk_set_rate(cap->clk, cap->clk_rate);
 	if (ret) {
 		dev_err(&pdev->dev, "Failed to set clk_rate %ld\n",
 			cap->clk_rate);
-		goto out_disable_rst;
+		goto out_pwmchip_remove;
 	}
 
 	cap->glb_regs = of_iomap(pdev->dev.of_node, 1);
 	if (IS_ERR(cap->glb_regs))
-		goto out_disable_rst;
+		goto out_pwmchip_remove;
 
 	for (i = 0; i < AIC_CAP_CH_NUM; i++) {
 		if (cap->data[i].available) {
@@ -364,6 +364,8 @@ static int aic_cap_probe(struct platform_device *pdev)
 	dev_info(&pdev->dev, "ArtInChip CAP Loaded.\n");
 	return 0;
 
+out_pwmchip_remove:
+	pwmchip_remove(&cap->chip);
 out_disable_rst:
 	reset_control_assert(cap->rst);
 out_disable_clk:

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2023 ArtInChip Technology Co. Ltd
+ * Copyright (C) 2020-2025 ArtInChip Technology Co. Ltd
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -91,7 +91,7 @@ int wav_seek_packet(struct aic_wav_parser *s, s64 seek_time)
         loge("seek too long seek_pos%"PRIu64"file_size%"PRIu64"\n",pos,s->file_size);
         return -1;
     }
-    ret = (int)aic_stream_seek(s->stream,SEEK_SET,pos);
+    ret = (int)aic_stream_seek(s->stream, pos, SEEK_SET);
     return ret;
 }
 

@@ -16,6 +16,10 @@ endif
 ifeq ($(BR2_QTLAUNCHER_SMALL_MEMORY),y)
 export QTLAUNCHER_SMALL_MEMORY = YES
 endif
+ifeq ($(BR2_QTLAUNCHER_WIFI_MANAGER),y)
+export QTLAUNCHER_WIFI_MANAGER = YES
+QTLAUNCHER_DEPENDENCIES += wifimanager
+endif
 
 define QTLAUNCHER_INSTALL_TARGET_CMDS
 	mkdir -p $(TARGET_DIR)/usr/local/launcher/

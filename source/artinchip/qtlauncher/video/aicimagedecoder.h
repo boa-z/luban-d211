@@ -1,7 +1,9 @@
 /*
- * Copyright (C) 2024 ArtInChip Technology Co. Ltd
+ * Copyright (C) 2024-2025 ArtInChip Technology Co. Ltd
  *
  * SPDX-License-Identifier: Apache-2.0
+ *
+ * Author: Huahui Mai <huahui.mai@artinchip.com>
  */
 
 #ifndef AICIMAGEDECODER_H
@@ -10,10 +12,10 @@
 #include <QWidget>
 #include <QFile>
 
+#ifdef QTLAUNCHER_GE_SUPPORT
+
 #include <linux/fb.h>
 #include <video/artinchip_fb.h>
-
-#ifdef QTLAUNCHER_GE_SUPPORT
 #include <video/mpp_types.h>
 #include <linux/dma-heap.h>
 #include <dma_allocator.h>

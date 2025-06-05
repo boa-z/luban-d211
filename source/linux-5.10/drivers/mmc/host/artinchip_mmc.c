@@ -3252,8 +3252,8 @@ static void artinchip_mmc_aic_set_clksmpl(struct artinchip_mmc *host, u8 sample)
 	u32 clksel;
 
 	clksel = mci_readl(host, SDMC_DLYCTRL);
-	clksel &= ~(0x3 << 28);
-	clksel |= sample << 28;
+	clksel &= ~(0x3 << SDMC_DLYCTRL_CLK_DRV_PHA_SHIFT);
+	clksel |= sample << SDMC_DLYCTRL_CLK_DRV_PHA_SHIFT;
 	mci_writel(host, SDMC_DLYCTRL, clksel);
 }
 
@@ -3263,13 +3263,9 @@ static u8 artinchip_mmc_aic_move_next_clksmpl(struct artinchip_mmc *host)
 	u8 sample;
 
 	clksel = mci_readl(host, SDMC_DLYCTRL);
-	temp = (clksel >> 28) & 0x3;
-	if (temp < 3)
-		temp++;
-	sample = (u8)temp;
-	temp = temp << 28;
-	clksel &= ~(0x3 << 28);
-	clksel |= temp;
+	temp = (clksel >> SDMC_DLYCTRL_CLK_DRV_PHA_SHIFT) & 0x3;
+	sample = (temp + 1) & 0x3;
+	clksel = SDMMC_DLYCTRL_CCLK_UP_DRIVER(clksel, sample);
 
 	mci_writel(host, SDMC_DLYCTRL, clksel);
 
@@ -3311,16 +3307,19 @@ static int artinchip_mmc_aic_execute_tuning(struct artinchip_mmc_slot *slot, u32
 	s8 best_clksmpl = -1;
 	int ret;
 	/*set 0*/
-	start_smpl = (mci_readl(host, SDMC_DLYCTRL) >> 28) & 0x3;
+	start_smpl = (mci_readl(host, SDMC_DLYCTRL) >> SDMC_DLYCTRL_CLK_DRV_PHA_SHIFT) & 0x3;
+	dev_info(&slot->mmc->class_dev, "start_smpl tunning sample phase:%d\n", start_smpl);
 	do {
 		mci_writel(host, SDMC_TTMC, 0xfffffff);
 		smpl = artinchip_mmc_aic_move_next_clksmpl(host);
+		dev_info(&slot->mmc->class_dev, "tunning phase:%d\n", smpl);
 		/*send tuning cmd*/
 		if (!mmc_send_tuning(mmc, opcode, NULL))
 			candiates |= (1 << smpl);
 	} while (start_smpl != smpl);
 
 	best_clksmpl = artinchip_mmc_aic_get_best_clksmpl(candiates);
+	dev_info(&slot->mmc->class_dev, "get the best tunning value:%d\n", best_clksmpl);
 	if (best_clksmpl >= 0) {
 		artinchip_mmc_aic_set_clksmpl(host, best_clksmpl);
 		priv->tuned_sample = best_clksmpl;

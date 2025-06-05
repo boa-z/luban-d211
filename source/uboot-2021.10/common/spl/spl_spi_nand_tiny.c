@@ -274,8 +274,10 @@ static int spi_nand_show_logo(struct spinand_device *spinand)
 	}
 
 	ret = spi_nand_load_logo(spinand, &dst, &len);
+#ifndef CONFIG_USERID_SUPPORT
 	if (ret)
 		goto out;
+#endif
 
 	if (dst[1] == 'P' || dst[2] == 'N' || dst[3] == 'G')
 		aic_png_decode(dst, len);
@@ -284,8 +286,10 @@ static int spi_nand_show_logo(struct spinand_device *spinand)
 	else
 		pr_err("Invaild logo file format, need a png/jpeg image\n");
 
+#ifndef CONFIG_USERID_SUPPORT
 out:
 	aicfb_update_ui_layer(dev);
+#endif
 	aicfb_startup_panel(dev);
 
 	return ret;
@@ -302,6 +306,10 @@ static int spi_nand_load_image_os(struct spl_image_info *spl_image,
 	spl_spi_nand_read(spinand, CONFIG_SYS_SPL_NAND_OFS,
 			  CONFIG_SYS_SPL_WRITE_SIZE, &retlen, (void *)
 			  CONFIG_SYS_SPL_ARGS_ADDR);
+
+#ifdef CONFIG_VIDEO_ARTINCHIP
+	spi_nand_show_logo(spinand);
+#endif
 
 	err = spi_nand_load_image(spl_image, spinand, offset);
 	if (err)
@@ -344,12 +352,8 @@ static int spl_spi_nand_load_image(struct spl_image_info *spl_image,
 		ret = spi_nand_load_image_os(spl_image, spinand, offset);
 
 		/* Double check after linux image is loaded. */
-		if (!ret && !spl_start_uboot()) {
-#ifdef CONFIG_VIDEO_ARTINCHIP
-			spi_nand_show_logo(spinand);
-#endif
+		if (!ret && !spl_start_uboot())
 			return 0;
-		}
 	}
 #endif
 	offset = CONFIG_SYS_SPI_NAND_U_BOOT_OFFS;

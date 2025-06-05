@@ -11,6 +11,7 @@ source package/artinchip/lvgl-ui/Config.in
 source package/artinchip/aicp-dec/Config.in
 source package/artinchip/aic-mem/Config.in
 source package/artinchip/wifimanager/Config.in
+source package/artinchip/p2p_auto/Config.in
 
 menu "Sample code"
 	source package/artinchip/test-mtop/Config.in
@@ -33,6 +34,7 @@ menu "Sample code"
 	source package/artinchip/test-tp2825/Config.in
 	source package/artinchip/test-pm-mbox/Config.in
 	source package/artinchip/test-efuse/Config.in
+	source package/artinchip/test-coredump/Config.in
 endmenu
 
 menu "Launchers"

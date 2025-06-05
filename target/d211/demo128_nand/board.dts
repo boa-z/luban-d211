@@ -682,7 +682,7 @@
 
 &codec {
 	pinctrl-names = "default";
-	pinctrl-0 = <&spk_pins_d>, <&dmic_pins_b>;
+	pinctrl-0 = <&spk_pins_d>, <&dmic_pins_a>;
 	pa-gpios = <&gpio_a 7 GPIO_ACTIVE_LOW>;
 	status = "okay";
 };

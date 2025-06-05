@@ -27,7 +27,7 @@ static int aic_mbox_recv(struct mbox_chan *chan, void *data)
 	mbox->recv_buf = (u32 *)data;
 	u32 sta = aic_mbox_int_sta(mbox->regs);
 
-	dev_dbg(chan->dev, "IRQ status: 0x%x\n", sta);
+	/* dev_dbg(chan->dev, "IRQ status: 0x%x\n", sta); */
 	if (!aic_mbox_int_sta_is_cared(sta))
 		goto err;
 

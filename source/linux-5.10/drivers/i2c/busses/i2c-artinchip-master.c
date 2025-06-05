@@ -329,7 +329,7 @@ static const struct i2c_algorithm i2c_algo = {
 int i2c_probe_master(struct aic_i2c_dev *i2c_dev)
 {
 	struct i2c_adapter *adap = &i2c_dev->adap;
-	int ret, cmd;
+	int ret, cmd, rate;
 
 	init_completion(&i2c_dev->cmd_complete);
 
@@ -358,8 +358,17 @@ int i2c_probe_master(struct aic_i2c_dev *i2c_dev)
 	msleep(1);
 
 	/* Set I2C SDA & SCL Sutuck Time*/
-	i2c_writel(i2c_dev, 0x1000, I2C_SDA_STUCK_TIMEOUT);
-	i2c_writel(i2c_dev, 0x1000, I2C_SCL_STUCK_TIMEOUT);
+	rate = i2c_dev->target_rate;
+	if (rate <= 10000) {
+		i2c_writel(i2c_dev, 0xa00000, I2C_SDA_STUCK_TIMEOUT);
+		i2c_writel(i2c_dev, 0xa00000, I2C_SCL_STUCK_TIMEOUT);
+	} else if (rate > 10000 && rate < 100000) {
+		i2c_writel(i2c_dev, 0x6000, I2C_SDA_STUCK_TIMEOUT);
+		i2c_writel(i2c_dev, 0x6000, I2C_SCL_STUCK_TIMEOUT);
+	} else {
+		i2c_writel(i2c_dev, 0x1000, I2C_SDA_STUCK_TIMEOUT);
+		i2c_writel(i2c_dev, 0x1000, I2C_SCL_STUCK_TIMEOUT);
+	}
 
 	ret = devm_request_irq(i2c_dev->dev, i2c_dev->irq, i2c_isr, 0,
 				dev_name(i2c_dev->dev), i2c_dev);

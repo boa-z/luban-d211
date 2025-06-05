@@ -7,21 +7,27 @@
 import sys
 import os
 
+
 def print_error(string):
     print("\t\033[1;31;40m" + string + "\033[0m")
+
 
 def print_pass(string):
     print("\t\033[1;32;40m" + string + "\033[0m")
 
+
 def print_warning(string):
     print("\t\033[1;33;40m" + string + "\033[0m")
 
+
 def check_pinmux(dtbname):
+    if not os.path.isfile(dtbname):
+        return
+
     try:
         import fdt
-    except:
-        print_warning("The fdt package is not installed, "\
-                      "so pinmux conflict check cannot be executed")
+    except ImportError:
+        print_warning("The fdt package is not installed, skip pinmux conflict check.")
         sys.exit()
 
     pinmux_conflict = False
@@ -104,6 +110,7 @@ def check_pinmux(dtbname):
 
     if not pinmux_conflict:
         print_pass("No conflict in pinmux")
+
 
 if __name__ == "__main__":
     # check dtb file is exist or not

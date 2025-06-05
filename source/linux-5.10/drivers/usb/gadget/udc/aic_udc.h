@@ -106,7 +106,19 @@ enum aic_ep0_state {
 #define AIC_SPEED_PARAM_FULL		1
 #define AIC_SPEED_PARAM_LOW		2
 
+#define SYSCFG_USB_RES_CAL_EN_SHIFT		8
+#define SYSCFG_USB_RES_CAL_EN_MASK		BIT(8)
+#define SYSCFG_USB_RES_CAL_VAL_SHIFT		0
+#define SYSCFG_USB_RES_CAL_VAL_MASK		GENMASK(7, 0)
+#define SYSCFG_USB_RES_CAL_VAL_DEF		0x40
+
+struct aic_usb_res_cfg {
+	void __iomem *addr;
+	u32 resis;
+};
+
 struct aic_gadget_params {
+	struct aic_usb_res_cfg		usb_res_cfg;
 	unsigned int			num_ep;
 	unsigned int			num_perio_in_ep;
 	unsigned int			total_fifo_size;

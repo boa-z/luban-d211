@@ -78,6 +78,8 @@ int main(int argc, char **argv)
 {
 	int dev_fd = -1;
 	int c, ret = 0, mode = 0, num = 0;
+	int len, i;
+	char str[5] = {0};
 	struct aicfb_ccm_config ccm;
 	struct aicfb_gamma_config gamma;
 	unsigned int flags = FLAGS_NONE;
@@ -131,9 +133,6 @@ int main(int argc, char **argv)
 			num = str2int(optarg);
 			break;
 		case 'c':
-			int len, i;
-			char str[5] = {0};
-
 			len = strlen(optarg);
 			if (len != 12 * 4) {
 				ERR("Invaild ccm table, table len %d\n", len);

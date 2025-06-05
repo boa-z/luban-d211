@@ -48,6 +48,13 @@ config AIC_PANEL_DSI_ST7701S
 	  Say Y here if you want to enable support for the ST7701S
 	  2-lane 480x800 MIPI DSI panel.
 
+config AIC_PANEL_DSI_TS8224S
+	tristate "ArtInChip dsi panel driver for TS8224S"
+	depends on AIC_DISP_MIPI_DSI
+	help
+	  Say Y here if you want to enable support for the ts8224S(ST7701S)
+	  2-lane 480x800 MIPI DSI panel.
+
 config AIC_PANEL_DSI_XM91080
 	tristate "ArtInChip dsi panel driver for XM91080"
 	depends on AIC_DISP_MIPI_DSI

@@ -102,6 +102,16 @@ static const struct spinand_info foresee_spinand_table[] = {
 		     SPINAND_HAS_QE_BIT,
 		     SPINAND_ECCINFO(&f35sqa_ooblayout, NULL),
 		     SPINAND_SELECT_TARGET(f35sqa_select_target)),
+	SPINAND_INFO("FS35ND01G",
+		     SPINAND_ID(0xEA),
+		     NAND_MEMORG(1, 2048, 64, 64, 1024, 1, 1, 1),
+		     NAND_ECCREQ(1, 528),
+		     SPINAND_INFO_OP_VARIANTS(&read_cache_variants,
+					      &write_cache_variants,
+					      &update_cache_variants),
+		     SPINAND_HAS_QE_BIT,
+		     SPINAND_ECCINFO(&f35sqa_ooblayout, NULL),
+		     SPINAND_SELECT_TARGET(f35sqa_select_target)),
 };
 
 static int foresee_spinand_init(struct spinand_device *spinand)

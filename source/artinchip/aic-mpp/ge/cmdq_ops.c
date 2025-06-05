@@ -377,6 +377,14 @@ static inline int is_rgb(enum mpp_pixel_format format)
 	return 0;
 }
 
+static inline int is_rgb_or_yuv400(enum mpp_pixel_format format)
+{
+	if (is_rgb(format) || format == MPP_FMT_YUV400)
+		return 1;
+
+	return 0;
+}
+
 static inline int need_blend(struct ge_ctrl *ctrl)
 {
 	if (ctrl->alpha_en || ctrl->ck_en)
@@ -1885,8 +1893,8 @@ static int ge_fillrect(struct mpp_ge *ge, struct ge_fillrect *fill)
 
 	/* check rgb type */
 	if (ge->version_id == GE_VERSION_ID_1_1 &&
-		(!is_rgb(fill->dst_buf.format))) {
-		printf("fill rectangle not support yuv format\n");
+		(!is_rgb_or_yuv400(fill->dst_buf.format))) {
+		printf("fill rectangle not support yuv format, except yuv400\n");
 		return -1;
 	}
 
@@ -1966,8 +1974,8 @@ static int ge_bitblt(struct mpp_ge *ge, struct ge_bitblt *blt)
 
 	/* check rgb type */
 	if (ge->version_id == GE_VERSION_ID_1_1 &&
-		(!is_rgb(blt->src_buf.format) || !is_rgb(blt->dst_buf.format))) {
-		printf("bitblt not support yuv format\n");
+		(!is_rgb_or_yuv400(blt->src_buf.format) || !is_rgb(blt->dst_buf.format))) {
+		printf("bitblt not support yuv format, except yuv400\n");
 		return -1;
 	}
 

@@ -9,8 +9,15 @@ import os, sys, subprocess, math, re, zlib, json, struct, argparse, filecmp
 from collections import namedtuple
 from collections import OrderedDict
 
+br2_target_rootfs_jffs2_padsize = "BR2_TARGET_ROOTFS_JFFS2_PADSIZE"
 br2_target_rootfs_ubifs_max_size = "BR2_TARGET_ROOTFS_UBIFS_MAX_SIZE"
 br2_target_rootfs_ext2_max_size = "BR2_TARGET_ROOTFS_EXT2_SIZE"
+
+br2_target_userfs_jffs2_padsize = [
+    "BR2_TARGET_USERFS1_JFFS2_PADSIZE",
+    "BR2_TARGET_USERFS2_JFFS2_PADSIZE",
+    "BR2_TARGET_USERFS3_JFFS2_PADSIZE"
+]
 
 br2_target_userfs_ubifs_max_size = [
     "BR2_TARGET_USERFS1_UBIFS_MAX_SIZE",
@@ -37,6 +44,16 @@ def load_fs_max_size(media_type, data, pt_name, pt_size):
                 print('%#x'%pt_size)
         else:
             partstr = br2_target_userfs_ubifs_max_size[userfs_num]
+            if partstr == data:
+                print('%#x'%pt_size)
+            userfs_num += 1
+    if media_type == "spi-nor":
+        if pt_name == "rootfs":
+            partstr = br2_target_rootfs_jffs2_padsize
+            if partstr == data:
+                print('%#x'%pt_size)
+        else:
+            partstr = br2_target_userfs_jffs2_padsize[userfs_num]
             if partstr == data:
                 print('%#x'%pt_size)
             userfs_num += 1
@@ -110,7 +127,7 @@ def aic_auto_calculate_part_config(cfg, data):
     total_siz = 0
 
     media_type = cfg["image"]["info"]["media"]["type"]
-    if media_type == "spi-nand" or media_type == "spi-nor":
+    if media_type == "spi-nand":
         total_siz = parse_text_to_num(cfg[media_type]["size"])
         partitions = cfg[media_type]["partitions"]
         if len(partitions) == 0:
@@ -146,6 +163,32 @@ def aic_auto_calculate_part_config(cfg, data):
                         sys.exit(1)
             else:
                 pt_off += pt_size
+    elif media_type == "spi-nor":
+        total_siz = parse_text_to_num(cfg[media_type]["size"])
+        partitions = cfg[media_type]["partitions"]
+        if len(partitions) == 0:
+            print("Partition table is empty")
+            sys.exit(1)
+        for part in partitions:
+            itemstr = ""
+            if "size" not in partitions[part]:
+                print("No size value for partition: {}".format(part))
+            itemstr += partitions[part]["size"]
+            pt_size_str = itemstr
+            pt_name = "{}".format(part)
+            pt_size = parse_text_to_num(pt_size_str)
+            if partitions[part]["size"] == "-":
+                pt_size = total_siz - pt_off
+            if "offset" in partitions[part]:
+               pt_off = parse_text_to_num(partitions[part]["offset"])
+            if rootfs_num == 1:
+                load_fs_max_size(media_type, data, pt_name, pt_size)
+            if pt_name == "rootfs":
+                load_fs_max_size(media_type, data, pt_name, pt_size)
+                rootfs_num = 1
+            pt_off += pt_size
+            if userfs_num > len(br2_target_userfs_jffs2_padsize) - 1:
+                sys.exit(1)
     elif media_type == "mmc":
         total_siz = parse_text_to_num(cfg[media_type]["size"])
         partitions = cfg[media_type]["partitions"]

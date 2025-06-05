@@ -60,5 +60,10 @@
         <file>resources/animation/ica.png</file>
         <file>resources/video/pause_norma_1.png</file>
         <file>resources/video/play_normal.png</file>
+        <file>resources/keyboard/backspace.png</file>
+        <file>resources/keyboard/caplock.png</file>
+        <file>resources/keyboard/enter.png</file>
+        <file>resources/keyboard/pack_up.png</file>
+        <file>resources/keyboard/space.png</file>
     </qresource>
 </RCC>

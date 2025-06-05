@@ -1,3 +1,54 @@
+# V1.2.9 #
+
+## 新增 ##
+- USB：支持DTS中配置阻抗匹配参数
+- QtLauncher：集成WiFi manager、QtKeyboard（支持中文）
+- 新增p、m两个shell命令，和Luban-Lite保持同样的用法
+- 打包镜像：支持SM2、SM4算法的签名
+- AiPQ工具：支持通过UART调试MIPI DSI屏幕
+- Qt：增加Framebuffer旋转功能
+- Target GDB：升级版本号为V14.2
+- RTP：增加X、Y坐标的镜像接口
+- 打包：支持解包、重新打包的场景需求
+- test-wdt：增加持续喂狗的功能
+- 新增WiFi支持：aic8800、asr5505s、rtl8733bu、rtl8733bs支持BT功能
+- 新增第三方包：libmodbus、tcpdump、avahi、libdaemon、v4l-utils
+- 新增示例：test-coredump、p2p_auto
+
+## 优化 ##
+- 启动：精简启动过程中的log
+- SPI：优化系统高负载时的DMA处理流程
+- I2C：优化不同速率的超时机制
+- 烧写：优化NOR的烧写速度
+- PBP：增强SID的写保护机制；退出PBP前关闭UART
+- Audio：优化动态音量调节的效果
+- UART：配置参数期间进入loopback模式
+- 打包：自动计算分区大小以限制Jffs2镜像的size
+- SPI：优化互斥锁的使用流程
+- RTC：解耦SYS_BAK功能，将其移到WRI模块，RTC可随时关闭
+
+## 修改 ##
+- LVGL：调整启动脚本中的RTP校准处理
+- Disp：修正关闭CONFIG_PM时的编译依赖
+- GE：完善YUV格式的兼容性检查
+- MPP：修正PNG解码中的刷Cache处理
+- USB：修正OHCI休眠的处理流程
+- SPI：修正全双工的CPU模式处理流程
+- ADB：启动脚本中支持停止adbd服务
+- 烧写：完善sparse格式区分的异常情况处理
+- toolchain：增加'-mno-dup-loop-header'优化选项
+- SD卡：完善SD卡自动挂载的处理逻辑
+- WiFi：更新ASR5505固件，适配了ASR5532u
+- MPP：
+  - 修正wav文件播放时的seek处理
+  - 修正某些场景下的播放启动失败问题
+- env：修正eMMC方案中分区名称冲突的问题
+- PM：默认打开休眠功能，可降低系统功耗
+- Audio：修正全局数组的边界处理
+- 启动：默认挂载mnt目录为tmpfs，解决NOR方案中rootfs只读时的写需求
+
+
+
 # V1.2.7 #
 
 ## 新增##

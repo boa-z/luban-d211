@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 /*
- * Copyright (C) 2020-2024 ArtInChip Technology Co., Ltd.
+ * Copyright (C) 2020-2025 ArtInChip Technology Co., Ltd.
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -324,6 +324,7 @@ int dvp_request_buf(int num)
 			return -1;
 
 	        memset(&buf, 0, sizeof(struct v4l2_buffer));
+	        memset(planes, 0, sizeof(struct v4l2_plane) * DVP_PLANE_NUM);
 	        buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
 	        buf.index = i;
 	        buf.length = DVP_PLANE_NUM;
@@ -549,24 +550,6 @@ int video_layer_disable(void)
 	return 0;
 }
 
-#define US_PER_SEC      1000000
-
-static void show_fps(struct timeval *start, struct timeval *end, int cnt)
-{
-    double diff;
-
-    if (end->tv_usec < start->tv_usec) {
-        diff = (double)(US_PER_SEC + end->tv_usec - start->tv_usec)/US_PER_SEC;
-        diff += end->tv_sec - 1 - start->tv_sec;
-    } else {
-        diff = (double)(end->tv_usec - start->tv_usec)/US_PER_SEC;
-        diff += end->tv_sec - start->tv_sec;
-    }
-
-    printf("\nDVP frame rate: %.1f, frame %d / %.1f seconds\n",
-           (double)cnt/diff, cnt, diff);
-}
-
 int dvp_capture(u32 cnt)
 {
 	int i, index = 0;
@@ -596,11 +579,11 @@ int dvp_capture(u32 cnt)
 
 		if (i && (i % 1000 == 0)) {
 			gettimeofday(&end, NULL);
-			show_fps(&start, &end, i);
+			show_fps("DVP", &start, &end, i);
 		}
 	}
 	gettimeofday(&end, NULL);
-	show_fps(&start, &end, i);
+	show_fps("DVP", &start, &end, i);
 
 	return 0;
 }

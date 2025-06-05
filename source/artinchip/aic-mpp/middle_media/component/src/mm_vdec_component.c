@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2024 ArtInChip Technology Co. Ltd
+ * Copyright (C) 2020-2025 ArtInChip Technology Co. Ltd
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -807,11 +807,11 @@ static void *mm_vdec_component_thread(void *p_thread_data)
                             MM_COMMAND_WKUP, 0, NULL);
             p_vdec_data->decoder_ok_num++;
         } else if (dec_ret == DEC_NO_READY_PACKET) {
-            mm_send_command(p_bind_demuxer->p_bind_comp,
-                            MM_COMMAND_WKUP, 0, NULL);
             pthread_mutex_lock(&p_vdec_data->in_pkt_lock);
             p_vdec_data->wait_for_ready_pkt = MM_TRUE;
             pthread_mutex_unlock(&p_vdec_data->in_pkt_lock);
+            mm_send_command(p_bind_demuxer->p_bind_comp,
+                            MM_COMMAND_WKUP, 0, NULL);
 
             if (p_vdec_data->pkt_end_flag) {
                 mm_send_command(p_bind_video_render->p_bind_comp,

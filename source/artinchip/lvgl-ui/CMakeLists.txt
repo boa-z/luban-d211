@@ -7,8 +7,18 @@ project(lvgl-ui)
 set(DEMO_FOLDER aic_demo)
 
 # set app folder
-set(APP_FOLDER ${DEMO_FOLDER}/base_demo)
-#set(APP_FOLDER ${DEMO_FOLDER}/hub_demo)
+if(DEFINED LVGL_FBDEV)
+    if(${LVGL_FBDEV} STREQUAL "yes")
+        set(APP_FOLDER ${DEMO_FOLDER}/base_demo)
+        #set(APP_FOLDER ${DEMO_FOLDER}/hub_demo)
+    endif()
+endif()
+
+if(DEFINED LVGL_DRM)
+    if(${LVGL_DRM} STREQUAL "yes")
+        set(APP_FOLDER ${DEMO_FOLDER}/drm_base)
+    endif()
+endif()
 
 # set LVGL lib path
 set(LVGL_LIB_PATH lvgl_v8)
@@ -50,7 +60,23 @@ include(GNUInstallDirs)
 add_subdirectory(${LVGL_LIB_PATH}/lvgl)
 
 # lvgl HAL source
-set(LVGL_HAL ${CMAKE_CURRENT_SOURCE_DIR}/${LVGL_LIB_PATH}/lv_drivers)
+set(LVGL_DRIVER_PATH fbdev)
+
+if(DEFINED LVGL_FBDEV)
+    if((${LVGL_FBDEV} STREQUAL "yes") AND (${LVGL_V_9} STREQUAL "yes"))
+        set(LVGL_DRIVER_PATH fbdev)
+    else()
+        set(LVGL_DRIVER_PATH )
+    endif()
+endif()
+
+if(DEFINED LVGL_DRM)
+    if(${LVGL_DRM} STREQUAL "yes")
+        set(LVGL_DRIVER_PATH drm)
+    endif()
+endif()
+
+set(LVGL_HAL ${CMAKE_CURRENT_SOURCE_DIR}/${LVGL_LIB_PATH}/lv_drivers/${LVGL_DRIVER_PATH})
 
 file(GLOB_RECURSE DRIVER_SOURCE_FILES
     ${LVGL_HAL}/*.c)
@@ -59,7 +85,7 @@ file(GLOB_RECURSE DRIVER_SOURCE_FILES
 file(GLOB_RECURSE APP_SOURCE_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/${APP_FOLDER}/*.c)
 
-if  (NOT APP_FOLDER STREQUAL aic_demo/qc_test AND NOT APP_FOLDER STREQUAL aic_demo/lv_perf)
+if  (NOT APP_FOLDER STREQUAL aic_demo/lv_perf)
     file(GLOB APP_SOURCE_FILES_MAIN
         ${CMAKE_CURRENT_SOURCE_DIR}/main.c)
     list(APPEND APP_SOURCE_FILES ${APP_SOURCE_FILES_MAIN})
@@ -79,10 +105,26 @@ add_executable(${APP_OUT_NAME} ${APP_SOURCE_FILES})
 target_link_libraries(${APP_OUT_NAME} lvgl)
 target_link_libraries(${APP_OUT_NAME} lvgl_examples)
 target_link_libraries(${APP_OUT_NAME} lvgl_demos)
-target_link_libraries(${APP_OUT_NAME} media_player)
-target_link_libraries(${APP_OUT_NAME} m)
-target_link_libraries(${APP_OUT_NAME} mpp_base mpp_ve mpp_ge mpp_decoder)
+
+if(DEFINED LVGL_FBDEV)
+    if(${LVGL_FBDEV} STREQUAL "yes")
+        target_link_libraries(${APP_OUT_NAME} media_player)
+        target_link_libraries(${APP_OUT_NAME} m)
+        target_link_libraries(${APP_OUT_NAME} mpp_base mpp_ve mpp_ge mpp_decoder)
+    endif()
+endif()
+
 target_link_libraries(${APP_OUT_NAME} pthread)
+
+if(DEFINED LVGL_DRM)
+    if(${LVGL_DRM} STREQUAL "yes")
+        find_library(LIBDRM libdrm.so)
+        find_path(VAR xf86drm.h)
+
+        target_link_libraries(${APP_OUT_NAME} ${LIBDRM})
+        target_include_directories(${APP_OUT_NAME} PUBLIC "${VAR}/drm/")
+    endif()
+endif()
 
 if (APP_FOLDER STREQUAL aic_demo/qc_test OR APP_FOLDER STREQUAL aic_demo/hub_demo)
     if(use_mirror STREQUAL "use_screen_mirror")

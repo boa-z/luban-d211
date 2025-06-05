@@ -1,7 +1,9 @@
 /*
- * Copyright (C) 2024 ArtInChip Technology Co. Ltd
+ * Copyright (C) 2024-2025 ArtInChip Technology Co. Ltd
  *
  * SPDX-License-Identifier: Apache-2.0
+ *
+ * Author: Huahui Mai <huahui.mai@artinchip.com>
  */
 
 #ifndef AICVIDEOVIEW_H
@@ -16,10 +18,9 @@
 #include "../video/aicvideothread.h"
 #include "../video/aicimagedecoder.h"
 
+#ifdef QTLAUNCHER_GE_SUPPORT
 #include <linux/fb.h>
 #include <video/artinchip_fb.h>
-
-#ifdef QTLAUNCHER_GE_SUPPORT
 #include <video/mpp_types.h>
 #include <linux/dma-heap.h>
 #include <dma_allocator.h>
@@ -33,7 +34,7 @@ class AiCVideoView : public QWidget
     Q_OBJECT
 
 public:
-    AiCVideoView(QSize size, QWidget *parent = NULL);
+    explicit AiCVideoView(QSize size, QWidget *parent = NULL);
     ~AiCVideoView();
 
     void videoStop(void);

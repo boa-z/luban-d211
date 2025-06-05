@@ -10,6 +10,7 @@
 #include <linux/device.h>
 #include <linux/dma-mapping.h>
 #include <linux/of_device.h>
+#include <linux/of_address.h>
 #include <linux/mutex.h>
 #include <linux/platform_device.h>
 #include <linux/phy/phy.h>
@@ -1073,6 +1074,55 @@ bad_mps:
 	dev_err(gg->dev, "ep%d: bad mps of %d\n", ep, mps);
 }
 
+static void aic_gg_set_usb_res(void __iomem *ctl_reg, u32 resis)
+{
+	u32 val;
+
+	if (ctl_reg == NULL)
+		return;
+
+	resis &= SYSCFG_USB_RES_CAL_VAL_MASK;
+
+	val = readl(ctl_reg);
+	val &= ~SYSCFG_USB_RES_CAL_VAL_MASK;
+	val |= resis << SYSCFG_USB_RES_CAL_VAL_SHIFT;
+	val |= 1 << SYSCFG_USB_RES_CAL_EN_SHIFT;
+
+	writel(val, ctl_reg);
+}
+
+static int aic_gg_get_res_cfg(struct device_node *np, struct aic_usb_res_cfg *cfg,
+				const char *property)
+{
+	int len, index, offset, res;
+	const __be32 *prop;
+	struct device_node *child_np;
+
+	prop = of_get_property(np, property, &len);
+	if (!prop || len < 4 * sizeof(__be32))
+		return -ENODEV;
+
+	child_np = of_find_node_by_phandle(be32_to_cpup(prop++));
+	if (!child_np)
+		return -ENODEV;
+
+	index = be32_to_cpup(prop++);
+	offset = be32_to_cpup(prop++);
+	res = be32_to_cpup(prop);
+
+	cfg->addr = of_iomap(child_np, index);
+	if (!cfg->addr)
+		return -ENOMEM;
+	cfg->addr += offset;
+	cfg->resis = res;
+
+	pr_debug("device property : %s \n", property);
+	pr_debug("child_np : %s \n", child_np->name);
+	pr_debug("offset : %#x  res : %#x \n", offset, res);
+
+	return 0;
+}
+
 static int aic_core_hw_init1(struct aic_usb_gadget *gg, bool is_usb_reset)
 {
 	u32 reg = 0;
@@ -1235,6 +1285,8 @@ static int aic_core_init(struct aic_usb_gadget *gg,
 			  bool is_usb_reset)
 {
 	int ret = 0;
+
+	aic_gg_set_usb_res(gg->params.usb_res_cfg.addr, gg->params.usb_res_cfg.resis);
 
 	ret = aic_core_hw_init1(gg, is_usb_reset);
 	if (ret)
@@ -3695,6 +3747,7 @@ static int aic_udc_probe(struct platform_device *dev)
 	}
 
 	/* regulator */
+	aic_gg_get_res_cfg(dev->dev.of_node, &gg->params.usb_res_cfg, "aic,usbd-ext-resistance");
 
 	/* clock */
 	for (i = 0; i < USB_MAX_CLKS_RSTS; i++) {

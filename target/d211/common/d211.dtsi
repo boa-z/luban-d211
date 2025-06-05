@@ -153,7 +153,6 @@
 			compatible = "riscv";
 			riscv,isa = "rv64gcxthead";
 			mmu-type = "riscv,sv39";
-			cpu-freq = "600Mhz";
 			cpu-icache = "32KB";
 			cpu-dcache = "32KB";
 			cpu-tlb = "1024 4-ways";
@@ -272,6 +271,10 @@
 			compatible = "artinchip,aic-ohci-v1.0";
 			reg = <0x0 0x10210400 0x0 0x100>;
 			interrupts-extended = <&plic0 36 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&cmu CLK_USBH0>, <&cmu CLK_USB_PHY0>;
+			clock-names = "usbh";
+			resets = <&rst RESET_USBH0>, <&rst RESET_USBPHY0>;
+			reset-names = "usbh", "usbh-phy";
 			//num-ports = <1>;
 			aic,otg-support;
 			status = "disabled";
@@ -296,6 +299,10 @@
 			compatible = "artinchip,aic-ohci-v1.0";
 			reg = <0x0 0x10220400 0x0 0x100>;
 			interrupts-extended = <&plic0 38 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&cmu CLK_USBH1>, <&cmu CLK_USB_PHY1>;
+			clock-names = "usbh";
+			resets = <&rst RESET_USBH1>, <&rst RESET_USBPHY1>;
+			reset-names = "usbh", "usbh-phy";
 			status = "disabled";
 		};
 
@@ -482,7 +489,7 @@
 
 		rtc: rtc@19030000 {
 			compatible = "artinchip,aic-rtc-v1.0";
-			reg = <0x0 0x19030000 0x0 0x1000>;
+			reg = <0x0 0x19030000 0x0 0xfc 0x0 0x19030800 0x0 0xfc>;
 			interrupts-extended = <&plic0 50 IRQ_TYPE_LEVEL_HIGH>;
 			clocks = <&cmu CLK_RTC>;
 			resets = <&rst RESET_RTC>;
@@ -1064,7 +1071,7 @@
 
 		wri: wri@1900f000 {
 			compatible = "artinchip,aic-wri-v1.0";
-			reg = <0x0 0x1900f000 0x0 0x1000>;
+			reg = <0x0 0x1900f000 0x0 0x1000 0x0 0x190300fc 0x0 0x44>;
 			status = "okay";
 		};
 
