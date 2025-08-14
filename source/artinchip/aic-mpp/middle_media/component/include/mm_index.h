@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2024 ArtInChip Technology Co. Ltd
+ * Copyright (C) 2020-2025 ArtInChip Technology Co. Ltd
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -59,6 +59,7 @@ typedef enum MM_INDEX_TYPE {
     MM_INDEX_VENDOR_AUDIO_RENDER_VOLUME,
     MM_INDEX_VENDOR_DEMUXER_SKIP_TRACK,
     MM_INDEX_VENDOR_VIDEO_RENDER_CAPTURE,
+    MM_INDEX_VENDOR_VIDEO_RENDER_KEEP_LAST_FRAME,
     MM_INDEX_VENDOR_MUXER_RECORD_FILE_INFO,
 } MM_INDEX_TYPE;
 

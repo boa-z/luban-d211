@@ -228,13 +228,30 @@ s32 nor_fwc_data_write(struct fwc_info *fwc, u8 *buf, s32 len)
 	uint64_t erased_addr = 0;
 	s32 i = 0, calc_len;
 	s32 ret = 0;
-	size_t retlen;
-	u8 *rdbuf;
+	size_t retlen, rb_len = 0;
+	u8 *rdbuf = NULL;
 
 	priv = (struct aicupg_nor_priv *)fwc->priv;
 	if (!priv)
 		return 0;
-	rdbuf = valloc(len);
+
+	for (i = 0; i < MAX_DUPLICATED_PART; i++) {
+		mtd = priv->mtds[i];
+		if (!mtd)
+			continue;
+
+		if (len < mtd->erasesize)
+			rb_len = mtd->erasesize;
+		else
+			rb_len = len;
+		rdbuf = valloc(rb_len);
+		if (!rdbuf) {
+			pr_err("Malloc failed\n");
+			return 0;
+		}
+		break;
+	}
+
 	for (i = 0; i < MAX_DUPLICATED_PART; i++) {
 		mtd = priv->mtds[i];
 		if (!mtd)
@@ -253,7 +270,7 @@ s32 nor_fwc_data_write(struct fwc_info *fwc, u8 *buf, s32 len)
 				return 0;
 			}
 
-			if (!is_all_ff(rdbuf, len)) {
+			if (!is_all_ff(rdbuf, mtd->erasesize)) {
 				ret = do_mtd_erase_sector(mtd, erased_addr);
 				if (ret) {
 					pr_err("Mtd erse sector failed!..\n");

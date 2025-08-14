@@ -1,0 +1,4 @@
+config BR2_PACKAGE_HTTP_WIFICONFIG
+    bool "Enable artinchip http-wificonfig"
+    default n
+

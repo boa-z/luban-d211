@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (c) 2022 ArtInChip
+ * Copyright (c) 2022-2025 ArtInChip
  *
  * Authors:
  *	keliang.liu <keliang.liu@artinchip.com>
@@ -11,6 +11,11 @@
 #include <linux/mtd/spinand.h>
 
 #define SPINAND_MFR_FORESEE			0xCD
+#define FORESEE_STATUS_ECC_NO_BITFLIPS	    	(0 << 4)
+#define FORESEE_STATUS_ECC_1_BITFLIPS	    	(1 << 4)
+#define FORESEE_ECC_UNCOR_ERROR10           	(2 << 4)
+#define FORESEE_ECC_UNCOR_ERROR11           	(3 << 4)
+#define STATUS_ECC_MASK			GENMASK(5, 4)
 
 static SPINAND_OP_VARIANTS(read_cache_variants,
 		SPINAND_PAGE_READ_FROM_CACHE_X4_OP(0, 1, NULL, 0),
@@ -29,13 +34,25 @@ static SPINAND_OP_VARIANTS(update_cache_variants,
 static int f35sqa_ooblayout_ecc(struct mtd_info *mtd, int section,
 				  struct mtd_oob_region *region)
 {
-	return -ERANGE;
+	if (section)
+		return -ERANGE;
+
+	region->offset = mtd->oobsize;
+	region->length = 0;
+
+	return 0;
 }
 
 static int f35sqa_ooblayout_free(struct mtd_info *mtd, int section,
 				   struct mtd_oob_region *region)
 {
-	return -ERANGE;
+	if (section)
+		return -ERANGE;
+
+	region->offset = 2;
+	region->length = mtd->oobsize - 2;
+
+	return 0;
 }
 
 static const struct mtd_ooblayout_ops f35sqa_ooblayout = {
@@ -47,14 +64,15 @@ static int f35sqa_ecc_get_status(struct spinand_device *spinand,
 				      u8 status)
 {
 	switch (status & STATUS_ECC_MASK) {
-	case STATUS_ECC_NO_BITFLIPS:
+	case FORESEE_STATUS_ECC_NO_BITFLIPS:
 		return 0;
 
-	case STATUS_ECC_UNCOR_ERROR:
-		return -EBADMSG;
+	case FORESEE_STATUS_ECC_1_BITFLIPS:
+		return 1;
 
-	case STATUS_ECC_HAS_BITFLIPS:
-		return ((status & STATUS_ECC_MASK) >> 4);
+	case FORESEE_ECC_UNCOR_ERROR10:
+	case FORESEE_ECC_UNCOR_ERROR11:
+		return -EBADMSG;
 
 	default:
 		break;

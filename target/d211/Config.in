@@ -53,6 +53,10 @@ config LUBAN_BOARD_D211_QC128_MMC
 	bool "qc128_mmc"
 	depends on LUBAN_CHIP_D211
 
+config LUBAN_BOARD_D211_AISHOOT88_NOR
+	bool "aishoot88_nor"
+	depends on LUBAN_CHIP_D211
+
 endchoice
 
 config LUBAN_BOARD_OF_D211
@@ -64,7 +68,9 @@ config LUBAN_BOARD_OF_D211
 	default "per2_spinor" if LUBAN_BOARD_D211_PER2_SPINOR
 	default "demo128_nand" if LUBAN_BOARD_D211_DEMO128_NAND
 	default "demo100_nand" if LUBAN_BOARD_D211_DEMO100_NAND
+	default "aishoot88_nor" if LUBAN_BOARD_D211_AISHOOT88_NOR
 	default "demo88_nor_musl" if LUBAN_BOARD_D211_DEMO88_NOR_MUSL
+	default "aishoot88_nor" if LUBAN_BOARD_D211_AISHOOT88_NOR
 	default "demo88_nor" if LUBAN_BOARD_D211_DEMO88_NOR
 	default "demo88_nand" if LUBAN_BOARD_D211_DEMO88_NAND
 	default "ota_emmc" if LUBAN_BOARD_D211_OTA_EMMC

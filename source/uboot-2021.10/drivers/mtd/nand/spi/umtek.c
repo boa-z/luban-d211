@@ -33,13 +33,25 @@ static SPINAND_OP_VARIANTS(update_cache_variants,
 static int gss01sqa_ooblayout_ecc(struct mtd_info *mtd, int section,
 				  struct mtd_oob_region *region)
 {
-	return -ERANGE;
+	if (section)
+		return -ERANGE;
+
+	region->offset = 2;
+	region->length = 30;
+
+	return 0;
 }
 
 static int gss01sqa_ooblayout_free(struct mtd_info *mtd, int section,
 				   struct mtd_oob_region *region)
 {
-	return -ERANGE;
+	if (section)
+		return -ERANGE;
+
+	region->offset = 32;
+	region->length = 32;
+
+	return 0;
 }
 
 static const struct mtd_ooblayout_ops gss01sqa_ooblayout = {

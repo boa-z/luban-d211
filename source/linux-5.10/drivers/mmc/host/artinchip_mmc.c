@@ -819,13 +819,13 @@ static int artinchip_mmc_get_cd(struct mmc_host *mmc)
 		present = ((mci_readl(host, SDMC_CDET) & SDMC_CDET_ABSENT)) ?
 			   0 : 1;
 
-	spin_lock(&host->lock);
+	spin_lock_bh(&host->lock);
 	if (present && !test_and_set_bit(ARTINCHIP_MMC_CARD_PRESENT, &slot->flags))
 		dev_dbg(&mmc->class_dev, "card is present\n");
 	else if (!present &&
 			!test_and_clear_bit(ARTINCHIP_MMC_CARD_PRESENT, &slot->flags))
 		dev_dbg(&mmc->class_dev, "card is not present\n");
-	spin_unlock(&host->lock);
+	spin_unlock_bh(&host->lock);
 	return present;
 }
 

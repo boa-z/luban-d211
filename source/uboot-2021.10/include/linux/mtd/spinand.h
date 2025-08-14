@@ -221,6 +221,7 @@ extern const struct spinand_manufacturer esmt_spinand_manufacturer;
 extern const struct spinand_manufacturer umtek_spinand_manufacturer;
 extern const struct spinand_manufacturer byte_spinand_manufacturer;
 extern const struct spinand_manufacturer xtx_spinand_manufacturer;
+extern const struct spinand_manufacturer xincun_spinand_manufacturer;
 
 /**
  * struct spinand_op_variants - SPI NAND operation variants
@@ -360,6 +361,7 @@ void spl_nand_bbt_init(struct spinand_device *spinand);
 #endif
 void aic_clear_nand_bbt(void);
 void aic_nand_bbt_init(struct spinand_device *spinand);
+int aic_nand_bbt_update(struct spinand_device *spinand);
 #endif
 
 /**

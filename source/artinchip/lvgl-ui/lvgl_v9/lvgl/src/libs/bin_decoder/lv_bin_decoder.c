@@ -285,6 +285,9 @@ lv_result_t lv_bin_decoder_open(lv_image_decoder_t * decoder, lv_image_decoder_d
             if(image->header.flags & LV_IMAGE_FLAGS_ALLOCATED) {
                 decoded = (lv_draw_buf_t *)image;
             }
+            else if(image->header.flags & LV_IMAGE_FLAGS_USER8) { // used by aic mpp buffer
+                decoded = (lv_draw_buf_t *)image;
+            }
             else {
                 decoded = &decoder_data->c_array;
                 lv_draw_buf_from_image(decoded, image);

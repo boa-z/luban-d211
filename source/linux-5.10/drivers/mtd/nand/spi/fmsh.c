@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (c) 2022 ArtInChip
+ * Copyright (c) 2022-2025 ArtInChip
  *
  * Authors:
  *	keliang.liu <keliang.liu@artinchip.com>
@@ -28,21 +28,33 @@ static SPINAND_OP_VARIANTS(update_cache_variants,
 		SPINAND_PROG_LOAD_X4(false, 0, NULL, 0),
 		SPINAND_PROG_LOAD(false, 0, NULL, 0));
 
-static int fm25s01_ooblayout_ecc(struct mtd_info *mtd, int section,
+static int fm25s01a_ooblayout_ecc(struct mtd_info *mtd, int section,
 				  struct mtd_oob_region *region)
 {
-	return -ERANGE;
+	if (section)
+		return -ERANGE;
+
+	region->offset = mtd->oobsize;
+	region->length = 0;
+
+	return 0;
 }
 
-static int fm25s01_ooblayout_free(struct mtd_info *mtd, int section,
+static int fm25s01a_ooblayout_free(struct mtd_info *mtd, int section,
 				   struct mtd_oob_region *region)
 {
-	return -ERANGE;
+	if (section)
+		return -ERANGE;
+
+	region->offset = 2;
+	region->length = mtd->oobsize - 2;
+
+	return 0;
 }
 
-static const struct mtd_ooblayout_ops fm25s01_ooblayout = {
-	.ecc = fm25s01_ooblayout_ecc,
-	.free = fm25s01_ooblayout_free,
+static const struct mtd_ooblayout_ops fm25s01a_ooblayout = {
+	.ecc = fm25s01a_ooblayout_ecc,
+	.free = fm25s01a_ooblayout_free,
 };
 
 static int fm25s01_ecc_get_status(struct spinand_device *spinand,
@@ -74,7 +86,7 @@ static const struct spinand_info fmsh_spinand_table[] = {
 					      &write_cache_variants,
 					      &update_cache_variants),
 		     SPINAND_HAS_QE_BIT,
-		     SPINAND_ECCINFO(&fm25s01_ooblayout,
+		     SPINAND_ECCINFO(&fm25s01a_ooblayout,
 				     fm25s01_ecc_get_status)),
 
 	SPINAND_INFO("FM25S01A",
@@ -85,7 +97,7 @@ static const struct spinand_info fmsh_spinand_table[] = {
 					      &write_cache_variants,
 					      &update_cache_variants),
 		     SPINAND_HAS_QE_BIT,
-		     SPINAND_ECCINFO(&fm25s01_ooblayout,
+		     SPINAND_ECCINFO(&fm25s01a_ooblayout,
 				     fm25s01_ecc_get_status)),
 };
 

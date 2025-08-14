@@ -1,3 +1,48 @@
+# V1.3.0 #
+
+## 新增 ##
+- USB：
+  - 支持MTP功能
+  - 支持指定EP地址
+- MPP：支持AAC raw data的解码
+- Display：支持AiPQ工具的接口自动识别功能
+- PBP：支持预定义IO的状态
+- SPI：支持用户态动态调整SPI的clock频率
+- LVGL：
+  - 新增控件：lyrics_effect（歌词特效）、aic_canvas、aic_player
+- 增加aishoot_demo
+- RTP：支持作为普通ADC使用
+- WiFi：aic8800增加monitor功能
+- 增加歌词特效的功能，支持以视频播放作为背景
+- 新增方案：双系统双显、aishoot
+- 新增示例：test_battery、http-wificonfig
+- 新增器件：
+- NAND：PY25Q128HA、XCSP1AAPK-IT
+- 屏幕：nv3051、gh8555bc
+
+## 优化 ##
+- LVGL V9：
+  - 优化软件绘图的stride处理
+  - 优化FreeType的多线程访问
+- MPP：优化视频播放的文件切换流程
+- SPL：
+  - 使用硬件Gzip解压Kernel
+  - 优化Boot logo的兼容处理
+- Boot：优化SPI的delay参数配置流程
+- Display：优化Vsync的处理流程
+- SPI：完善工作模式的容错处理
+- NAND：
+  - 优化OOB layout的处理流程
+  - 优化ECC的获取接口
+  - 完善Boot中的BBT处理流程
+- winbond：兼容3Byte ID的型号
+- NOR：优化擦写的容错处理
+
+## 修改 ##
+- SPL：demo88_nor配置默认打开Falcon模式
+
+
+
 # V1.2.9 #
 
 ## 新增 ##

@@ -118,6 +118,11 @@ static const unsigned int scaling_coeffs[4][32] = {
 	},
 };
 
+u32 de_get_output_line(void __iomem *base_addr)
+{
+	return reg_read(base_addr + TIMING_DEBUG);
+}
+
 void de_config_prefetch_line_set(void __iomem *base_addr, u32 line)
 {
 	reg_set_bits(base_addr + TIMING_LINE_SET,

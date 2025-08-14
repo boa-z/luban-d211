@@ -31,21 +31,80 @@ static SPINAND_OP_VARIANTS(update_cache_variants,
 		SPINAND_PROG_LOAD_X4(false, 0, NULL, 0),
 		SPINAND_PROG_LOAD(false, 0, NULL, 0));
 
-static int f50l1g_ooblayout_ecc(struct mtd_info *mtd, int section,
-				  struct mtd_oob_region *region)
+/*
+ * OOB spare area map (64 bytes)
+ *
+ * Bad Block Markers
+ * filled by HW and kernel                 Reserved
+ *   |                 +-----------------------+-----------------------+
+ *   |                 |                       |                       |
+ *   |                 |    OOB free data Area |non ECC protected      |
+ *   |   +-------------|-----+-----------------|-----+-----------------|-----+
+ *   |   |             |     |                 |     |                 |     |
+ * +-|---|----------+--|-----|--------------+--|-----|--------------+--|-----|--------------+
+ * | |   | section0 |  |     |    section1  |  |     |    section2  |  |     |    section3  |
+ * +-v-+-v-+---+----+--v--+--v--+-----+-----+--v--+--v--+-----+-----+--v--+--v--+-----+-----+
+ * |   |   |   |    |     |     |     |     |     |     |     |     |     |     |     |     |
+ * |0:1|2:3|4:7|8:15|16:17|18:19|20:23|24:31|32:33|34:35|36:39|40:47|48:49|50:51|52:55|56:63|
+ * |   |   |   |    |     |     |     |     |     |     |     |     |     |     |     |     |
+ * +---+---+-^-+--^-+-----+-----+--^--+--^--+-----+-----+--^--+--^--+-----+-----+--^--+--^--+
+ *           |    |                |     |                 |     |                 |     |
+ *           |    +----------------|-----+-----------------|-----+-----------------|-----+
+ *           |             ECC Area|(Main + Spare) - filled|by ESMT NAND HW        |
+ *           |                     |                       |                       |
+ *           +---------------------+-----------------------+-----------------------+
+ *                         OOB ECC protected Area - not used due to
+ *                         partial programming from some filesystems
+ *                             (like JFFS2 with cleanmarkers)
+ */
+
+#define ESMT_OOB_SECTION_COUNT			4
+#define ESMT_OOB_SECTION_SIZE(nand) \
+	(nanddev_per_page_oobsize(nand) / ESMT_OOB_SECTION_COUNT)
+#define ESMT_OOB_FREE_SIZE(nand) \
+	(ESMT_OOB_SECTION_SIZE(nand) / 2)
+#define ESMT_OOB_ECC_SIZE(nand) \
+	(ESMT_OOB_SECTION_SIZE(nand) - ESMT_OOB_FREE_SIZE(nand))
+#define ESMT_OOB_BBM_SIZE			2
+
+static int f50l1g41lb_ooblayout_ecc(struct mtd_info *mtd, int section,
+				    struct mtd_oob_region *region)
 {
-	return -ERANGE;
+	struct nand_device *nand = mtd_to_nanddev(mtd);
+
+	if (section >= ESMT_OOB_SECTION_COUNT)
+		return -ERANGE;
+
+	region->offset = section * ESMT_OOB_SECTION_SIZE(nand) +
+			 ESMT_OOB_FREE_SIZE(nand);
+	region->length = ESMT_OOB_ECC_SIZE(nand);
+
+	return 0;
 }
 
-static int f50l1g_ooblayout_free(struct mtd_info *mtd, int section,
-				   struct mtd_oob_region *region)
+static int f50l1g41lb_ooblayout_free(struct mtd_info *mtd, int section,
+				     struct mtd_oob_region *region)
 {
-	return -ERANGE;
+	struct nand_device *nand = mtd_to_nanddev(mtd);
+
+	if (section >= ESMT_OOB_SECTION_COUNT)
+		return -ERANGE;
+
+	/*
+	 * Reserve space for bad blocks markers (section0) and
+	 * reserved bytes (sections 1-3)
+	 */
+	region->offset = section * ESMT_OOB_SECTION_SIZE(nand) + 2;
+
+	/* Use only 2 non-protected ECC bytes per each OOB section */
+	region->length = 2;
+
+	return 0;
 }
 
-static const struct mtd_ooblayout_ops f50l1g_ooblayout = {
-	.ecc = f50l1g_ooblayout_ecc,
-	.rfree = f50l1g_ooblayout_free,
+static const struct mtd_ooblayout_ops f50l1g41lb_ooblayout = {
+	.ecc = f50l1g41lb_ooblayout_ecc,
+	.rfree = f50l1g41lb_ooblayout_free,
 };
 
 static int f50l1g_select_target(struct spinand_device *spinand,
@@ -71,7 +130,7 @@ static const struct spinand_info esmt_spinand_table[] = {
 					      &write_cache_variants,
 					      &update_cache_variants),
 		     SPINAND_HAS_QE_BIT,
-		     SPINAND_ECCINFO(&f50l1g_ooblayout, NULL),
+		     SPINAND_ECCINFO(&f50l1g41lb_ooblayout, NULL),
 		     SPINAND_SELECT_TARGET(f50l1g_select_target)),
 };
 

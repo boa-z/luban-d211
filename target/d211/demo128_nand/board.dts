@@ -252,7 +252,21 @@
 		u-boot,dm-pre-reloc;
 		status = "disabled";
 	};
+	rfkill_bt {
+		compatible = "rfkill-gpio";
+		rfkill-name = "bluetooth";
+		rfkill-type = <2>;
+		reset-gpios = <&gpio_d 3 GPIO_ACTIVE_HIGH>;
+		status = "okay";
+	};
 
+	rfkill_wlan {
+		compatible = "rfkill-gpio";
+		rfkill-name = "wlan";
+		rfkill-type = <1>;
+		reset-gpios = <&gpio_d 1 GPIO_ACTIVE_HIGH>;
+		status = "okay";
+	};
 	keys: gpio-keys {
 		compatible = "gpio-keys";
 
@@ -388,8 +402,8 @@
 
 &uart7 {
 	pinctrl-names = "default";
-	pinctrl-0 = <&uart7_pins_a>;
-	status = "disabled";
+	pinctrl-0 = <&uart7_pins_a>, <&uart7_rts_pins_b>, <&uart7_cts_pins_a>;
+	status = "okay";
 };
 
 &i2c0 {
@@ -496,7 +510,12 @@
 &sdmc2 {
 	pinctrl-names = "default";
 	pinctrl-0 = <&sdmc2_pins>;
-	status = "disabled";
+	bus-width = <4>;
+	no-mmc;
+	no-sd;
+	non-removable;
+	cap-sdio-irq;
+	status = "okay";
 };
 
 /* case 1: USB0 = OTG Enable */

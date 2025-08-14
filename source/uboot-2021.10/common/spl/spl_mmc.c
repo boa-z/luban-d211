@@ -375,10 +375,6 @@ static int mmc_load_image_raw_os(struct spl_image_info *spl_image,
 	if (ret)
 		return ret;
 
-#ifdef CONFIG_VIDEO_ARTINCHIP
-	mmc_load_logo(mmc);
-#endif
-
 	if (spl_image->os != IH_OS_LINUX && spl_image->os != IH_OS_TEE
 	    && spl_image->os != IH_OS_OPENSBI) {
 		puts("Expected image is not found. Trying to start U-boot\n");
@@ -557,8 +553,14 @@ int spl_mmc_load(struct spl_image_info *spl_image,
 		if (!spl_start_uboot()) {
 			err = mmc_load_image_raw_os(spl_image, mmc);
 			/* Double check after linux image is loaded. */
-			if (!spl_start_uboot() && !err)
+			if (!spl_start_uboot() && !err) {
+#ifdef CONFIG_SPL_OS_BOOT
+#ifdef CONFIG_VIDEO_ARTINCHIP
+				mmc_load_logo(mmc);
+#endif
+#endif
 				return err;
+			}
 		}
 
 		raw_sect = spl_mmc_get_uboot_raw_sector(mmc, raw_sect);

@@ -3489,6 +3489,31 @@ err:
 	return ret;
 }
 
+static struct usb_ep *aic_gg_match_ep(struct usb_gadget *gadget,
+		struct usb_endpoint_descriptor *desc,
+		struct usb_ss_ep_comp_descriptor *ep_comp)
+{
+	struct aic_usb_gadget *gg = our_gadget(gadget);
+	int ep_num = usb_endpoint_num(desc);
+	struct usb_ep *ep;
+
+	if ((ep_num >= gg->params.num_ep) || (ep_num == 0))
+		return NULL;
+
+	if (usb_endpoint_dir_in(desc))
+		ep = &gg->eps_in[ep_num]->ep;
+	else
+		ep = &gg->eps_out[ep_num]->ep;
+
+	if (ep->claimed)
+		return NULL;
+
+	if (usb_gadget_ep_match_desc(gadget, ep, desc, ep_comp))
+		return ep;
+
+	return NULL;
+}
+
 static const struct usb_gadget_ops aic_usb_gadget_ops = {
 	.get_frame		= aic_gg_getframe,
 	.udc_start		= aic_gg_udc_start,
@@ -3496,6 +3521,7 @@ static const struct usb_gadget_ops aic_usb_gadget_ops = {
 	.pullup			= aic_gg_pullup,
 	.vbus_session		= aic_gg_vbus_session,
 	.vbus_draw		= aic_gg_vbus_draw,
+	.match_ep		= aic_gg_match_ep,
 };
 
 static void aic_init_ep(struct aic_usb_gadget *gg,

@@ -17,6 +17,7 @@ comment "gdb/gdbserver >= 8.x needs a toolchain w/ C++, gcc >= 4.8"
 
 menuconfig BR2_PACKAGE_GDB
 	bool "gdb"
+	select BR2_PACKAGE_HOST_GDB
 	depends on BR2_TOOLCHAIN_HAS_THREADS && BR2_TOOLCHAIN_HAS_THREADS_DEBUG
 	depends on BR2_PACKAGE_GDB_ARCH_SUPPORTS
 	depends on BR2_TOOLCHAIN_GCC_AT_LEAST_4_8
@@ -60,6 +61,7 @@ config BR2_PACKAGE_GDB_SERVER
 
 config BR2_PACKAGE_GDB_DEBUGGER
 	bool "full debugger"
+	default y
 	depends on BR2_USE_WCHAR
 	depends on !BR2_sh
 	select BR2_PACKAGE_GMP

@@ -75,7 +75,7 @@ EXPORT_SYMBOL_GPL(nanddev_bbt_clean);
  */
 int nanddev_bbt_update(struct nand_device *nand)
 {
-	return 0;
+	return nand->ops->update_bbt(nand);
 }
 EXPORT_SYMBOL_GPL(nanddev_bbt_update);
 

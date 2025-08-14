@@ -1,0 +1,3 @@
+config BR2_PACKAGE_MTPFS
+    bool "mtpfs"
+    default n

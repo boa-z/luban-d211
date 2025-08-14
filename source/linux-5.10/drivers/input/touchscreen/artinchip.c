@@ -30,6 +30,7 @@
 #define AIC_RTP_MAX_PDEB_VAL		0xFFFFFFFF
 #define AIC_RTP_MAX_DELAY_VAL		0xFFFFFFFF
 #define AIC_RTP_DEFALUT_DELAY_VAL	0x4f00004f
+#define AIC_RTP_TIMEOUT			msecs_to_jiffies(1000)
 
 /* Register definition for RTP */
 #define RTP_MCR			0x000
@@ -58,7 +59,7 @@
 #define RTP_INTR_DRDY_FLG	BIT(18)
 #define RTP_INTR_RISE_DET_FLG	BIT(17)
 #define RTP_INTR_PRES_DET_FLG	BIT(16)
-#define RTP_INTR_SCI_IE         BIT(5)
+#define RTP_INTR_SCI_IE		BIT(5)
 #define RTP_INTR_DOUR_INTEN	BIT(4)
 #define RTP_INTR_FIFO_ERR_IE	BIT(3)
 #define RTP_INTR_DAT_RDY_IE	BIT(2)
@@ -67,15 +68,21 @@
 
 #define RTP_PCTL_PRES_DET_BYPASS		BIT(16)
 
+#define RTP_CHCFG_ADC_ACQ_VAL			0x2f
+#define RTP_CHCFG_ADC_ACQ_MASK			GENMASK(15, 8)
+#define RTP_CHCFG_ADC_ACQ_SHIFT			8
+
 #define RTP_MMSC_VREF_MINUS_SEL_SHIFT		22
 #define RTP_MMSC_VREF_PLUS_SEL_SHIFT		20
 #define RTP_MMSC_XY_DRV_X_PLUS			BIT(19)
 #define RTP_MMSC_XY_DRV_Y_PLUS			BIT(18)
 #define RTP_MMSC_XY_DRV_X_MINUS			BIT(17)
 #define RTP_MMSC_XY_DRV_Y_MINUS			BIT(16)
+#define RTP_MMSC_DRV_MASK			GENMASK(19, 16)
 #define RTP_MMSC_XY_DRV_SHIFT			16
 #define RTP_MMSC_SMP_CNT_PER_TRIG_SHIFT		8
 #define RTP_MMSC_SMP_CH_SEL_SHIFT		4
+#define RTP_MMSC_SMP_CH_SEL_MASK		GENMASK(5, 4)
 #define RTP_MMSC_SMP_TRIG			BIT(0)
 
 #define RTP_FIL_Z_REL_RANGE_SHIFT		28
@@ -97,8 +104,8 @@
 #define RTP_FCR_OF_IE			BIT(1)
 #define RTP_FCR_FLUSH			BIT(0)
 
-#define RTP_DATA_CH_NUM_SHIFT		12
-#define RTP_DATA_CH_NUM_MASK		GENMASK(13, 12)
+#define RTP_DATA_CH_NUM_SHIFT		16
+#define RTP_DATA_CH_NUM_MASK		GENMASK(17, 16)
 #define RTP_DATA_DATA_MASK		GENMASK(11, 0)
 
 enum aic_rtp_mode {
@@ -187,6 +194,11 @@ enum aic_rtp_manual_mode_status {
 	RTP_MMS_FINISH
 };
 
+struct aic_rtp_adc_info {
+	u8 ch;
+	u16 data;
+};
+
 struct aic_rtp_dev {
 	struct platform_device *pdev;
 	struct attribute_group attrs;
@@ -204,6 +216,7 @@ struct aic_rtp_dev {
 	bool y_flip;
 	bool pressure_det;
 	bool ignore_fifo_data;
+	bool as_adc_chan_en;
 	enum aic_rtp_mode mode;
 	u32 max_press;
 	u32 smp_period;
@@ -213,15 +226,19 @@ struct aic_rtp_dev {
 	u32 pdeb;
 	u32 delay;
 
+	struct completion complete;
 	struct workqueue_struct *workq;
 	struct work_struct event_work;
 	u32 intr;
 	u32 fcr;
 	struct aic_rtp_dat latest;
 	enum aic_rtp_manual_mode_status mms;
+	struct aic_rtp_adc_info adc_info;
 };
 
 static DEFINE_SPINLOCK(user_lock);
+
+extern u16 adcim_auto_calibration(u16 *adc_val, struct device *dev);
 
 static ssize_t status_show(struct device *dev,
 			   struct device_attribute *devattr, char *buf)
@@ -250,11 +267,6 @@ static ssize_t status_show(struct device *dev,
 		       rtp->two_points + 1, rtp->smp_period, rtp->fuzz);
 }
 static DEVICE_ATTR_RO(status);
-
-static struct attribute *aic_rtp_attr[] = {
-	&dev_attr_status.attr,
-	NULL
-};
 
 static u32 rtp_ms2itv(struct aic_rtp_dev *rtp, u32 ms)
 {
@@ -384,9 +396,13 @@ static void rtp_enable(struct aic_rtp_dev *rtp, int en)
 	enum aic_rtp_mode mode = rtp->mode;
 
 	spin_lock(&user_lock);
-	rtp_reg_enable(regs, RTP_MCR,
-		mode << RTR_MCR_MODE_SHIFT | RTP_MCR_PRES_DET_EN | RTP_MCR_EN,
-		en);
+	if (mode != RTP_MODE_MANUAL) {
+		rtp_reg_enable(regs, RTP_MCR,
+			       mode << RTR_MCR_MODE_SHIFT | RTP_MCR_PRES_DET_EN | RTP_MCR_EN, en);
+	} else {
+		rtp_reg_enable(regs, RTP_MCR, mode << RTR_MCR_MODE_SHIFT | RTP_MCR_EN, en);
+	}
+
 
 	if (mode == RTP_MODE_MANUAL)
 		writel(0x09C409C4, regs + RTP_PDEB);
@@ -419,12 +435,33 @@ static void rtp_int_enable(struct aic_rtp_dev *rtp, int en)
 	u32 val = RTP_INTR_FIFO_ERR_IE | RTP_INTR_DAT_RDY_IE
 			| RTP_INTR_RISE_DET_IE | RTP_INTR_SCI_IE;
 
-	if (rtp->mode == RTP_MODE_MANUAL)
+	if (rtp->mode == RTP_MODE_MANUAL) {
 		val |= RTP_INTR_PRES_DET_IE;
+		init_completion(&rtp->complete);
+	}
 
 	spin_lock(&user_lock);
 	rtp_reg_enable(rtp->regs, RTP_INTR, val, en);
 	spin_unlock(&user_lock);
+}
+
+static u16 rtp_adc_soft_trigger(struct aic_rtp_dev *rtp, int ch)
+{
+	int val = 0;
+	void __iomem *regs = rtp->regs;
+	struct device *dev = &rtp->pdev->dev;
+
+	val = readl(regs + RTP_MMSC) & (~RTP_MMSC_SMP_CH_SEL_MASK);
+	writel(val | (ch << RTP_MMSC_SMP_CH_SEL_SHIFT), regs + RTP_MMSC);
+	rtp_reg_enable(regs, RTP_MMSC, RTP_MMSC_SMP_TRIG, 1);
+
+	if (!wait_for_completion_timeout(&rtp->complete, AIC_RTP_TIMEOUT)) {
+		dev_err(dev, "Ch%d read timeout!\n", ch);
+		return -ETIMEDOUT;
+	}
+
+	adcim_auto_calibration(&rtp->adc_info.data, dev);
+	return rtp->adc_info.data;
 }
 
 static void rtp_fifo_flush(struct aic_rtp_dev *rtp)
@@ -444,6 +481,8 @@ static void rtp_fifo_flush(struct aic_rtp_dev *rtp)
 static void rtp_fifo_init(struct aic_rtp_dev *rtp)
 {
 	u32 thd = 0;
+	int val = 0;
+	void __iomem *regs = rtp->regs;
 
 	switch (rtp->mode) {
 	case RTP_MODE_AUTO1:
@@ -465,13 +504,21 @@ static void rtp_fifo_init(struct aic_rtp_dev *rtp)
 			thd = 6;
 		break;
 	case RTP_MODE_AUTO4:
+	case RTP_MODE_MANUAL:
 	default:
 		thd = 8;
 		break;
 	}
-	thd <<= RTP_FCR_DAT_RDY_THD_SHIFT;
 
+	thd <<= RTP_FCR_DAT_RDY_THD_SHIFT;
 	writel(thd | RTP_FCR_UF_IE | RTP_FCR_OF_IE, rtp->regs + RTP_FCR);
+
+	if (rtp->mode == RTP_MODE_MANUAL)
+		rtp_reg_enable(regs, RTP_MMSC, (thd - 1) << RTP_MMSC_SMP_CNT_PER_TRIG_SHIFT, 1);
+	rtp_reg_enable(regs, RTP_CHCFG, RTP_CHCFG_ADC_ACQ_VAL << RTP_CHCFG_ADC_ACQ_SHIFT, 1);
+
+	val = readl(regs + RTP_MMSC) & (~RTP_MMSC_DRV_MASK);
+	writel(val, regs + RTP_MMSC);
 }
 
 static u32 rtp_press_calc(struct aic_rtp_dev *rtp)
@@ -822,6 +869,12 @@ static void aic_rtp_read_fifo(struct aic_rtp_dev *rtp, u32 cnt)
 			tmp >> RTP_FCR_DAT_CNT_SHIFT);
 		rtp_fifo_flush(rtp);
 	}
+	if (rtp->as_adc_chan_en) {
+		tmp = rtp_average(data, cnt);
+		complete(&rtp->complete);
+		rtp->adc_info.data = tmp;
+		return;
+	}
 
 	if (rtp->mode == RTP_MODE_MANUAL) {
 		tmp = rtp_average(data, cnt);
@@ -845,6 +898,52 @@ static void aic_rtp_read_fifo(struct aic_rtp_dev *rtp, u32 cnt)
 		return;
 	}
 }
+
+static int rtp_get_adc_val(struct device *dev, int chan)
+{
+	int val = 0;
+	struct aic_rtp_dev *rtp = dev_get_drvdata(dev);
+
+	rtp_enable(rtp, 1);
+	rtp_int_enable(rtp, 1);
+	rtp_auto_mode(rtp);
+	val = rtp_adc_soft_trigger(rtp, chan);
+
+	return val;
+}
+
+static ssize_t adc_val_xp_show(struct device *dev, struct device_attribute *devattr, char *buf)
+{
+	return sprintf(buf, "%d\n", rtp_get_adc_val(dev, 3));
+}
+static DEVICE_ATTR_RO(adc_val_xp);
+
+static ssize_t adc_val_yp_show(struct device *dev, struct device_attribute *devattr, char *buf)
+{
+	return sprintf(buf, "%d\n", rtp_get_adc_val(dev, 2));
+}
+static DEVICE_ATTR_RO(adc_val_yp);
+
+static ssize_t adc_val_xn_show(struct device *dev, struct device_attribute *devattr, char *buf)
+{
+	return sprintf(buf, "%d\n", rtp_get_adc_val(dev, 1));
+}
+static DEVICE_ATTR_RO(adc_val_xn);
+
+static ssize_t adc_val_yn_show(struct device *dev, struct device_attribute *devattr, char *buf)
+{
+	return sprintf(buf, "%d\n", rtp_get_adc_val(dev, 0));
+}
+static DEVICE_ATTR_RO(adc_val_yn);
+
+static struct attribute *aic_rtp_attr[] = {
+	&dev_attr_status.attr,
+	&dev_attr_adc_val_xp.attr,
+	&dev_attr_adc_val_yp.attr,
+	&dev_attr_adc_val_xn.attr,
+	&dev_attr_adc_val_yn.attr,
+	NULL
+};
 
 static void aic_rtp_manual_worker(struct work_struct *work)
 {
@@ -889,6 +988,7 @@ static irqreturn_t aic_rtp_irq(int irq, void *dev_id)
 	enum aic_rtp_mode mode = rtp->mode;
 	u32 intr, fcr;
 	unsigned long flags;
+	u32 data_cnt = 0, data_thd = 0;
 
 	spin_lock_irqsave(&user_lock, flags);
 
@@ -905,6 +1005,17 @@ static irqreturn_t aic_rtp_irq(int irq, void *dev_id)
 			intr &= ~RTP_INTR_PRES_DET_FLG;
 		else
 			intr &= ~RTP_INTR_RISE_DET_FLG;
+	}
+	if (rtp->as_adc_chan_en) {
+		data_cnt = (fcr & RTP_FCR_DAT_CNT_MASK) >> RTP_FCR_DAT_CNT_SHIFT;
+		data_thd = (fcr & RTP_FCR_DAT_RDY_THD_MASK) >> RTP_FCR_DAT_RDY_THD_SHIFT;
+		if (data_cnt != 0 && data_cnt != data_thd) {
+			goto irq_clean_fifo;
+		} else if (intr & RTP_INTR_DRDY_FLG) {
+			aic_rtp_read_fifo(rtp,
+					  (fcr & RTP_FCR_DAT_CNT_MASK) >> RTP_FCR_DAT_CNT_SHIFT);
+			goto irq_done;
+		}
 	}
 
 	if (intr & RTP_INTR_SCI_FLG) {
@@ -1066,6 +1177,12 @@ static int aic_rtp_parse_dt(struct device *dev)
 			rtp->mode = RTP_MODE_AUTO2;
 	} else {
 		rtp->mode = RTP_MODE_AUTO1;
+	}
+
+	rtp->as_adc_chan_en = false;
+	if (of_property_read_bool(np, "aic,adc-mode")) {
+		rtp->as_adc_chan_en = true;
+		dev_info(dev, "RTP is adc mode\n");
 	}
 
 	if (of_property_read_bool(np, "aic,manual-mode")) {

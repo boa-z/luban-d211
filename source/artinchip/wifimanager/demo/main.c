@@ -1,11 +1,39 @@
+/*
+ * Copyright (C) 2022-2025 ArtInChip Technology Co., Ltd.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Authors:  lv.wu <lv.wu@artinchip.com>
+ */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <getopt.h>
 
+#include <sys/socket.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <sys/un.h>
+#include <netinet/in.h>
+#include <sys/wait.h>
+#include <stdint.h>
+#include <sys/prctl.h>
+#include <pthread.h>
+#include <unistd.h>
 #include "wifimanager.h"
 
 #define LIST_NETWORK_MAX 4096
+#define USER_SOCKET	"/var/run/user_cb_socket"
+
+struct cb_info {
+	int evt;
+	int buff_length;
+};
+
+static pthread_t gp_user_callback;
+static int g_server_fd = -1;
+static int g_cli_fd = -1;
 
 static const char *wifistate2string(wifistate_t state)
 {
@@ -55,16 +83,188 @@ static const char *disconn_reason2string(wifimanager_disconn_reason_t reason)
 	}
 }
 
+/* This callback is running in wifimanager daemon process,
+ * So you can't process other logic in this callback, such as UI display...
+ *
+ * It is recommended to use inter-process communication (IPC) to send the
+ * results of the WIFIMANAGER DAEMON to the process that needs to execute them.
+ */
 static void print_scan_result(char *result)
 {
-	printf("%s\n", result);
+	int fd;
+	struct sockaddr_un saddr = { .sun_family = AF_UNIX };
+	struct cb_info info;
+
+	snprintf(saddr.sun_path, sizeof(saddr.sun_path) - 1, USER_SOCKET);
+
+	if ((fd = socket(PF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC, 0)) == -1) {
+		printf("client: socket alloc error\n");
+		return;
+	}
+
+	if (connect(fd, (struct sockaddr *)(&saddr), sizeof(saddr)) == -1) {
+		printf("client: connect error\n");
+		close(fd);
+		return;
+	}
+
+	info.evt = 0;
+	info.buff_length = strlen(result);
+	send(fd, &info, sizeof(struct cb_info), 0);
+	send(fd, result, strlen(result), 0);
+	close(fd);
 }
 
-static void print_stat_change(int stat, int reason)
+/* This callback is running in wifimanager daemon process,
+ * So you can't process other logic in this callback, such as UI display...
+ *
+ * It is recommended to use inter-process communication (IPC) to send the
+ * results of the WIFIMANAGER DAEMON to the process that needs to execute them.
+ */
+static void print_stat_change(wifistate_t stat, wifimanager_disconn_reason_t reason)
 {
-	printf("%s\n", wifistate2string(stat));
-	if (stat == WIFI_STATE_DISCONNECTED)
-		printf("disconnect reason: %s\n", disconn_reason2string(reason));
+	int fd;
+	struct sockaddr_un saddr = { .sun_family = AF_UNIX };
+	struct cb_info info;
+	int buff[2];
+
+	snprintf(saddr.sun_path, sizeof(saddr.sun_path) - 1, USER_SOCKET);
+
+	if ((fd = socket(PF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC, 0)) == -1)
+		printf("client: socket alloc error\n");
+		return;
+
+	if (connect(fd, (struct sockaddr *)(&saddr), sizeof(saddr)) == -1) {
+		printf("client: connect error\n");
+		close(fd);
+		return;
+	}
+
+	info.evt = 1;
+	info.buff_length = sizeof(int) * 2;
+
+	buff[0] = stat;
+	buff[1] = reason;
+
+	send(fd, &info, sizeof(struct cb_info),0);
+	send(fd, buff, sizeof(int) * 2,0);
+	close(fd);
+}
+
+static void *user_callback_thread(void *arg)
+{
+	struct sockaddr_un saddr = { .sun_family = AF_UNIX };
+	snprintf(saddr.sun_path, sizeof(saddr.sun_path) - 1, USER_SOCKET);
+	int header[2];
+	void *buff;
+
+	g_server_fd = socket(PF_UNIX, SOCK_SEQPACKET, 0);
+	if (g_server_fd == -1) {
+		printf("server: socket alloc error\n");
+		return NULL;
+	}
+	if (bind(g_server_fd, (struct sockaddr *)(&saddr), sizeof(saddr)) == -1) {
+		printf("server: bind error\n");
+		goto fail;
+	}
+
+	if (chmod(saddr.sun_path, 0660) == -1) {
+		printf("server: chmod error\n");
+		goto fail;
+	}
+
+	if (listen(g_server_fd, 2) == -1) {
+		printf("server: listen error\n");
+		goto fail;
+	}
+
+	while (1) {
+		int len;
+		g_cli_fd = accept(g_server_fd, NULL, NULL);
+		len = recv(g_cli_fd, header, sizeof(int) * 2, 0);
+		if (len <= 0) {
+			close(g_cli_fd);
+			g_cli_fd = -1;
+			continue;
+		}
+
+		buff = malloc(header[1] + 1);
+		if (len <= 0) {
+			close(g_cli_fd);
+			g_cli_fd = -1;
+			continue;
+		}
+		len = recv(g_cli_fd, buff, header[1], 0);
+		if (len <= 0) {
+			free(buff);
+			close(g_cli_fd);
+			g_cli_fd = -1;
+			continue;
+		}
+
+		if (header[0] == 0) {
+			printf("\n-------------------------scan result-------------------------\n");
+			printf("%s\n", buff);
+			printf("---------------------------------------------------------------\n");
+		} else if (header[0] == 1) {
+			printf("\n-------------------connection change result------------------\n");
+			printf("%s\n", wifistate2string(((int *)buff)[0]));
+			if (((int *)buff)[0] == WIFI_STATE_DISCONNECTED)
+				printf("disconnect reason: %s\n", disconn_reason2string(((int *)buff)[1]));
+			printf("---------------------------------------------------------------\n");
+		}
+
+		free(buff);
+		close(g_cli_fd);
+		g_cli_fd = -1;
+	}
+fail:
+	close(g_server_fd);
+	g_server_fd = -1;
+	pthread_exit(NULL);
+}
+
+/* release socket resource */
+static void loop_stop(int sig)
+{
+	struct sigaction sigact = { .sa_handler = SIG_DFL };
+
+	sigaction(sig, &sigact, NULL);
+	pthread_cancel(gp_user_callback);
+	pthread_join(gp_user_callback, NULL);
+
+	if (g_server_fd != -1)
+		close(g_server_fd);
+	if (g_cli_fd != -1)
+		close(g_cli_fd);
+
+	unlink(USER_SOCKET);
+}
+
+static int wait_loop()
+{
+	pid_t pid;
+
+	if((pid = fork()) < 0)
+		return 0;
+	else if(pid)
+		return 0;
+
+	pthread_create(&gp_user_callback, NULL, user_callback_thread, NULL);
+
+	struct sigaction sigact = { .sa_handler = SIG_IGN };
+	sigaction(SIGPIPE, &sigact, NULL);
+
+	/* free ctl resource */
+	sigact.sa_handler = loop_stop;
+	sigaction(SIGTERM, &sigact, NULL);
+	sigaction(SIGINT, &sigact, NULL);
+
+	while(1) {
+		sleep(1);
+	}
+
+	return 0;
 }
 
 int main(int argc, char *argv[])
@@ -166,8 +366,18 @@ usage:
 				return EXIT_SUCCESS;
 
 			case 'o':
-				wifimanager_init(&cb);
+				if (wifimanager_init(&cb)) {
+					printf("wifimanager init failed\n");
+					return -1;
+				}
+
 				printf("wifimanager init ok\n");
+
+				/* create a child process, in case user_callback_thread don't be closed
+				 * just for this test. if your farther process won't exit, ignore it
+				 */
+				wait_loop();
+
 				return EXIT_SUCCESS;
 
 			case 'd':

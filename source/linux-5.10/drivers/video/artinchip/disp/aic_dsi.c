@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * Copyright (C) 2020-2022 ArtInChip Technology Co., Ltd.
+ * Copyright (C) 2020-2025 ArtInChip Technology Co., Ltd.
  * Authors: matteo <duanmt@artinchip.com>
  */
 
@@ -48,6 +48,7 @@ struct aic_dsi_comp {
 	bool dc_inv;
 	bool command_on;
 	ulong sclk_rate;
+	ulong lp_rate;
 	s32 irq;
 	u32 vc_num;
 };
@@ -99,6 +100,9 @@ static int aic_dsi_parse_dt(struct aic_dsi_comp *comp, struct device *dev)
 	comp->ln_assign = ln_assign;
 	comp->ln_polrs = ln_polrs;
 
+	if (of_property_read_u32(np, "lp-clock-rates", (u32 *)&comp->lp_rate))
+		comp->lp_rate = 10000000; /* LP default 10MHz */
+
 	return 0;
 }
 
@@ -114,12 +118,17 @@ static int aic_dsi_clk_enable(void)
 {
 	struct aic_dsi_comp *comp = aic_dsi_request_drvdata();
 	int ret = 0;
+	struct clk *fra2_clk;
 
-	if (comp->sclk_rate)
+	if (comp->sclk_rate) {
+		fra2_clk = clk_get_parent(comp->sclk);
+
+		clk_set_rate(fra2_clk, comp->sclk_rate);
 		clk_set_rate(comp->sclk, comp->sclk_rate);
-	else
+	} else {
 		dev_warn(comp->dev, "Use the default clock rate %ld\n",
-			clk_get_rate(comp->sclk));
+		clk_get_rate(comp->sclk));
+	}
 
 	ret = reset_control_deassert(comp->reset);
 	if (ret) {
@@ -160,8 +169,8 @@ static int aic_dsi_enable(void)
 	dsi_set_lane_polrs(comp->regs, comp->ln_polrs);
 	dsi_set_data_clk_polrs(comp->regs, comp->dc_inv);
 
-	dsi_set_clk_div(comp->regs, comp->sclk_rate);
-	dsi_pkg_init(comp->regs);
+	dsi_set_clk_div(comp->regs, comp->sclk_rate, comp->lp_rate);
+	dsi_pkg_init(comp->regs, dsi->mode);
 	dsi_phy_init(comp->regs, comp->sclk_rate, dsi->lane_num, dsi->mode);
 	dsi_hs_clk(comp->regs, 1);
 

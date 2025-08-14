@@ -6,6 +6,7 @@
 
 #include <linux/init.h>
 #include <linux/module.h>
+#include <linux/device.h>
 #include <linux/spinlock.h>
 #include <linux/interrupt.h>
 #include <linux/uaccess.h>
@@ -85,6 +86,8 @@ struct aic_spi {
 	spinlock_t lock;
 	bool bit_mode;
 	u32 rx_samp_dly;
+	u32 freq;
+	u32 freq_dividor;
 };
 
 struct aic_spi_platform_data {
@@ -112,15 +115,24 @@ static inline void spi_cltr_cfg_tc(u32 mode, void __iomem *base_addr)
 {
 	u32 val = readl(base_addr + SPI_REG_TCR);
 
-	if (mode & SPI_CPOL)
-		val |= TCR_BIT_CPOL;
-	else
-		val &= ~TCR_BIT_CPOL;
-
-	if (mode & SPI_CPHA)
-		val |= TCR_BIT_CPHA;
-	else
+	/* only support mode0 & mode2 */
+	if ((mode & SPI_CPHA) && !(mode & SPI_CPOL)) {
 		val &= ~TCR_BIT_CPHA;
+		val |= TCR_BIT_CPOL;
+	} else if ((mode & SPI_CPHA) && (mode & SPI_CPOL)) {
+		val &= ~TCR_BIT_CPHA;
+		val &= ~TCR_BIT_CPOL;
+	} else {
+		if (mode & SPI_CPOL)
+			val |= TCR_BIT_CPOL;
+		else
+			val &= ~TCR_BIT_CPOL;
+
+		if (mode & SPI_CPHA)
+			val |= TCR_BIT_CPHA;
+		else
+			val &= ~TCR_BIT_CPHA;
+	}
 
 	if (mode & SPI_CS_HIGH)
 		val &= ~TCR_BIT_SPOL;
@@ -487,9 +499,10 @@ static int aic_spi_bit_mode_transfer_one(struct spi_controller *ctlr,
 }
 
 
-static inline void spi_ctlr_set_clk(u32 spiclk, u32 mclk, void __iomem *base_addr)
+static inline u32 spi_ctlr_set_clk(u32 spiclk, u32 mclk, void __iomem *base_addr)
 {
 	u32 val, cdr, div;
+	u32 freq = 0;
 
 	/*
 	 * mclk: module source clock
@@ -501,15 +514,20 @@ static inline void spi_ctlr_set_clk(u32 spiclk, u32 mclk, void __iomem *base_add
 	cdr = spi_get_best_div_param(spiclk, mclk, &div);
 
 	val = readl(base_addr + SPI_REG_CCR);
+	val &= ~CCR_BIT_MSK;
 	if (cdr == 0) {
 		val &= ~(CCR_BIT_CDR1_MSK | CCR_BIT_DRS);
 		val |= (div << CCR_BIT_CDR1_OFF);
+		freq = mclk >> div;
 	} else {
 		val &= ~CCR_BIT_CDR2_MSK;
-		val |= (div | CCR_BIT_DRS);
+		val |= CCR_BIT_DRS;
+		freq = mclk / (2 * (div + 1));
 	}
 
 	writel(val, base_addr + SPI_REG_CCR);
+
+	return freq;
 }
 
 static inline void spi_ctlr_start_xfer(void __iomem *base_addr)
@@ -1035,8 +1053,16 @@ static int spi_ctlr_cfg_xfer(struct aic_spi *aicspi, struct spi_device *spi,
 		else
 			spi_ctlr_cfg_single(aicspi, t);
 	}
-	spi_ctlr_set_rx_delay(aicspi, t->speed_hz);
-	spi_ctlr_set_clk(t->speed_hz, clk_get_rate(aicspi->mclk), base_addr);
+
+	if (aicspi->freq_dividor != 0)
+		aicspi->freq = spi_ctlr_set_clk(aicspi->freq, clk_get_rate(aicspi->mclk),
+											base_addr);
+	else
+		aicspi->freq = spi_ctlr_set_clk(t->speed_hz, clk_get_rate(aicspi->mclk),
+											base_addr);
+
+	spi_ctlr_set_rx_delay(aicspi, aicspi->freq);
+
 	return 0;
 }
 
@@ -1527,7 +1553,7 @@ static int aic_spi_hw_init(struct aic_spi *aicspi,
 	spi_ctlr_enable_bus(base_addr);
 	spi_ctlr_set_cs_num(0, base_addr);
 	spi_ctlr_set_master_mode(base_addr);
-	spi_ctlr_set_clk(24000000, src_clk, base_addr);
+	aicspi->freq = spi_ctlr_set_clk(24000000, src_clk, base_addr);
 	spi_cltr_cfg_tc(SPI_MODE_0, base_addr);
 	spi_ctlr_set_tx_delay_mode(base_addr, true);
 	spi_ctlr_enable_tp(base_addr);
@@ -1639,10 +1665,73 @@ static ssize_t aic_spi_status_show(struct device *dev,
 static struct device_attribute aic_spi_status_attr =
 	__ATTR(status, 0444, aic_spi_status_show, NULL);
 
-static void aic_spi_sysfs(struct platform_device *_pdev)
+static ssize_t freq_dividor_show(struct device *dev,
+	struct device_attribute *attr,
+	char *buf)
+{
+	struct platform_device *pdev = to_platform_device(dev);
+	struct spi_controller *ctlr;
+	struct aic_spi *aicspi;
+
+	ctlr = spi_controller_get(platform_get_drvdata(pdev));
+	aicspi = spi_controller_get_devdata(ctlr);
+
+	return sprintf(buf, "%d\n", aicspi->freq_dividor);
+}
+
+static ssize_t freq_dividor_store(struct device *dev,
+		struct device_attribute *attr,
+		const char *buf, size_t count)
+{
+	struct platform_device *pdev = to_platform_device(dev);
+	struct spi_controller *ctlr;
+	struct aic_spi *aicspi;
+	int new_val, ret;
+
+	ctlr = spi_controller_get(platform_get_drvdata(pdev));
+	aicspi = spi_controller_get_devdata(ctlr);
+
+	ret = kstrtoint(buf, 10, &new_val);
+	if (ret < 0) {
+		return ret;
+	}
+
+	if (new_val < 0 || new_val > 10) {
+		return -EINVAL;
+	}
+
+	if (new_val != aicspi->freq_dividor) {
+		void __iomem *base_addr = aicspi->base_addr;
+		u32 freq = 0;
+
+		if (new_val == 0)
+			freq = spi_ctlr_set_clk(clk_get_rate(aicspi->mclk), clk_get_rate(aicspi->mclk), base_addr);
+		else
+			freq = spi_ctlr_set_clk(clk_get_rate(aicspi->mclk) / new_val, clk_get_rate(aicspi->mclk), base_addr);
+
+		spi_ctlr_set_rx_delay(aicspi, freq);
+		dev_info(dev, "updata freq: %u Hz, mclk: %lu Hz\n", freq, clk_get_rate(aicspi->mclk));
+		aicspi->freq_dividor = new_val;
+		aicspi->freq = freq;
+	}
+
+	return count;
+}
+
+static DEVICE_ATTR_RW(freq_dividor);
+
+static void aic_spi_register_sysfs(struct platform_device *_pdev)
 {
 	device_create_file(&_pdev->dev, &aic_spi_info_attr);
 	device_create_file(&_pdev->dev, &aic_spi_status_attr);
+	device_create_file(&_pdev->dev, &dev_attr_freq_dividor);
+}
+
+static void aic_spi_remove_sysfs(struct platform_device *_pdev)
+{
+	device_remove_file(&_pdev->dev, &aic_spi_info_attr);
+	device_remove_file(&_pdev->dev, &aic_spi_status_attr);
+	device_remove_file(&_pdev->dev, &dev_attr_freq_dividor);
 }
 
 bool aic_spi_mem_supports_op(struct spi_mem *mem, const struct spi_mem_op *op)
@@ -1766,9 +1855,14 @@ static int aic_spi_mem_exec_op(struct spi_mem *mem, const struct spi_mem_op *op)
 		break;
 	}
 
-	spi_ctlr_set_rx_delay(aicspi, mem->spi->max_speed_hz);
-	spi_ctlr_set_clk(mem->spi->max_speed_hz, clk_get_rate(aicspi->mclk),
-			 base_addr);
+	if (aicspi->freq_dividor != 0)
+		aicspi->freq = spi_ctlr_set_clk(aicspi->freq, clk_get_rate(aicspi->mclk),
+											base_addr);
+	else
+		aicspi->freq = spi_ctlr_set_clk(mem->spi->max_speed_hz, clk_get_rate(aicspi->mclk),
+											base_addr);
+
+	spi_ctlr_set_rx_delay(aicspi, aicspi->freq);
 	spi_ctlr_set_cs_enable(aicspi, true);
 	spi_ctlr_pending_irq_clr(ISR_BIT_ALL_MSK, base_addr);
 	reinit_completion(&aicspi->ctlr->xfer_completion);
@@ -2020,7 +2114,7 @@ static int aic_spi_probe(struct platform_device *pdev)
 		goto err5;
 	}
 
-	aic_spi_sysfs(pdev);
+	aic_spi_register_sysfs(pdev);
 
 	dev_info(&pdev->dev, "spi-%d: driver probe done.\n", ctlr->bus_num);
 	return 0;
@@ -2063,6 +2157,7 @@ static int aic_spi_remove(struct platform_device *pdev)
 	aic_spi_release_dma(aicspi);
 	platform_set_drvdata(pdev, NULL);
 	spi_controller_put(ctlr);
+	aic_spi_remove_sysfs(pdev);
 	kfree(pdev->dev.platform_data);
 
 	return 0;

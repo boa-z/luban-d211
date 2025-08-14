@@ -18,6 +18,7 @@
 #include <asm/global_data.h>
 #include <linux/libfdt.h>
 #include <init.h>
+#include <artinchip_ve.h>
 
 DECLARE_GLOBAL_DATA_PTR;
 
@@ -279,6 +280,7 @@ static int spl_load_fit_image(struct spl_load_info *info, ulong sector,
 	const void *data;
 	const void *fit = ctx->fit;
 	bool external_data = false;
+
 	if (IS_ENABLED(CONFIG_SPL_FPGA) || IS_ENABLED(CONFIG_SPL_OS_BOOT)) {
 		if (fit_image_get_type(fit, node, &type))
 			pr_err("Cannot get image type.\n");
@@ -369,10 +371,25 @@ static int spl_load_fit_image(struct spl_load_info *info, ulong sector,
 	load_ptr = map_sysmem(load_addr, length);
 	if (IS_ENABLED(CONFIG_SPL_GZIP) && image_comp == IH_COMP_GZIP) {
 		size = length;
+#ifdef CONFIG_GZIP_DECODE_ARTINCHIP
+		struct udevice *dev;
+
+		if (gunzip_init_device(&dev)) {
+			printf("artinchip gunzip init failed\n");
+			return -EIO;
+		}
+
+		if (gunzip_decompress(dev, load_ptr, CONFIG_SYS_BOOTM_LEN, src,
+				      &size)) {
+			puts("Uncompressing error\n");
+			return -EIO;
+		}
+#else
 		if (gunzip(load_ptr, CONFIG_SYS_BOOTM_LEN, src, &size)) {
 			puts("Uncompressing error\n");
 			return -EIO;
 		}
+#endif
 		length = size;
 	} else {
 		memcpy(load_ptr, src, length);
@@ -665,7 +682,7 @@ static int spl_simple_fit_read(struct spl_fit_info *ctx,
 			       struct spl_load_info *info, ulong sector,
 			       const void *fit_header)
 {
-	unsigned long count, size;
+	unsigned long count, size, time;
 	int sectors;
 	void *buf;
 
@@ -688,7 +705,21 @@ static int spl_simple_fit_read(struct spl_fit_info *ctx,
 	sectors = get_aligned_image_size(info, size, 0);
 	buf = spl_get_fit_load_buffer(sectors * info->bl_len);
 
+	time = get_timer(0);
 	count = info->read(info, sector, sectors, buf);
+	time = get_timer(time);
+	if (sectors && time) {
+		unsigned long rdsiz, n, d, speed_int, speed_pnt;
+
+		rdsiz = sectors * info->bl_len;
+		n = rdsiz * 1000;
+		d = time * 1024 * 1024;
+		speed_int =  n / d;
+		speed_pnt = n * 100 / d - speed_int * 100;
+		pr_info("Read firamware speed (size %lu time %lu ms) %lu.%lu MB/s\n",
+			rdsiz, time, speed_int, speed_pnt);
+	}
+
 	ctx->fit = buf;
 	debug("fit read sector %lx, sectors=%d, dst=%p, count=%lu, size=0x%lx\n",
 	      sector, sectors, buf, count, size);

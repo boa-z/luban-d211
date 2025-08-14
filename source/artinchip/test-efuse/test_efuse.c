@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * Copyright (C) 2020-2024 ArtInChip Technology Co., Ltd.
+ * Copyright (C) 2020-2025 ArtInChip Technology Co., Ltd.
  * Authors:  Xiong Hao <hao.xiong@artinchip.com>
  */
 
@@ -124,8 +124,17 @@ static int efuse_show_info(struct efuse_info *info)
 		goto out;
 	}
 
-	lseek(fd, info->start, SEEK_SET);
-	read(fd, data, info->len);
+	if (lseek(fd, info->start, SEEK_SET) < 0) {
+		printf("Failed to seek %s file.\n", filename);
+		ret = -1;
+		goto out;
+	}
+
+	if (read(fd, data, info->len) < 0) {
+		printf("Failed to read %s file, ret: %d\n", filename, ret);
+		ret = -1;
+		goto out;
+	}
 
 	hexdump(info->name, data, info->len);
 
@@ -157,12 +166,12 @@ int main(int argc, char **argv)
 	if (!strcmp(argv[1], "show")) {
 		ret = efuse_show_info(info);
 		if (ret) {
-			usage(argv[0]);
 			return ret;
 		}
 	} else {
 		usage(argv[0]);
+		return -EINVAL;
 	}
 
-	return ret;
+	return 0;
 }

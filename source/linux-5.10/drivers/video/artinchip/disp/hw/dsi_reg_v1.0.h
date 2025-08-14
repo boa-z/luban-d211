@@ -220,8 +220,8 @@ void dsi_set_lane_assign(void __iomem *base, u32 ln_assign);
 void dsi_set_lane_polrs(void __iomem *base, u32 ln_polrs);
 void dsi_set_data_clk_polrs(void __iomem *base, u32 dc_inv);
 
-void dsi_set_clk_div(void __iomem *base, ulong mclk);
-void dsi_pkg_init(void __iomem *base);
+void dsi_set_clk_div(void __iomem *base, ulong mclk, ulong lp_rate);
+void dsi_pkg_init(void __iomem *base, enum dsi_mode mode);
 void dsi_phy_init(void __iomem *base, ulong mclk, u32 lane, enum dsi_mode mode);
 void dsi_hs_clk(void __iomem *base, u32 enable);
 void dsi_set_vm(void __iomem *base, enum dsi_mode mode, enum dsi_format format,

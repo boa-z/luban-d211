@@ -128,6 +128,7 @@
 #define CCR_BIT_CDR2_MSK	GENMASK(7, 0)
 #define CCR_BIT_CDR1_MSK	GENMASK(11, 8)
 #define CCR_BIT_DRS		BIT(12)
+#define CCR_BIT_MSK		GENMASK(12, 0)
 
 /* SPI Master Burst Counter Register Bit Fields & Masks */
 #define BCR_BIT_CNT_MSK		GENMASK(23, 0)

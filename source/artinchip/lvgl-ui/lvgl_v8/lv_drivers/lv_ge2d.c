@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2022-2024 Artinchip Technology Co., Ltd.
+ * Copyright (C) 2022-2025 ArtInChip Technology Co., Ltd.
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -24,6 +24,7 @@
 #include "mpp_decoder.h"
 #include "lv_fbdev.h"
 #include "dma_allocator.h"
+#include "aic_ui.h"
 
 #define PI 3.141592653589
 #define SIN(x) (sin((x)* PI / 180.0))
@@ -873,7 +874,7 @@ lv_res_t lv_draw_aic_draw_img(lv_draw_ctx_t * draw_ctx, const lv_draw_img_dsc_t 
                 int blend;
                 unsigned int color;
 
-                sscanf(src + 3, "%dx%d_%d_%08x", &width, &height, &blend, &color);
+                FAKE_IMAGE_PARSE((char *)src, &width, &height, &blend, &color);
                 return ge_run_fill(draw_ctx, color, (color >> 24) & 0xff, blend, &blend_area);
             } else {
                 return hw_decode(draw_ctx, draw_dsc, src, &blend_area, coords);

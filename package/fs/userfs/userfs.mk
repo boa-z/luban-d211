@@ -175,6 +175,62 @@ endif
 
 USERFS_$(1)_UBIFS_CMD = $$(foreach MKCMD, $$(MK_UBIFS_$(1)_CMD), $$(call $$(MKCMD))$$(sep))
 
+######## UBI commands ########
+
+ifeq ($$(BR2_TARGET_USERFS$(1)_UBI_PARAM_USER_CUSTOM),y)
+USERFS_$(1)_UBI_UBINIZE_OPTS_CUSTOM = -m $$(BR2_TARGET_USERFS$(1)_UBIFS_MINIOSIZE)
+USERFS_$(1)_UBI_UBINIZE_OPTS_CUSTOM += -p $$(BR2_TARGET_USERFS$(1)_UBI_PEBSIZE)
+ifneq ($$(BR2_TARGET_USERFS$(1)_UBI_SUBSIZE),0)
+USERFS_$(1)_UBI_UBINIZE_OPTS_CUSTOM += -s $$(BR2_TARGET_USERFS$(1)_UBI_SUBSIZE)
+endif
+USERFS_$(1)_UBI_UBINIZE_OPTS_CUSTOM += $$(call qstrip, $$(BR2_TARGET_USERFS$(1)_UBI_OPTS))
+
+MK_USERFS_$(1)_UBI_HOOK += MK_USERFS_$(1)_UBI_CMD_CUSTOM
+endif
+
+ifeq ($$(BR2_TARGET_USERFS$(1)_UBI_DEVICE_SPI_NAND_2K_128K),y)
+USERFS_$(1)_UBI_UBINIZE_OPTS_2K_128K = -m 0x800 -p 0x20000
+USERFS_$(1)_UBI_UBINIZE_OPTS_2K_128K += $$(call qstrip, $$(BR2_TARGET_USERFS$(1)_UBI_OPTS))
+MK_USERFS_$(1)_UBI_HOOK += MK_USERFS_$(1)_UBI_CMD_2K_128K
+endif
+
+ifeq ($$(BR2_TARGET_USERFS$(1)_UBI_DEVICE_SPI_NAND_4K_256K),y)
+USERFS_$(1)_UBI_UBINIZE_OPTS_4K_256K = -m 0x1000 -p 0x40000
+USERFS_$(1)_UBI_UBINIZE_OPTS_4K_256K += $$(call qstrip, $$(BR2_TARGET_USERFS$(1)_UBI_OPTS))
+MK_USERFS_$(1)_UBI_HOOK += MK_USERFS_$(1)_UBI_CMD_4K_256K
+endif
+
+USERFS_$(1)_UBI_DEPENDENCIES = userfs$(1)-ubifs
+
+ifeq ($$(BR2_TARGET_USERFS$(1)_UBI_USE_CUSTOM_CONFIG),y)
+USERFS_$(1)_UBI_UBINIZE_CONFIG_FILE_PATH = $$(call qstrip,$$(BR2_TARGET_USERFS$(1)_UBI_CUSTOM_CONFIG_FILE))
+else
+USERFS_$(1)_UBI_UBINIZE_CONFIG_FILE_PATH = package/fs/userfs/ubinize.cfg.userfs$(1)
+endif
+
+MK_USERFS_$(1)_UBI_CMD_CUSTOM = \
+	sed 's;userfs$(1);$$(call qstrip,$$(BR2_TARGET_USERFS$(1)_NAME));;s;BR2_USERFS$(1)_UBIFS_PATH;$@fs;;s;BINARIES_DIR;$(BINARIES_DIR);' \
+		$$(USERFS_$(1)_UBI_UBINIZE_CONFIG_FILE_PATH) > $(BUILD_DIR)/ubinize.custom.cfg \
+	rm $(BUILD_DIR)/ubinize.custom.cfg
+
+MK_USERFS_$(1)_UBI_CMD_2K_128K = \
+	sed 's;userfs$(1);$$(call qstrip,$$(BR2_TARGET_USERFS$(1)_NAME));;s;BR2_USERFS$(1)_UBIFS_PATH;$$(BINARIES_DIR)/$$(call qstrip,$$(BR2_TARGET_USERFS$(1)_NAME))_page_2k_block_128k.ubifs;;s;BINARIES_DIR;$(BINARIES_DIR);' \
+		$$(USERFS_$(1)_UBI_UBINIZE_CONFIG_FILE_PATH) > $(BUILD_DIR)/ubinize.2k_128k.cfg; \
+	$(HOST_DIR)/sbin/ubinize \
+		-o $$(BINARIES_DIR)/$$(call qstrip,$$(BR2_TARGET_USERFS$(1)_NAME))_page_2k_block_128k.ubi \
+		$$(USERFS_$(1)_UBI_UBINIZE_OPTS_2K_128K) \
+		$(BUILD_DIR)/ubinize.2k_128k.cfg
+
+MK_USERFS_$(1)_UBI_CMD_4K_256K = \
+	sed 's;userfs$(1);$$(call qstrip,$$(BR2_TARGET_USERFS$(1)_NAME));;s;BR2_USERFS$(1)_UBIFS_PATH;$$(BINARIES_DIR)/$$(call qstrip,$$(BR2_TARGET_USERFS$(1)_NAME))_page_4k_block_256k.ubifs;;s;BINARIES_DIR;$(BINARIES_DIR);' \
+		$$(USERFS_$(1)_UBI_UBINIZE_CONFIG_FILE_PATH) > $(BUILD_DIR)/ubinize.4k_256k.cfg; \
+	$(HOST_DIR)/sbin/ubinize \
+		-o $$(BINARIES_DIR)/$$(call qstrip,$$(BR2_TARGET _USERFS$(1)_NAME))_page_4k_block_256k.ubi \
+		$$(USERFS_$(1)_UBI_UBINIZE_OPTS_4K_256K) \
+		$(BUILD_DIR)/ubinize.4k_256k.cfg
+
+USERFS_$(1)_UBI_CMD = $$(foreach MKCMD, $$(MK_USERFS_$(1)_UBI_HOOK), $$(call $$(MKCMD))$$(sep))
+
 ######## JFFS2 commands ########
 USERFS_$(1)_JFFS2_OPTS = -e $$(BR2_TARGET_USERFS$(1)_JFFS2_EBSIZE) --with-xattr
 USERFS_$(1)_JFFS2_SUMTOOL_OPTS = -e $$(BR2_TARGET_USERFS$(1)_JFFS2_EBSIZE)
@@ -289,6 +345,10 @@ endif
 
 ifeq ($$(BR2_TARGET_USERFS$(1)_TYPE_UBIFS),y)
 	$$(call PRINTF,$$(USERFS_$(1)_UBIFS_CMD)) >> $$(FAKEROOT_SCRIPT)
+endif
+
+ifeq ($$(BR2_TARGET_USERFS$(1)_TYPE_UBI),y)
+	$$(call PRINTF,$$(USERFS_$(1)_UBI_CMD)) >> $$(FAKEROOT_SCRIPT)
 endif
 
 ifeq ($$(BR2_TARGET_USERFS$(1)_TYPE_JFFS2),y)

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2022-2023 ArtinChip Technology Co., Ltd.
+ * Copyright (C) 2022-2025 ArtInChip Technology Co., Ltd.
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -306,15 +306,13 @@ static lv_res_t fake_decoder_info(lv_img_decoder_t *decoder, const void *src, lv
     int height;
     int blend;
     unsigned int color;
-    int ret;
 
-    FAKE_IMAGE_PARSE(src, ret, width, height, blend, color);
+    FAKE_IMAGE_PARSE((char *)src, &width, &height, &blend, &color);
     header->w = width;
     header->h = height;
     header->cf = LV_IMG_CF_TRUE_COLOR;
-    ret = LV_RES_OK;
 
-    return ret;
+    return LV_RES_OK;
 }
 
 static lv_res_t png_decoder_info(lv_img_decoder_t *decoder, const void *src, lv_img_header_t *header)

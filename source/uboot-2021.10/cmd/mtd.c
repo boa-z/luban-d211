@@ -328,7 +328,7 @@ static int do_mtd_io(struct cmd_tbl *cmdtp, int flag, int argc,
 	}
 
 	if (has_pages)
-		printf("%s %lld byte(s) (%d page(s)) at offset 0x%08llx%s%s%s\n",
+		printf("%s %lld byte(s) (%u page(s)) at offset 0x%08llx%s%s%s\n",
 		       read ? "Reading" : "Writing", len, npages, start_off,
 		       raw ? " [raw]" : "", woob ? " [oob]" : "",
 		       !read && write_empty_pages ? " [dontskipff]" : "");
@@ -448,7 +448,7 @@ static int do_mtd_erase(struct cmd_tbl *cmdtp, int flag, int argc,
 		goto out_put_mtd;
 	}
 
-	printf("Erasing 0x%08llx ... 0x%08llx (%d eraseblock(s))\n",
+	printf("Erasing 0x%08llx ... 0x%08llx (%u eraseblock(s))\n",
 	       off, off + len - 1, mtd_div_by_eb(len, mtd));
 
 	erase_op.mtd = mtd;
@@ -512,6 +512,39 @@ out_put_mtd:
 	return CMD_RET_SUCCESS;
 }
 
+static int do_mtd_markbad(struct cmd_tbl *cmdtp, int flag, int argc,
+	char *const argv[])
+{
+	struct mtd_info *mtd;
+	loff_t off;
+
+	if (argc < 2)
+		return CMD_RET_USAGE;
+
+	mtd = get_mtd_by_name(argv[1]);
+	if (IS_ERR_OR_NULL(mtd))
+
+	if (!mtd_can_have_bb(mtd)) {
+		printf("Only NAND-based devices can have bad blocks\n");
+		goto out_put_mtd;
+	}
+
+	argc -= 2;
+	argv += 2;
+
+	off = argc > 0 ? hextoul(argv[0], NULL) : 0;
+
+	if (mtd_block_markbad(mtd, off))
+		printf("Mark bad block error!\n");
+	else
+		printf("Mark %s bad block off: 0x%08llx\n", mtd->name, off);
+
+out_put_mtd:
+	put_mtd_device(mtd);
+
+	return CMD_RET_SUCCESS;
+}
+
 #ifdef CONFIG_AUTO_COMPLETE
 static int mtd_name_complete(int argc, char *const argv[], char last_char,
 			     int maxv, char *cmdv[])
@@ -560,6 +593,7 @@ static char mtd_help_text[] =
 	"\n"
 	"Specific functions:\n"
 	"mtd bad                               <name>\n"
+	"mtd mark                              <name>		 [<off>\n"
 	"\n"
 	"With:\n"
 	"\t<name>: NAND partition/chip name (or corresponding DM device name or OF path)\n"
@@ -585,4 +619,6 @@ U_BOOT_CMD_WITH_SUBCMDS(mtd, "MTD utils", mtd_help_text,
 		U_BOOT_SUBCMD_MKENT_COMPLETE(erase, 4, 0, do_mtd_erase,
 					     mtd_name_complete),
 		U_BOOT_SUBCMD_MKENT_COMPLETE(bad, 2, 1, do_mtd_bad,
-					     mtd_name_complete));
+					     mtd_name_complete),
+		U_BOOT_SUBCMD_MKENT_COMPLETE(mark, 3, 1, do_mtd_markbad,
+						 mtd_name_complete));

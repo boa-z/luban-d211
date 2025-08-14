@@ -1031,6 +1031,23 @@ timing_config_attr(vfront_porch);
 timing_config_attr(vback_porch);
 timing_config_attr(vsync_len);
 
+static ssize_t
+di_type_show(struct device *dev, struct device_attribute *attr,
+		char *buf)
+{
+	struct aicfb_data *fbd = dev_get_drvdata(dev);
+	struct aicfb_dt *dt = &fbd->dt_lists[0];
+	s8 *type[] = {"rgb", "lvds", "dsi", "dbi"};
+	s32 i;
+
+	for (i = 0; i < ARRAY_SIZE(type); i++)
+		if (strncasecmp(dt->di_np->name, type[i], strlen(type[i])) == 0)
+			break;
+
+	return sprintf(buf, "display interface type: %d (%s)\n", i + 1, dt->di_np->name);
+}
+static DEVICE_ATTR_RO(di_type);
+
 static struct attribute *aic_fb_attrs[] = {
 	&dev_attr_reset.attr,
 	&dev_attr_reset_de_di.attr,
@@ -1043,6 +1060,7 @@ static struct attribute *aic_fb_attrs[] = {
 	&dev_attr_vfront_porch.attr,
 	&dev_attr_vback_porch.attr,
 	&dev_attr_vsync_len.attr,
+	&dev_attr_di_type.attr,
 	NULL
 };
 

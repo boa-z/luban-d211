@@ -155,15 +155,14 @@ void lv_draw_ge2d_img(lv_draw_unit_t *draw_unit, const lv_draw_image_dsc_t *draw
                       const lv_area_t *coords)
 {
     if (lv_image_src_get_type(draw_dsc->src) == LV_IMAGE_SRC_FILE) {
-        char *ptr = strrchr(draw_dsc->src, '.');
-        if (!strcmp(ptr, ".fake")) {
+        const char *ptr = lv_fs_get_ext(draw_dsc->src);
+        if (!strcmp(ptr, "fake")) {
             int width;
             int height;
             int alpha_en;
             unsigned int color;
-            int ret;
 
-            FAKE_IMAGE_PARSE((char *)draw_dsc->src, ret, width, height, alpha_en, color);
+            FAKE_IMAGE_PARSE((char *)draw_dsc->src, &width, &height, &alpha_en, &color);
             lv_draw_fill_dsc_t fill_dsc;
             lv_draw_fill_dsc_init(&fill_dsc);
             fill_dsc.color.blue =  color & 0xff;
@@ -171,15 +170,15 @@ void lv_draw_ge2d_img(lv_draw_unit_t *draw_unit, const lv_draw_image_dsc_t *draw
             fill_dsc.color.red =  (color >> 16) & 0xff;
             fill_dsc.opa = (color >> 24) & 0xff;
 
-            if (ret != 4) {
-                LV_LOG_WARN("w:%d, h:%d, alpha_en:%d, color:%08x", width, height, alpha_en, color);
-            }
-
             lv_area_t clipped_img_area;
             if(!_lv_area_intersect(&clipped_img_area, coords, draw_unit->clip_area)) {
                 return;
             }
 
+            _lv_image_buf_get_transformed_area(&clipped_img_area, lv_area_get_width(coords), lv_area_get_height(coords),
+                                            draw_dsc->rotation, draw_dsc->scale_x,
+                                            draw_dsc->scale_y, &draw_dsc->pivot);
+            lv_area_move(&clipped_img_area, coords->x1, coords->y1);
             lv_draw_ge2d_fill_with_blend(draw_unit, &fill_dsc, &clipped_img_area, alpha_en);
             return;
         }

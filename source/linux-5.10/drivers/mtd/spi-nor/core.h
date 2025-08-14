@@ -403,6 +403,7 @@ extern const struct spi_nor_manufacturer spi_nor_boya;
 extern const struct spi_nor_manufacturer spi_nor_fmsh;
 extern const struct spi_nor_manufacturer spi_nor_cfx;
 extern const struct spi_nor_manufacturer spi_nor_zbit;
+extern const struct spi_nor_manufacturer spi_nor_puya;
 
 int spi_nor_write_enable(struct spi_nor *nor);
 int spi_nor_write_disable(struct spi_nor *nor);

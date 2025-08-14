@@ -152,6 +152,7 @@ struct nand_ops {
 	int (*erase)(struct nand_device *nand, const struct nand_pos *pos);
 	int (*markbad)(struct nand_device *nand, const struct nand_pos *pos);
 	bool (*isbad)(struct nand_device *nand, const struct nand_pos *pos);
+	int (*update_bbt)(struct nand_device *nand);
 };
 
 /**

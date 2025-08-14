@@ -292,7 +292,7 @@ static const struct pll_clk_cfg aic_clk_pll_cfg[] = {
 		PLL_FRA1_GEN_REG, PLL_FRA1_CFG_REG, PLL_FRA1_SDM_REG, 0),
 	PLL_SDM_VIDEO(CLK_PLL_FRA2, "pll_fra2", PARENT("osc24m"),
 		PLL_FRA2_GEN_REG, PLL_FRA2_CFG_REG, PLL_FRA2_SDM_REG, 0,
-		360000000, 1200000000),
+		0, 1200000000),
 };
 
 static const struct fixed_parent_clk_cfg aic_fixed_parent_clk_cfg[] = {

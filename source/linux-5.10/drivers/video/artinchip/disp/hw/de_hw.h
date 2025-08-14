@@ -11,6 +11,9 @@
 #include <linux/io.h>
 #include <linux/types.h>
 
+#define LAYER_CONFIG_TIME_US		      30
+#define DE_PREFETCH_LINE		      2
+
 #define DE_CTRL_DITHER_EN                     BIT(0)
 #define DE_MODE_SELECT_COLOR_BAR              BIT(0)
 #define DE_CONFIG_UPDATE_EN                   BIT(0)
@@ -272,6 +275,8 @@ void de_config_update_enable(void __iomem *base_addr, u32 enable);
  */
 void de_set_dither(void __iomem *base_addr, u32 r_depth,
 		   u32 g_depth, u32 b_depth, u32 enable);
+
+u32 de_get_output_line(void __iomem *base_addr);
 
 void de_set_qos(void __iomem *base_addr);
 

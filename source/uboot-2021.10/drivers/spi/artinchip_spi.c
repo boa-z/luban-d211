@@ -1102,59 +1102,20 @@ static int aic_spi_parse_sample_phase(struct udevice *bus, u32 rx_sample_dly,
 {
 	struct aic_spi_platdata *plat = dev_get_plat(bus);
 
-	switch (rx_sample_dly) {
-	case 0:
-		plat->rx_samp_dly = RX_SAMP_DLY_0P;
-		break;
-	case 90:
-		plat->rx_samp_dly = RX_SAMP_DLY_90P;
-		break;
-	case 180:
-		plat->rx_samp_dly = RX_SAMP_DLY_180P;
-		break;
-	case 270:
-		plat->rx_samp_dly = RX_SAMP_DLY_270P;
-		break;
-	case 360:
-		plat->rx_samp_dly = RX_SAMP_DLY_360P;
-		break;
-	default:
+	if (((rx_sample_dly % 90) == 0) && rx_sample_dly <= 1080)
+		plat->rx_samp_dly = rx_sample_dly / 90;
+	else
 		plat->rx_samp_dly = RX_SAMP_DLY_AUTOP;
-		break;
-	}
 
-	switch (tx_clk_dly) {
-	case 0:
+	if (((tx_clk_dly % 90) == 0) && tx_clk_dly <= 360)
+		plat->tx_clk_dly = tx_clk_dly / 90;
+	else
 		plat->tx_clk_dly = 0;
-		break;
-	case 90:
-		plat->tx_clk_dly = 1;
-		break;
-	case 180:
-		plat->tx_clk_dly = 2;
-		break;
-	case 270:
-		plat->tx_clk_dly = 3;
-		break;
-	case 360:
-		plat->tx_clk_dly = 4;
-		break;
-	default:
-		plat->tx_clk_dly = 0;
-		break;
-	}
 
-	switch (tx_sample_dly) {
-	case 0:
+	if (((tx_sample_dly % 180) == 0) && tx_sample_dly <= 180)
+		plat->tx_samp_dly = tx_sample_dly / 180;
+	else
 		plat->tx_samp_dly = 0;
-		break;
-	case 180:
-		plat->tx_samp_dly = 1;
-		break;
-	default:
-		plat->tx_samp_dly = 0;
-		break;
-	}
 
 	return 0;
 }

@@ -3,13 +3,13 @@
 		"size": "16m", // Size of NOR
 		"partitions": {
 			"spl":    { "size": "256k" },
-			"uboot":  { "size": "640k" },
+			"uboot":  { "size": "1m" },
 			"userid": { "size": "64k" },
 			"env":    { "size": "64k" },
 			"env_r":  { "size": "64k" },
 			"falcon": { "size": "64k" },
 			"logo":   { "size": "512k" },
-			"kernel": { "size": "3584k" },
+			"kernel": { "size": "4m" },
 			"rootfs": { "size": "7m" },
 			"user":   { "size": "-" },
 		}

@@ -31,13 +31,25 @@ static SPINAND_OP_VARIANTS(update_cache_variants,
 static int zb35q01a_ooblayout_ecc(struct mtd_info *mtd, int section,
 				  struct mtd_oob_region *region)
 {
-	return -ERANGE;
+	if (section > 3)
+		return -ERANGE;
+
+	region->offset = (16 * section) + 3;
+	region->length = 13;
+
+	return 0;
 }
 
 static int zb35q01a_ooblayout_free(struct mtd_info *mtd, int section,
 				   struct mtd_oob_region *region)
 {
-	return -ERANGE;
+	if (section > 3)
+		return -ERANGE;
+
+	region->offset = (16 * section) + 1;
+	region->length = 2;
+
+	return 0;
 }
 
 static const struct mtd_ooblayout_ops zb35q01a_ooblayout = {
@@ -56,7 +68,10 @@ static int zb35q01a_ecc_get_status(struct spinand_device *spinand,
 		return -EBADMSG;
 
 	case STATUS_ECC_HAS_BITFLIPS:
-		return ((status & STATUS_ECC_MASK) >> 4);
+		return 4;
+
+	case STATUS_ECC_MASK:
+		return 8;
 
 	default:
 		break;

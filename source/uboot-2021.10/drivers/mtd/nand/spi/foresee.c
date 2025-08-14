@@ -33,13 +33,26 @@ static SPINAND_OP_VARIANTS(update_cache_variants,
 static int f35sqa_ooblayout_ecc(struct mtd_info *mtd, int section,
 				  struct mtd_oob_region *region)
 {
-	return -ERANGE;
+	if (section)
+		return -ERANGE;
+
+	region->offset = mtd->oobsize;
+	region->length = 0;
+
+	return 0;
 }
 
 static int f35sqa_ooblayout_free(struct mtd_info *mtd, int section,
 				   struct mtd_oob_region *region)
 {
-	return -ERANGE;
+	if (section)
+		return -ERANGE;
+
+	/* Reserve 2 bytes for the BBM. */
+	region->offset = 2;
+	region->length = mtd->oobsize - 2;
+
+	return 0;
 }
 
 static const struct mtd_ooblayout_ops f35sqa_ooblayout = {

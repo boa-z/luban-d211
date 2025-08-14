@@ -144,6 +144,9 @@ lv_result_t lv_image_decoder_open(lv_image_decoder_dsc_t * dsc, const void * src
         .use_indexed = false,
     };
 
+    // always disable stride align
+    dsc->args.stride_align = 0;
+
     /*
      * We assume that if a decoder can get the info, it can open the image.
      * If decoder open failed, free the source and return error.

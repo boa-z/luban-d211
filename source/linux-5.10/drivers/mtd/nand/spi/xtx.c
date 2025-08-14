@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (c) 2022 ArtInChip
+ * Copyright (c) 2022-2025 ArtInChip
  *
  * Authors:
  *	keliang.liu <keliang.liu@artinchip.com>
@@ -12,62 +12,77 @@
 
 #define SPINAND_MFR_XTX			0x0B
 
-#define XTX_STATUS_ECC_MASK  (0xF << 4)
-#define XTX_STATUS_ECC_NO_BITFLIPS (0 << 4)
-#define XTX_STATUS_ECC_UNCOR_ERROR (0xF << 4)
+#define XT26XXXC_STATUS_ECC_MASK			GENMASK(7, 4)
+#define XT26XXXC_STATUS_ECC_NO_DETECTED     (0)
+#define XT26XXXC_STATUS_ECC_STATUS_OFF		(4)
+#define XT26XXXC_STATUS_ECC_UNCOR_ERROR     GENMASK(7, 4)
 
 static SPINAND_OP_VARIANTS(read_cache_variants,
+		SPINAND_PAGE_READ_FROM_CACHE_QUADIO_OP(0, 1, NULL, 0),
 		SPINAND_PAGE_READ_FROM_CACHE_X4_OP(0, 1, NULL, 0),
+		SPINAND_PAGE_READ_FROM_CACHE_DUALIO_OP(0, 1, NULL, 0),
 		SPINAND_PAGE_READ_FROM_CACHE_X2_OP(0, 1, NULL, 0),
 		SPINAND_PAGE_READ_FROM_CACHE_OP(true, 0, 1, NULL, 0),
 		SPINAND_PAGE_READ_FROM_CACHE_OP(false, 0, 1, NULL, 0));
 
 static SPINAND_OP_VARIANTS(write_cache_variants,
+		SPINAND_PROG_LOAD_X4(true, 0, NULL, 0),
 		SPINAND_PROG_LOAD(true, 0, NULL, 0));
 
 static SPINAND_OP_VARIANTS(update_cache_variants,
+		SPINAND_PROG_LOAD_X4(false, 0, NULL, 0),
 		SPINAND_PROG_LOAD(false, 0, NULL, 0));
 
-static int xtx_ooblayout_ecc(struct mtd_info *mtd, int section,
-			     struct mtd_oob_region *region)
+static int xt26xxxc_ooblayout_ecc(struct mtd_info *mtd, int section,
+					struct mtd_oob_region *region)
 {
-	return -ERANGE;
+	if (section)
+		return -ERANGE;
+
+	region->offset = 64;
+	region->length = 52;
+
+	return 0;
 }
 
-static int xtx_ooblayout_free(struct mtd_info *mtd, int section,
-			      struct mtd_oob_region *region)
+static int xt26xxxc_ooblayout_free(struct mtd_info *mtd, int section,
+					struct mtd_oob_region *region)
 {
-	return -ERANGE;
+	if (section)
+		return -ERANGE;
+
+	region->offset = 2;
+	region->length = 62;
+
+	return 0;
 }
 
-static const struct mtd_ooblayout_ops xtx_ooblayout = {
-	.ecc = xtx_ooblayout_ecc,
-	.free = xtx_ooblayout_free,
+static const struct mtd_ooblayout_ops xt26xxxc_ooblayout = {
+	.ecc = xt26xxxc_ooblayout_ecc,
+	.free = xt26xxxc_ooblayout_free,
 };
 
-static int xtx_ecc_get_status(struct spinand_device *spinand,
-			      u8 status)
+static int xt26xxxc_ecc_get_status(struct spinand_device *spinand,
+					u8 status)
 {
-	switch (status & XTX_STATUS_ECC_MASK) {
-	case XTX_STATUS_ECC_NO_BITFLIPS:
-		return 0;
+	status = status & XT26XXXC_STATUS_ECC_MASK;
 
-	case XTX_STATUS_ECC_UNCOR_ERROR:
+	switch (status) {
+	case XT26XXXC_STATUS_ECC_NO_DETECTED:
+		return 0;
+	case XT26XXXC_STATUS_ECC_UNCOR_ERROR:
 		return -EBADMSG;
 
-	case (1 << 4):
-	case (2 << 4):
-	case (3 << 4):
-	case (4 << 4):
-	case (5 << 4):
-	case (6 << 4):
-	case (7 << 4):
-	case (8 << 4):
-		return 8 << 4;
 	default:
 		break;
 	}
-	return -EINVAL;
+
+	/* At this point values greater than (2 << 4) are invalid  */
+	if (status > XT26XXXC_STATUS_ECC_UNCOR_ERROR)
+		return -EINVAL;
+
+	/* (1 << 4) through (7 << 4) are 1-7 corrected errors */
+	return status >> XT26XXXC_STATUS_ECC_STATUS_OFF;
 }
 
 static const struct spinand_info xtx_spinand_table[] = {
@@ -76,11 +91,11 @@ static const struct spinand_info xtx_spinand_table[] = {
 		NAND_MEMORG(1, 2048, 64, 64, 1024, 40, 1, 1, 1),
 		NAND_ECCREQ(8, 528),
 		SPINAND_INFO_OP_VARIANTS(&read_cache_variants,
-			&write_cache_variants,
-			&update_cache_variants),
-			SPINAND_HAS_QE_BIT,
-			SPINAND_ECCINFO(&xtx_ooblayout,
-			xtx_ecc_get_status)),
+					 &write_cache_variants,
+					 &update_cache_variants),
+		SPINAND_HAS_QE_BIT,
+		SPINAND_ECCINFO(&xt26xxxc_ooblayout,
+				xt26xxxc_ecc_get_status)),
 };
 
 static int xtx_spinand_init(struct spinand_device *spinand)

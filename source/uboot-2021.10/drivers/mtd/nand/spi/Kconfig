@@ -119,4 +119,10 @@ config SPI_NAND_BYTE
 	help
 	  Enable this driver for BYTe (BOYA technology zhuhai) SPI NAND flash.
 
+config SPI_NAND_XINCUN
+	bool "Support XINCUN SPI NAND"
+	default n
+	help
+	  Enable this driver for XINCUN SPI NAND flash.
+
 endif

@@ -170,9 +170,18 @@ static bool ge2d_draw_img_supported(const lv_draw_image_dsc_t *draw_dsc)
     if (draw_dsc->rotation % 900 && scale)
         return false;
 
+    if (draw_dsc->header.w * draw_dsc->header.h < LV_GE2D_FILL_OPA_SIZE_LIMIT) {
+        if (lv_image_src_get_type(draw_dsc->src) == LV_IMAGE_SRC_FILE) {
+            if (!strcmp(lv_fs_get_ext(draw_dsc->src), "fake")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     if (draw_dsc->header.cf < LV_COLOR_FORMAT_YUV_START) {
         if (draw_dsc->header.stride % 8) {
-            LV_LOG_TRACE("stride:%d", draw_dsc->header.stride);
+            LV_LOG_ERROR("stride:%d", draw_dsc->header.stride);
             return false;
         }
     }

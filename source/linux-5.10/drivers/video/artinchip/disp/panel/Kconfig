@@ -20,6 +20,18 @@ config AIC_PANEL_DSI_SIMPLE
 	help
 	  ArtInChip MIPI DSI simple panel
 
+config AIC_PANEL_DSI_NV3051
+	tristate "ArtInChip dsi panel driver for NV3051"
+	depends on BACKLIGHT_CLASS_DEVICE && AIC_DISP_MIPI_DSI
+	help
+	  Say Y here if you want to enable support for the NV3051 MIPI DSI panel.
+
+config AIC_PANEL_DSI_GH8555BC
+	tristate "ArtInChip dsi panel driver for GH8555BC"
+	depends on BACKLIGHT_CLASS_DEVICE && AIC_DISP_MIPI_DSI
+	help
+	  Say Y here if you want to enable support for the GH8555BC MIPI DSI panel.
+
 config AIC_PANEL_DSI_B080XAN
 	tristate "ArtInChip dsi panel driver for B080XAN"
 	depends on BACKLIGHT_CLASS_DEVICE && AIC_DISP_MIPI_DSI

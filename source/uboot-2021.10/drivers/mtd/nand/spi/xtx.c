@@ -33,21 +33,62 @@ static SPINAND_OP_VARIANTS(write_cache_variants,
 static SPINAND_OP_VARIANTS(update_cache_variants,
 		SPINAND_PROG_LOAD(false, 0, NULL, 0));
 
-static int xtx_ooblayout_ecc(struct mtd_info *mtd, int section,
-			     struct mtd_oob_region *region)
+static int xt26xxxg_ooblayout_ecc(struct mtd_info *mtd, int section,
+	struct mtd_oob_region *region)
 {
-	return -ERANGE;
+	if (section)
+		return -ERANGE;
+
+	region->offset = mtd->oobsize / 2;
+	region->length = mtd->oobsize / 2 - 12;
+
+	return 0;
 }
 
-static int xtx_ooblayout_free(struct mtd_info *mtd, int section,
-			      struct mtd_oob_region *region)
+static int xt26xxxg_ooblayout_free(struct mtd_info *mtd, int section,
+	 struct mtd_oob_region *region)
 {
-	return -ERANGE;
+	if (section)
+		return -ERANGE;
+
+	region->offset = 2;
+	region->length = mtd->oobsize / 2 - 2;
+
+	return 0;
 }
 
-static const struct mtd_ooblayout_ops xtx_ooblayout = {
-	.ecc = xtx_ooblayout_ecc,
-	.rfree = xtx_ooblayout_free,
+static const struct mtd_ooblayout_ops xt26xxxg_ooblayout = {
+	.ecc = xt26xxxg_ooblayout_ecc,
+	.rfree = xt26xxxg_ooblayout_free,
+};
+
+static int xt26xxxg04c_ooblayout_ecc(struct mtd_info *mtd, int section,
+	struct mtd_oob_region *region)
+{
+	if (section)
+		return -ERANGE;
+
+	region->offset = mtd->oobsize / 2;
+	region->length = mtd->oobsize / 2 - 24;
+
+	return 0;
+}
+
+static int xt26xxxg04c_ooblayout_free(struct mtd_info *mtd, int section,
+	 struct mtd_oob_region *region)
+{
+	if (section)
+		return -ERANGE;
+
+	region->offset = 2;
+	region->length = mtd->oobsize / 2 - 2;
+
+	return 0;
+}
+
+static const struct mtd_ooblayout_ops xt26xxxg04c_ooblayout = {
+	.ecc = xt26xxxg04c_ooblayout_ecc,
+	.rfree = xt26xxxg04c_ooblayout_free,
 };
 
 static int xtx_ecc_get_status(struct spinand_device *spinand,
@@ -80,13 +121,13 @@ static int xtx_ecc_get_status(struct spinand_device *spinand,
 static const struct spinand_info xtx_spinand_table[] = {
     SPINAND_INFO("XT26G01C",
 			 SPINAND_ID(0x11),
-			 NAND_MEMORG(1, 2048, 64, 64, 1024, 1, 1, 1),
+			 NAND_MEMORG(1, 2048, 128, 64, 1024, 1, 1, 1),
 			 NAND_ECCREQ(8, 528),
 			 SPINAND_INFO_OP_VARIANTS(&read_cache_variants,
 						  &write_cache_variants,
 						  &update_cache_variants),
 			 SPINAND_HAS_QE_BIT,
-			 SPINAND_ECCINFO(&xtx_ooblayout, xtx_ecc_get_status)),
+			 SPINAND_ECCINFO(&xt26xxxg_ooblayout, xtx_ecc_get_status)),
 	SPINAND_INFO("XT26G04C",
 			 SPINAND_ID(0x13),
 			 NAND_MEMORG(1, 4096, 256, 64, 2048, 1, 1, 1),
@@ -95,7 +136,7 @@ static const struct spinand_info xtx_spinand_table[] = {
 						  &write_cache_variants,
 						  &update_cache_variants),
 			 SPINAND_HAS_QE_BIT,
-			 SPINAND_ECCINFO(&xtx_ooblayout, xtx_ecc_get_status)),
+			 SPINAND_ECCINFO(&xt26xxxg04c_ooblayout, xtx_ecc_get_status)),
 };
 
 static int xtx_spinand_init(struct spinand_device *spinand)

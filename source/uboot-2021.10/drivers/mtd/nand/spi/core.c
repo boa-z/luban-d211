@@ -956,6 +956,17 @@ static int spinand_mtd_block_isreserved(struct mtd_info *mtd, loff_t offs)
 	return ret;
 }
 
+static int spinand_update_bbt(struct nand_device *nand)
+{
+#ifdef CONFIG_NAND_BBT_MANAGE
+	struct spinand_device *spinand = nand_to_spinand(nand);
+
+	return aic_nand_bbt_update(spinand);
+#else
+	return 0;
+#endif
+}
+
 const struct spi_mem_op *
 spinand_find_supported_op(struct spinand_device *spinand,
 			  const struct spi_mem_op *ops,
@@ -975,6 +986,7 @@ static const struct nand_ops spinand_ops = {
 	.erase = spinand_erase,
 	.markbad = spinand_markbad,
 	.isbad = spinand_isbad,
+	.update_bbt = spinand_update_bbt,
 };
 
 static const struct spi_mem_op *

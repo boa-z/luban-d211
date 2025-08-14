@@ -91,7 +91,7 @@ add_library(mm_base SHARED
     ${BASE_AUDIO_RENDER}
 )
 
-target_link_libraries(mm_base mpp_base asound)
+target_link_libraries(mm_base mpp_base mpp_ge asound)
 
 if (RTSP_DEMUXER)
     target_link_libraries(mm_base BasicUsageEnvironment groupsock liveMedia UsageEnvironment)

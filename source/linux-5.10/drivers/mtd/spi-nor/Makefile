@@ -22,6 +22,7 @@ spi-nor-objs			+= boya.o
 spi-nor-objs			+= fmsh.o
 spi-nor-objs			+= cfx.o
 spi-nor-objs			+= zbit.o
+spi-nor-objs			+= puya.o
 obj-$(CONFIG_MTD_SPI_NOR)	+= spi-nor.o
 
 obj-$(CONFIG_MTD_SPI_NOR)	+= controllers/

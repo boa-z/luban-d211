@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2022-2024 ArtInChip Technology Co., Ltd.
+ * Copyright (C) 2022-2025 ArtInChip Technology Co., Ltd.
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -14,23 +14,48 @@ extern "C" {
 #endif
 
 #include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
 
 #define LVGL_PATH_ORI "/usr/local/share/lvgl_data/"
 #define CONN(x, y) x#y
 #define LVGL_PATH(y) CONN(LVGL_DIR, y)
 #define LVGL_FONT_PATH(y) CONN(LVGL_PATH_ORI"font/", y)
 #define LVGL_IMAGE_PATH(y) CONN(LVGL_DIR"image/", y)
+#define LVGL_VIDEO_PATH(y) CONN(LVGL_DIR"video/", y)
 #define FILE_LIST_PATH  "/usr/local/share/lvgl_data/"
 #define LVGL_FILE_LIST_PATH(y) CONN(FILE_LIST_PATH, y)
 
+#define LV_USE_AIC_SIMULATOR 0
+
 /* use fake image to fill color */
-#define FAKE_IMAGE_DECLARE(name) char fake_##name[128];
+#define FAKE_IMAGE_DECLARE(name) char fake_##name[256];
 #define FAKE_IMAGE_INIT(name, w, h, blend, color) \
-                snprintf(fake_##name, 128, "L:/%dx%d_%d_%08x.fake",\
+                snprintf(fake_##name, 255, "L:/%dx%d_%d_%08x.fake",\
                  w, h, blend, color);
 #define FAKE_IMAGE_NAME(name) (fake_##name)
-#define FAKE_IMAGE_PARSE(fake_name, ret, width, height, blend, color) \
-        ret = sscanf(fake_name + 3, "%dx%d_%d_%08x", &width, &height, &blend, &color);
+
+#define FAKE_IMAGE_PARSE(fake_name, pwidth, pheight, pblend, pcolor) \
+        fake_image_parse(fake_name, pwidth, pheight, pblend, pcolor)
+
+static inline void fake_image_parse(char *fake_name, int *width,
+                                    int *height, int *blend,
+                                    unsigned int *color)
+{
+    char *cur_ptr;
+    char *pos_ptr;
+    cur_ptr = fake_name + 3;
+    *width = strtol(cur_ptr, &pos_ptr, 10);
+    cur_ptr = pos_ptr + 1;
+    *height = strtol(cur_ptr, &pos_ptr, 10);
+    cur_ptr = pos_ptr + 1;
+    *blend = strtol(cur_ptr, &pos_ptr, 10);
+    cur_ptr = pos_ptr + 1;
+    *color = strtoul(cur_ptr, NULL, 16);
+    return;
+}
+
+#define ui_snprintf(fmt, arg...) snprintf(fmt, 255, ##arg)
 
 uint32_t custom_tick_get(void);
 

@@ -229,6 +229,8 @@ static struct artinchip_reset	rest_info[] = {
 	RESET_DESC(RESET_GPT9,		CLK_GPT_REG(9)),
 	RESET_DESC(RESET_SP_USBD,	CLK_SP_USBD_REG),
 	RESET_DESC(RESET_SP_USB_PHY0,	CLK_SP_USB_PHY0_REG),
+	RESET_DESC(RESET_SP_UART0,	CLK_SP_UART0_REG),
+	RESET_DESC(RESET_SP_UART1,	CLK_SP_UART1_REG),
 };
 
 static int aic_reset_probe(struct udevice *dev)

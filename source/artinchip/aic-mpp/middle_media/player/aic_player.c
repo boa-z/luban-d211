@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2023 ArtInChip Technology Co. Ltd
+ * Copyright (C) 2020-2025 ArtInChip Technology Co. Ltd
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -68,6 +68,7 @@ struct aic_player {
     s32 rotation_angle;
     s8 mute;
     s8 seeking;
+    s8 video_render_keep_last_frame;
 };
 
 
@@ -940,6 +941,13 @@ s32 aic_player_stop(struct aic_player *player)
 
     if (player->media_info.has_video) {
         if (player->video_render_handle) {
+            mm_param_u32 params;
+            params.u32 = (u32)player->video_render_keep_last_frame;
+            if (MM_ERROR_NONE != mm_set_parameter(player->video_render_handle,
+                                                  MM_INDEX_VENDOR_VIDEO_RENDER_KEEP_LAST_FRAME,
+                                                  &params)) {
+                loge("set video render keep last frame failed.\n");
+            }
             mm_free_handle(player->video_render_handle);
             player->video_render_handle = NULL;
         }
@@ -1200,3 +1208,22 @@ s32 aic_player_get_rotation(struct aic_player *player)
     return rotation.rotation;
 }
 
+s32 aic_player_control(struct aic_player *player, enum aic_player_command cmd, void *data)
+{
+    s32 ret = 0;
+    switch (cmd) {
+        case AIC_PLAYER_CMD_SET_VIDEO_RENDER_KEEP_LAST_FRAME: {
+            if (!data) {
+                loge("video render set last frame data is null\n");
+                return -1;
+            }
+            player->video_render_keep_last_frame = *(s8 *)data;
+            break;
+        }
+
+        default:
+            return -1;
+    }
+
+    return ret;
+}

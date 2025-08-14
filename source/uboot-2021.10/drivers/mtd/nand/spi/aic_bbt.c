@@ -282,6 +282,46 @@ void aic_clear_nand_bbt(void)
 	put_mtd_device(mtd);
 }
 
+static int init_nand_part_bad_block(struct spinand_device *spinand, struct bad_block_ctl *bad_block_buf)
+{
+	struct mtd_info *mtd = spinand_to_mtd(spinand);
+	int ret = 0;
+
+	if (!spinand->bbt_buf) {
+		spinand->bbt_buf = kmalloc(sizeof(*spinand->bbt_buf), GFP_KERNEL);
+		if (!spinand->bbt_buf) {
+			pr_err("Kmalloc bbt buf failed.\n");
+			return -1;
+		}
+	}
+
+	memset((char *)spinand->bbt_buf, 0, sizeof(*spinand->bbt_buf));
+
+	/* save bad block information from spinand to buf */
+	get_mtd_device_bad_block(mtd);
+	update_nand_part_bad_block(spinand->bbt_buf, bad_block_buf);
+	ret = set_nand_part_bad_block(mtd, bad_block_buf);
+	if (ret)
+		return -1;
+
+	memset(bad_block_buf, 0, sizeof(struct bad_block_ctl));
+
+	ret = get_nand_part_bad_block(mtd, (u8 *)bad_block_buf);
+	if (ret)
+		return -1;
+
+	ret = check_nand_part_bad_block(bad_block_buf);
+	if (!ret) {
+		ret = cmp_mtd_and_bad_block(spinand->bbt_buf, bad_block_buf);
+		if (!ret) {
+			pr_notice("bbt part data is already up to date!\n");
+			return -1;
+		}
+	}
+
+	return 0;
+}
+
 void aic_nand_bbt_init(struct spinand_device *spinand)
 {
 	struct bad_block_ctl *bbt_ctl;
@@ -304,7 +344,58 @@ void aic_nand_bbt_init(struct spinand_device *spinand)
 	if (!ret) {
 		pr_notice("enable nand bbt ...\n");
 		sync_bbt(spinand, bbt_ctl);
+	} else {
+		pr_notice("There are not bbt ctrl data on Flash, init it.\n");
+		init_nand_part_bad_block(spinand, bbt_ctl);
 	}
+
+	kfree(bbt_ctl);
+}
+
+int aic_nand_bbt_update(struct spinand_device *spinand)
+{
+	struct bad_block_ctl *bbt_ctl;
+	struct mtd_info *mtd = spinand_to_mtd(spinand);
+	int ret;
+
+	bbt_ctl = kmalloc(sizeof(struct bad_block_ctl), GFP_KERNEL);
+	if (!bbt_ctl)
+		return -1;
+
+	memset(bbt_ctl, 0, sizeof(struct bad_block_ctl));
+
+	if (!spinand->bbt_buf) {
+		spinand->bbt_buf = kmalloc(sizeof(*spinand->bbt_buf), GFP_KERNEL);
+		if (!spinand->bbt_buf) {
+			pr_err("Kmalloc bbt buf failed.\n");
+			return -1;
+		}
+	}
+
+	memset((char *)spinand->bbt_buf, 0, sizeof(*spinand->bbt_buf));
+	/* save bad block information from spinand to buf */
+	get_mtd_device_bad_block(mtd);
+
+	update_nand_part_bad_block(spinand->bbt_buf, bbt_ctl);
+	ret = set_nand_part_bad_block(mtd, bbt_ctl);
+	if (ret)
+		return -1;
+
+	memset(bbt_ctl, 0, sizeof(struct bad_block_ctl));
+	ret = get_nand_part_bad_block(mtd, (u8 *)bbt_ctl);
+	if (ret)
+		return -1;
+
+	ret = check_nand_part_bad_block(bbt_ctl);
+	if (!ret) {
+		ret = cmp_mtd_and_bad_block(spinand->bbt_buf, bbt_ctl);
+		if (!ret)
+			pr_notice("bbt part data is already up to date!\n");
+	}
+
+	kfree(bbt_ctl);
+
+	return 0;
 }
 
 static int do_nand_bbt(struct cmd_tbl *cmdtp, int flag, int argc,

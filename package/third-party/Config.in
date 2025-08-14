@@ -144,5 +144,12 @@ menu "Third-party packages"
 	source package/third-party/live555/Config.in
 	source package/third-party/rtl8733bs_bt_fw/Config.in
 	source package/third-party/rtl8733bu_bt_fw/Config.in
+	comment "************************ MTP Tools *************************"
+	source package/third-party/libfuse/Config.in
+	source package/third-party/libiconv/Config.in
+	source package/third-party/libusb/Config.in
+	source package/third-party/mtpfs/Config.in
+	source package/third-party/umtprd/Config.in
+	source package/third-party/libmtp/Config.in
 
 endmenu

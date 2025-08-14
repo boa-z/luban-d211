@@ -82,6 +82,7 @@ enum dsi_mode {
 	DSI_MOD_CMD_MODE         = BIT(3),
 
 	DSI_CLOCK_NON_CONTINUOUS = BIT(4),
+	DSI_MOD_NO_EOT_PACKET    = BIT(5),
 };
 
 enum dsi_format {

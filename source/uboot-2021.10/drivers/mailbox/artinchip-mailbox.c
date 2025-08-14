@@ -32,7 +32,7 @@ static int aic_mbox_recv(struct mbox_chan *chan, void *data)
 		goto err;
 
 	if (aic_mbox_int_sta_is_rx_cmp(sta)) {
-		dev_dbg(chan->dev, "Peer had received data.\n");
+		/* dev_dbg(chan->dev, "Peer had received data.\n"); */
 		mbox->last_tx_done = 1;
 	}
 
@@ -47,14 +47,14 @@ static int aic_mbox_recv(struct mbox_chan *chan, void *data)
 		cnt = aic_mbox_rxfifo_cnt(mbox->regs);
 
 		if (cnt > 1) {
-			dev_dbg(chan->dev, "RxFIFO discard %d data.\n", cnt - 1);
+			/* dev_dbg(chan->dev, "RxFIFO discard %d data.\n", cnt - 1); */
 			aic_mbox_rd(mbox->regs, &mbox->recv_buf[index], cnt - 1);
 			index += cnt - 1;
 		}
 
 		if (aic_mbox_int_sta_is_tx_cmp(sta)) {
 			mbox->recv_buf[index] = aic_mbox_rd_cmp(mbox->regs);
-			dev_dbg(chan->dev, "Recv len %d Word, index:%d\n", cnt, index);
+			/* dev_dbg(chan->dev, "Recv len %d Word, index:%d\n", cnt, index); */
 			index++;
 
 			if (g_mbox_cb) {
@@ -73,7 +73,7 @@ static int aic_mbox_recv(struct mbox_chan *chan, void *data)
 	}
 
 	if (aic_mbox_int_sta_is_tx_full(sta)) {
-		dev_dbg(chan->dev, "mbox: TxFIFO is full!\n");
+		dev_err(chan->dev, "mbox: TxFIFO is full!\n");
 		goto err;
 	}
 
@@ -101,7 +101,7 @@ static void aic_mbox_shutdown(struct mbox_chan *chan)
 	aic_mbox_int_all_en(mbox->regs, 0);
 	aic_mbox_rxfifo_rst(mbox->regs);
 
-	dev_dbg(chan->dev, "Shutdown\n");
+	/* dev_dbg(chan->dev, "Shutdown\n"); */
 }
 
 static int aic_mbox_of_xlate(struct mbox_chan *chan,
@@ -110,7 +110,7 @@ static int aic_mbox_of_xlate(struct mbox_chan *chan,
 	struct aic_mbox *mbox = dev_get_priv(chan->dev);
 
 	if (args->args_count != 1) {
-		dev_dbg(chan->dev, "Invaild args_count: %d\n", args->args_count);
+		dev_err(chan->dev, "Invaild args_count: %d\n", args->args_count);
 		return -EINVAL;
 	}
 	mbox->regs = (void __iomem *)dev_read_addr(chan->dev);
@@ -129,7 +129,7 @@ static int aic_mbox_send(struct mbox_chan *chan, const void *data)
 	u32 ret = 0;
 
 	if (aic_mbox_int_sta_is_rx_cmp(sta)) {
-		dev_dbg(chan->dev, "Peer had received data\n");
+		/* dev_dbg(chan->dev, "Peer had received data\n"); */
 		mbox->last_tx_done = 1;
 	}
 
@@ -161,7 +161,7 @@ static int aic_mbox_send(struct mbox_chan *chan, const void *data)
  */
 static int aic_mbox_rfree(struct mbox_chan *chan)
 {
-	dev_dbg(chan->dev, "%s(chan=%p)\n", __func__, chan);
+	/* dev_dbg(chan->dev, "%s(chan=%p)\n", __func__, chan); */
 
 	aic_mbox_shutdown(chan);
 

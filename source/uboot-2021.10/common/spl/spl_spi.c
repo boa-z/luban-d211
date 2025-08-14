@@ -123,9 +123,6 @@ static int spi_load_image_os(struct spl_image_info *spl_image,
 {
 	int err;
 
-#ifdef CONFIG_VIDEO_ARTINCHIP
-	spi_flash_read_logo(flash, "boot");
-#endif
 	spi_flash_read(flash, CONFIG_SYS_SPI_ARGS_OFFS,
 		       CONFIG_SYS_SPI_ARGS_SIZE,
 		       (void *)CONFIG_SYS_SPL_ARGS_ADDR);
@@ -211,8 +208,12 @@ static int spl_spi_load_image(struct spl_image_info *spl_image,
 	if (!spl_start_uboot()) {
 		err = spi_load_image_os(spl_image, flash, header);
 		/* Double check after linux image is loaded. */
-		if (!err && !spl_start_uboot())
+		if (!err && !spl_start_uboot()) {
+#ifdef CONFIG_VIDEO_ARTINCHIP
+			spi_flash_read_logo(flash, "boot");
+#endif
 			return 0;
+		}
 	}
 #endif
 	{

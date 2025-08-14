@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2023 ArtInChip Technology Co. Ltd
+ * Copyright (C) 2020-2025 ArtInChip Technology Co. Ltd
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -30,6 +30,9 @@ enum aic_player_event {
 	AIC_PLAYER_EVENT_DEMUXER_FORMAT_NOT_DETECTED
 };
 
+enum aic_player_command {
+    AIC_PLAYER_CMD_SET_VIDEO_RENDER_KEEP_LAST_FRAME,
+};
 // now do not support  setting  nWidth and  nHeight,just only support setting pFilePath
 struct aic_capture_info {
     s8 *file_path;
@@ -107,6 +110,8 @@ s32 aic_player_capture(struct aic_player *player, struct aic_capture_info *captu
 s32 aic_player_set_rotation(struct aic_player *player, int rotation_angle);
 
 s32 aic_player_get_rotation(struct aic_player *player);
+
+s32 aic_player_control(struct aic_player *player, enum aic_player_command cmd, void *data);
 
 #ifdef __cplusplus
 #if __cplusplus

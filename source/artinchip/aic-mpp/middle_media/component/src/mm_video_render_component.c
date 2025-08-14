@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2024 ArtInChip Technology Co. Ltd
+ * Copyright (C) 2020-2025 ArtInChip Technology Co. Ltd
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -125,11 +125,11 @@ static int mm_video_render_free_dma_buffer(struct mpp_frame* p_frame,int dma_fd)
     if (p_frame->buf.fd[0] > 0) {
         dmabuf_free(p_frame->buf.fd[0]);
     }
-    if (p_frame->buf.fd[0] > 0) {
-        dmabuf_free(p_frame->buf.fd[0]);
+    if (p_frame->buf.fd[1] > 0) {
+        dmabuf_free(p_frame->buf.fd[1]);
     }
-    if (p_frame->buf.fd[0] > 0) {
-        dmabuf_free(p_frame->buf.fd[0]);
+    if (p_frame->buf.fd[2] > 0) {
+        dmabuf_free(p_frame->buf.fd[2]);
     }
     dmabuf_device_close(dma_fd);
     return 0;
@@ -1210,6 +1210,17 @@ static s32 mm_video_render_set_parameter(mm_handle h_component,
             p_video_render_data->dis_rect.height =
                 ((mm_config_rect *)p_param)->height;
             p_video_render_data->dis_rect_change = MM_TRUE;
+            break;
+        case MM_INDEX_VENDOR_VIDEO_RENDER_KEEP_LAST_FRAME:
+            if (!p_video_render_data->render) {
+                loge("video render is not initialization!!!\n");
+                return MM_ERROR_INSUFFICIENT_RESOURCES;
+            }
+            error = aic_video_render_rend_last_frame(p_video_render_data->render,
+                                                     (s32)(((mm_param_u32 *)p_param)->u32));
+            if (error != 0)
+                loge("aic_video_render_rend_last_frame error %d!!!\n", error);
+
             break;
 
         default:

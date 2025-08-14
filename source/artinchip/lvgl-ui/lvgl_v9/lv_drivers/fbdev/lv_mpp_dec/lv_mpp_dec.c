@@ -30,6 +30,7 @@
 #define JPEG_SOI 0xFFD8
 #define JPEG_SOF 0xFFC0
 #define ALIGN_16B(x) (((x) + (15)) & ~(15))
+#define ALIGN_8B(x)  (((x) + (7)) & ~(7))
 
 #define CHECK_RET(func, ret)  do {\
                             if (func != ret) {\
@@ -464,22 +465,15 @@ static lv_res_t fake_decoder_info(lv_image_decoder_t *decoder, const void *src, 
     int height;
     int alpha_en;
     unsigned int color;
-    int ret;
 
-    FAKE_IMAGE_PARSE((char *)src, ret, width, height, alpha_en, color);
+    FAKE_IMAGE_PARSE((char *)src, &width, &height, &alpha_en, &color);
     header->w = width;
     header->h = height;
     header->cf = LV_COLOR_FORMAT_RAW;
-
-    // means aic mpp buffer
+    header->stride = ALIGN_8B(width * 4);
     header->flags |= LV_IMAGE_FLAGS_USER8;
 
-    if (ret != 4) {
-        LV_LOG_WARN("w:%d, h:%d, alpha_en:%d, color:%08x", width, height, alpha_en, color);
-        return LV_RESULT_INVALID;
-    } else {
-        return LV_RES_OK;
-    }
+    return LV_RES_OK;
 }
 
 static lv_result_t lv_mpp_dec_info(lv_image_decoder_t *decoder, const void *src, lv_image_header_t *header)

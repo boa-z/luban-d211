@@ -99,6 +99,14 @@ config AIC_DISP_MIPI_DBI
 	help
 	  ArtInChip display mipi-dbi support
 
+config AIC_DSI_LEGACY_PACKET_CONFIG
+	bool "enable MIPI-DSI legacy packet config"
+	default n
+	depends on AIC_DISP_MIPI_DSI
+	help
+	  Choose this option if you have a need for the legacy luban
+	  sdk version support. If in doubt, say "N".
+
 if VIDEO_ARTINCHIP
 
 source "drivers/video/artinchip/display/panel/Kconfig"

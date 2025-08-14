@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2024 ArtInChip Technology Co. Ltd
+ * Copyright (C) 2020-2025 ArtInChip Technology Co. Ltd
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -392,6 +392,34 @@ static int process_command(struct video_player_ctx *player_ctx,char cmd)
 	return ret;
 }
 
+
+static int player_demo_prepare_stop(struct video_player_ctx *ctx, int force_stop,
+					int loop_time, int file_num)
+{
+	int enable = 0;
+
+	/*force stop need set render delay disable*/
+	if (force_stop && (ctx->loop_time > 1 || ctx->files.file_num > 1)) {
+		enable = 0;
+		aic_player_control(ctx->player, AIC_PLAYER_CMD_SET_VIDEO_RENDER_KEEP_LAST_FRAME, &enable);
+		return 0;
+	}
+
+	/*check the final play file then set render delay disable*/
+	if ((ctx->loop_time > 1) && (ctx->files.file_num > 1)) {
+		if ((loop_time == ctx->loop_time - 1) && (file_num == ctx->files.file_num -1)) {
+			enable = 0;
+			aic_player_control(ctx->player, AIC_PLAYER_CMD_SET_VIDEO_RENDER_KEEP_LAST_FRAME, &enable);
+		}
+	} else if ((ctx->loop_time > 1) && (loop_time == ctx->loop_time - 1)) {
+		enable = 0;
+		aic_player_control(ctx->player, AIC_PLAYER_CMD_SET_VIDEO_RENDER_KEEP_LAST_FRAME, &enable);
+	} else if ((ctx->files.file_num > 1) && (file_num == ctx->files.file_num - 1)) {
+		enable = 0;
+		aic_player_control(ctx->player, AIC_PLAYER_CMD_SET_VIDEO_RENDER_KEEP_LAST_FRAME, &enable);
+	}
+	return 0;
+}
 int main(int argc,char*argv[])
 {
 	int ret = 0;
@@ -400,6 +428,7 @@ int main(int argc,char*argv[])
 	char buffer[BUFFER_LEN];
 	int flag;
 	static int fd_dev;
+	int enable = 0;
 	struct aicfb_alpha_config alpha_bak = {0};
 	struct aicfb_alpha_config alpha = {0};
 	struct video_player_ctx *ctx = NULL;
@@ -441,6 +470,10 @@ int main(int argc,char*argv[])
 	flag = fcntl(STDIN_FILENO,F_GETFL);
 	flag |= O_NONBLOCK;
 	fcntl(STDIN_FILENO,F_SETFL,flag);
+	if (ctx->loop_time > 1 || ctx->files.file_num > 1) {
+		enable = 1;
+		aic_player_control(ctx->player, AIC_PLAYER_CMD_SET_VIDEO_RENDER_KEEP_LAST_FRAME, &enable);
+	}
 
 	for(i = 0;i < ctx->loop_time; i++) {
 		for(j = 0; j < ctx->files.file_num; j++) {
@@ -448,11 +481,13 @@ int main(int argc,char*argv[])
 			ctx->player_end = 0;
 			if (aic_player_set_uri(ctx->player,ctx->files.file_path[j])) {
 				loge("aic_player_prepare error!!!!\n");
+				player_demo_prepare_stop(ctx, 0, i, j);
 				aic_player_stop(ctx->player);
 				continue;
 			}
 
 			if (aic_player_prepare_sync(ctx->player)) {
+				player_demo_prepare_stop(ctx, 0, i, j);
 				loge("aic_player_prepare error!!!!\n");
 				aic_player_stop(ctx->player);
 				continue;
@@ -460,6 +495,7 @@ int main(int argc,char*argv[])
 
 			if (start_play(ctx) != 0) {
 				loge("start_play error!!!!\n");
+				player_demo_prepare_stop(ctx, 0, i, j);
 				aic_player_stop(ctx->player);
 				continue;
 			}
@@ -467,6 +503,7 @@ int main(int argc,char*argv[])
 			while(1) {
 				if (ctx->player_end == 1) {
 					logd("play file:%s end!!!!\n",ctx->files.file_path[j]);
+					player_demo_prepare_stop(ctx, 0, i, j);
 					ret = aic_player_stop(ctx->player);
 					ctx->player_end = 0;
 					break;
@@ -478,9 +515,11 @@ int main(int argc,char*argv[])
 						aic_player_stop(ctx->player);
 						break;
 					} else if (buffer[0] == 'd') {// down
+						player_demo_prepare_stop(ctx, 0, i, j);
 						aic_player_stop(ctx->player);
 						break;
 					} else if (buffer[0] == 'e') {// end
+						player_demo_prepare_stop(ctx, 1, i, j);
 						aic_player_stop(ctx->player);
 						goto _EXIT_;
 					}

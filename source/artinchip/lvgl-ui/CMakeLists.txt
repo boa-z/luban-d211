@@ -11,6 +11,7 @@ if(DEFINED LVGL_FBDEV)
     if(${LVGL_FBDEV} STREQUAL "yes")
         set(APP_FOLDER ${DEMO_FOLDER}/base_demo)
         #set(APP_FOLDER ${DEMO_FOLDER}/hub_demo)
+        #set(APP_FOLDER ${DEMO_FOLDER}/lyrics_demo)
     endif()
 endif()
 
@@ -47,6 +48,10 @@ add_compile_options(-Wall)
 
 add_definitions(-DLV_USE_CONF_CUSTOM)
 
+if(DEFINED BUILD_DIR)
+    message(NOTICE ${BUILD_DIR})
+endif()
+
 # set custom config path, used by lvgl library
 set(LV_CONF_CUSTOM_PATH ${CMAKE_CURRENT_SOURCE_DIR}/${APP_FOLDER})
 
@@ -58,6 +63,12 @@ include(GNUInstallDirs)
 
 ### build lvgl library
 add_subdirectory(${LVGL_LIB_PATH}/lvgl)
+
+option(BUILD_LYRICS_LIBS "Build lyrics_effect library" OFF)
+option(BUILD_RELEASE_LIBS "Release lyrics_effect library" OFF)
+
+### build aic widget library
+add_subdirectory(aic_widgets)
 
 # lvgl HAL source
 set(LVGL_DRIVER_PATH fbdev)
@@ -105,6 +116,16 @@ add_executable(${APP_OUT_NAME} ${APP_SOURCE_FILES})
 target_link_libraries(${APP_OUT_NAME} lvgl)
 target_link_libraries(${APP_OUT_NAME} lvgl_examples)
 target_link_libraries(${APP_OUT_NAME} lvgl_demos)
+target_link_libraries(${APP_OUT_NAME} aic_widgets)
+
+if(DEFINED LVGL_V_9)
+    if(${LVGL_V_9} STREQUAL "yes" AND BUILD_LYRICS_LIBS)
+        if(BUILD_RELEASE_LIBS)
+            link_directories(${CMAKE_CURRENT_SOURCE_DIR}/aic_widgets/lyrics_effect)
+        endif()
+        target_link_libraries(${APP_OUT_NAME} lyrics_effect)
+    endif()
+endif()
 
 if(DEFINED LVGL_FBDEV)
     if(${LVGL_FBDEV} STREQUAL "yes")

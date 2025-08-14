@@ -66,6 +66,7 @@ struct aic_de_comp {
 	bool init_flag;
 	int vsync_flag;
 	u32 scaler_active;
+	u32 accum_line;
 	wait_queue_head_t vsync_wait;
 	spinlock_t slock;
 	const struct aic_de_configs *config;
@@ -276,6 +277,29 @@ static inline bool is_support_alpha_blending(struct aic_de_comp *comp,
 		return false;
 }
 
+static void aic_de_calc_config(struct aic_de_comp *comp)
+{
+	struct videomode *vm = &comp->vm;
+
+	u32 vtotal = vm->vactive + vm->vfront_porch +
+		     vm->vback_porch + vm->vsync_len;
+	u32 htotal = vm->hactive + vm->hfront_porch +
+		     vm->hback_porch + vm->hsync_len;
+	u32 pixelclock = vm->pixelclock;
+
+	u32 fps = pixelclock / htotal / vtotal;
+	u32 frame_us = 1000000 / fps;
+	u32 line_us = frame_us / vtotal;
+	u32 line = 1;
+
+	while (line_us < LAYER_CONFIG_TIME_US) {
+		line_us = line_us << 1;
+		line++;
+	}
+
+	comp->accum_line = vtotal - line - 1;
+}
+
 static int aic_de_set_mode(struct aic_panel *panel, struct videomode *vm)
 {
 	struct aic_de_comp *comp = aic_de_request_drvdata();
@@ -284,6 +308,8 @@ static int aic_de_set_mode(struct aic_panel *panel, struct videomode *vm)
 	memcpy(&comp->vm, vm, sizeof(struct videomode));
 	comp->vm_flag = true;
 	comp->panel = panel;
+
+	aic_de_calc_config(comp);
 
 	switch (disp_dither) {
 	case DITHER_RGB565:
@@ -390,7 +416,7 @@ static int aic_de_timing_enable(u32 flags)
 		comp->init_flag = true;
 	}
 
-	de_config_prefetch_line_set(comp->regs, 2);
+	de_config_prefetch_line_set(comp->regs, DE_PREFETCH_LINE);
 	de_soft_reset_ctrl(comp->regs, 1);
 
 	if (te->mode)
@@ -1322,12 +1348,26 @@ static int update_one_layer_config(struct aic_de_comp *comp,
 
 static int aic_de_update_layer_config(struct aicfb_layer_data *layer_data)
 {
-	int ret;
 	struct aic_de_comp *comp = aic_de_request_drvdata();
+	u32 output_line, lock = 1;
+	unsigned long flags;
+	int ret;
+
+	spin_lock_irqsave(&comp->slock, flags);
+
+	output_line = de_get_output_line(comp->regs);
+	if (output_line >= comp->accum_line || output_line <= DE_PREFETCH_LINE) {
+		spin_unlock_irqrestore(&comp->slock, flags);
+		aic_delay_ms(1);
+		lock = 0;
+	}
 
 	de_config_update_enable(comp->regs, 0);
 	ret = update_one_layer_config(comp, layer_data);
 	de_config_update_enable(comp->regs, 1);
+
+	if (lock)
+		spin_unlock_irqrestore(&comp->slock, flags);
 
 	aic_de_release_drvdata();
 	return ret;

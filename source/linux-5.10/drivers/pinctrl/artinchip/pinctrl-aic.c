@@ -844,16 +844,10 @@ static const struct gpio_chip aic_gpio_chip = {
 
 static int aic_gpio_irq_set_type(struct irq_data *d, unsigned int type)
 {
-	int	ret;
 	void *reg;
 	u32 offset = d->hwirq;
 	struct irq_chip_generic *gc = irq_data_get_irq_chip_data(d);
 	struct aic_gpio_bank *bank = gc->private;
-
-	/* make sure the pin is configured as gpio input */
-	ret = aic_gpio_direction_input(&bank->gpio_chip, offset);
-	if (ret < 0)
-		return ret;
 
 	reg = bank->pctl->base + bank->regs.pin_cfg + offset * sizeof(u32);
 

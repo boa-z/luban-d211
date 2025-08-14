@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 /*
- * Copyright (C) 2021 ArtInChip Technology Co., Ltd.
+ * Copyright (C) 2021-2025 ArtInChip Technology Co., Ltd.
  * Author: Keliang Liu <keliang.liu@artinchip.com>
  */
 #include <stdio.h>
@@ -632,8 +632,10 @@ static void uart_circle_test(int times)
 	int fd = create_fd(m_send_device);
 	char rcv_buf[1025];
 
-	if (fd == -1)
-		return;
+	if (fd == -1) {
+		DBG("failed to open %s\n", m_send_device);
+		exit(-1);
+	}
 
 	while (1) {
 		send_len = uart_send(fd, test_msg1, strlen(test_msg1));

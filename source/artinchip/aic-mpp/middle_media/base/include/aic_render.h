@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2023 ArtInChip Technology Co. Ltd
+ * Copyright (C) 2020-2025 ArtInChip Technology Co. Ltd
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -13,7 +13,7 @@
 #include "mpp_dec_type.h"
 
 #ifdef __cplusplus
-extern "C"{
+extern "C" {
 #endif /* __cplusplus */
 
 struct aic_video_render {
@@ -25,6 +25,7 @@ struct aic_video_render {
 	s32 (*get_dis_rect)(struct aic_video_render *render,struct mpp_rect *rect);
 	s32 (*set_on_off)(struct aic_video_render *render,s32 on_off);
 	s32 (*get_on_off)(struct aic_video_render *render,s32 *on_off);
+	s32 (*rend_last_frame)(struct aic_video_render *render, s32 enable);
 };
 
 
@@ -58,6 +59,10 @@ struct aic_video_render {
 		   on_off)            \
 	    ((struct aic_video_render*)render)->get_on_off(render,on_off)
 
+#define aic_video_render_rend_last_frame( \
+		   render,                              \
+		   enable)                                \
+	    ((struct aic_video_render *)render)->rend_last_frame(render, enable)
 s32 aic_video_render_create(struct aic_video_render **render);
 
 #ifdef __cplusplus

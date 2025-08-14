@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * Copyright (C) 2021 ArtInChip Technology Co., Ltd.
+ * Copyright (C) 2021-2025 ArtInChip Technology Co., Ltd.
  * Authors: Huahui Mai <huahui.mai@artinchip.com>
  */
 
@@ -15,6 +15,7 @@
 #include "hw/dsi_reg.h"
 #include "hw/reg_util.h"
 #include "aic_com.h"
+#include <dt-bindings/clock/artinchip,aic-cmu.h>
 
 #define LANES_MAX_NUM	4
 #define LN_ASSIGN_WIDTH	4
@@ -32,6 +33,7 @@ struct aic_dsi_priv {
 	u32 ln_polrs;
 	bool dc_inv;
 	ulong sclk_rate;
+	ulong lp_rate;
 	u32 vc_num;
 };
 static struct aic_dsi_priv *g_aic_dsi_priv;
@@ -82,19 +84,36 @@ static int aic_dsi_parse_dt(struct aic_dsi_priv *priv, struct udevice *dev)
 	priv->ln_assign = ln_assign;
 	priv->ln_polrs = ln_polrs;
 
+	if (ofnode_read_u32(np, "lp-clock-rates", (u32 *)&priv->lp_rate))
+		priv->lp_rate = 10000000; /* default LP 10MHz */
+
 	return 0;
 }
 
 static int aic_dsi_clk_enable(void)
 {
 	struct aic_dsi_priv *priv = aic_dsi_request_drvdata();
+	struct udevice *dev;
+	struct clk clk;
+	u32 freq;
 	int ret = 0;
 
-	if (priv->sclk_rate)
-		clk_set_rate(&priv->sclk, priv->sclk_rate);
-	else
-		debug("Use the default clock rate %ld\n",
-			clk_get_rate(&priv->sclk));
+	ret = uclass_get_device_by_name(UCLASS_CLK, "clock@18020000", &dev);
+	if (ret < 0)
+		debug("Failed to find clock node. Check device tree\n");
+
+	clk.id = CLK_PLL_FRA2;
+	clk.dev = dev;
+	freq = clk_get_rate(&clk);
+	if (!freq) {
+		debug("Failed to get fra2 rate\n");
+		return -EINVAL;
+	}
+
+	if (freq != priv->sclk_rate)
+		clk_set_rate(&clk, priv->sclk_rate);
+
+	clk_set_rate(&priv->sclk, priv->sclk_rate);
 
 	ret = reset_deassert(&priv->reset);
 	if (ret) {
@@ -125,8 +144,8 @@ static int aic_dsi_enable(void)
 	dsi_set_lane_polrs(priv->regs, priv->ln_polrs);
 	dsi_set_data_clk_polrs(priv->regs, priv->dc_inv);
 
-	dsi_set_clk_div(priv->regs, priv->sclk_rate);
-	dsi_pkg_init(priv->regs);
+	dsi_set_clk_div(priv->regs, priv->sclk_rate, priv->lp_rate);
+	dsi_pkg_init(priv->regs, dsi->mode);
 	dsi_phy_init(priv->regs, priv->sclk_rate, dsi->lane_num, dsi->mode);
 	dsi_hs_clk(priv->regs, 1);
 
@@ -146,6 +165,7 @@ static int aic_dsi_pixclk2mclk(ulong pixclk)
 		priv->sclk_rate = pixclk * div[dsi->format] / dsi->lane_num;
 	else {
 		debug("Invalid lane number %d\n", dsi->lane_num);
+		priv->sclk_rate = pixclk * 6; /* default RGB888 format 4 lane */
 		ret = -EINVAL;
 	}
 

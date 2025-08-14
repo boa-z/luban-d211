@@ -1,5 +1,5 @@
 config RTL8733BU
-	depends on MMC
+	depends on USB
 	tristate "Realtek 8733B USB WiFi"
 	help
 	  Realtek RTL8733BU chipset driver

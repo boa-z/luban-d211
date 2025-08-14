@@ -2034,6 +2034,7 @@ static const struct spi_nor_manufacturer *manufacturers[] = {
 	&spi_nor_fmsh,
 	&spi_nor_cfx,
 	&spi_nor_zbit,
+	&spi_nor_puya,
 };
 
 static const struct flash_info *

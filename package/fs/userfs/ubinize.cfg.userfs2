@@ -1,0 +1,8 @@
+[ubifs]
+mode=ubi
+vol_id=0
+vol_type=dynamic
+vol_name=userfs2
+vol_alignment=1
+vol_flags=autoresize
+image=BR2_USERFS2_UBIFS_PATH
