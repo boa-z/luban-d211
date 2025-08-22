@@ -61,6 +61,25 @@ config ARTINCHIP_SID
 	help
 	   Enable support for ArtInChip eFuse read/write.
 
+config ARTINCHIP_SID_BURN_SPIENC_KEY_CMD
+        bool "Enable SID(eFuse) burn spienc key command"
+	depends on ARTINCHIP_SID
+	default n
+	help
+	   Burn spienc related eFuse.
+
+if ARTINCHIP_SID_BURN_SPIENC_KEY_CMD
+
+config ARTINCHIP_SID_BURN_SIMULATED
+	bool "Enable SID(eFuse) simulated burning"
+	default n
+
+config ARTINCHIP_SID_CONTINUE_BOOT_BURN_AFTER
+	bool "Enable SID(eFuse) continue to boot after burning"
+	default n
+
+endif
+
 config ARTINCHIP_SYSCFG
 	bool "Syscfg driver for ArtInChip SoC"
 	depends on MISC

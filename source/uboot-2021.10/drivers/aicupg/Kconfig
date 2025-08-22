@@ -27,10 +27,16 @@ config AICUPG_FORCE_USBUPG_SUPPORT
 	bool "Force USB upgrading check during boot"
 	default n
 
+config AICUPG_FIRMWARE_SECURITY
+	bool "Secure transfer firmware and burn"
+	default n
+	depends on ARTINCHIP_SPIENC
+
 config AICUPG_LOG_BUFFER_SUPPORT
 	bool "Support to get log buffer from device"
 	default y
 endif
+
 if AICUPG_LOG_BUFFER_SUPPORT
 config AICUPG_LOG_BUFFER_ADDR
 	hex "Log buffer start address"

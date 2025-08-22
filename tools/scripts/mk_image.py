@@ -12,6 +12,7 @@ import math
 import zlib
 import json
 import struct
+import shutil
 import argparse
 import platform
 import subprocess
@@ -1105,6 +1106,10 @@ def aic_boot_create_image_v2(cfg, keydir, datadir):
         else:
             signature_bytes = aic_boot_gen_signature_bytes(cfg, bootimg)
         bootimg = bootimg + signature_bytes
+        if aic_boot_with_ext_loader(cfg):
+            padlen = round_up(len(bootimg), META_ALIGNED_SIZE) - len(bootimg)
+            if padlen > 0:
+                bootimg += bytearray(padlen)
         return bootimg
 
     # Secure boot is not enabled, always add md5 result to the end
@@ -1168,6 +1173,58 @@ def spienc_create_image(imgcfg, script_dir):
     cmd.append("--input")
     cmd.append("{}".format(imgcfg["input"]))
     cmd.append("--output")
+    cmd.append("{}".format(imgcfg["output"]))
+    ret = subprocess.run(cmd, stdout=subprocess.PIPE)
+    if ret.returncode != 0:
+        print(ret.stdout.decode("utf-8"))
+        sys.exit(1)
+
+
+def get_align_file(filename, alignsize):
+    if os.path.exists(filename) is False:
+        print("File {} is not exist".format(filename))
+        sys.exit(1)
+
+    filesize = os.path.getsize(filename)
+    padlen = (alignsize - (filesize % alignsize)) % alignsize
+
+    alignfile = filename + '.align'
+    shutil.copyfile(filename, alignfile)
+
+    if padlen == 0:
+        return alignfile
+
+    with open(alignfile, "ab") as f:
+        f.write(bytearray(padlen))
+
+    return alignfile
+
+
+def data_crypt_create_image(imgcfg, script_dir):
+    keypath = get_file_path(imgcfg["key"], imgcfg["keydir"])
+    if keypath is None:
+        keypath = get_file_path(imgcfg["key"], imgcfg["datadir"])
+
+    mkcmd = os.path.join(script_dir, "firmware_security_encrypt")
+    if os.path.exists(mkcmd) is False:
+        mkcmd = "firmware_security_encrypt"
+    if sys.platform == "win32":
+        mkcmd += ".exe"
+    cmd = [mkcmd]
+    cmd.append("--key")
+    cmd.append("{}".format(keypath))
+    if "nonce" in imgcfg:
+        noncepath = get_file_path(imgcfg["nonce"], imgcfg["keydir"])
+        if noncepath is None:
+            noncepath = get_file_path(imgcfg["nonce"], imgcfg["datadir"])
+        cmd.append("--nonce")
+        cmd.append("{}".format(noncepath))
+    if "tweak" in imgcfg:
+        cmd.append("--tweak")
+        cmd.append("{}".format(imgcfg["tweak"]))
+    cmd.append("--infile")
+    cmd.append("{}".format(get_align_file(imgcfg["input"], 16)))
+    cmd.append("--outfile")
     cmd.append("{}".format(imgcfg["output"]))
     ret = subprocess.run(cmd, stdout=subprocess.PIPE)
     if ret.returncode != 0:
@@ -1775,6 +1832,7 @@ def img_write_fwc_file_to_binfile(binfile, cfg, datadir):
     start_block = 0
     last_block = 0
     used_block = 0
+    total_block = 0
 
     if VERBOSE:
         print("\tPacking file data:")
@@ -1807,7 +1865,16 @@ def img_write_fwc_file_to_binfile(binfile, cfg, datadir):
                     used_block = filesize // block_size // 1024 + 1
                 else:
                     used_block = filesize // block_size // 1024
-                last_block = start_block + used_block - 1
+                total_block = (part_size // block_size // 1024)
+                if (total_block - used_block) <= (total_block // 50):
+                    print("\t\tPart {} reserved blocks are less than 2%, \
+                            bad blocks may cause burning failures".format(part_name))
+
+                last_block = start_block + total_block - 1
+                if last_block < (start_block + used_block - 1):
+                    print("\t\tFile {} exceeds the part {} size".format(path, part_name))
+                    sys.exit(1)
+
             elif cfg["image"]["info"]["media"]["type"] == "spi-nor":
                 block_size = 64
                 start_block = part_offset // block_size // 1024
@@ -2338,6 +2405,60 @@ def firmware_component_preproc_spienc(cfg, datadir, keydir, bindir):
         spienc_create_image(imgcfg, bindir)
 
 
+def firmware_component_preproc_data_crypt(cfg, datadir, keydir, bindir):
+    preproc_cfg = get_pre_process_cfg(cfg)
+    imgnames = preproc_cfg["data_crypt"].keys()
+    for name in imgnames:
+        imgcfg = preproc_cfg["data_crypt"][name]
+        imgcfg["keydir"] = keydir
+        imgcfg["datadir"] = datadir
+        inname = datadir + imgcfg["file"]
+        outname = datadir + name
+        imgcfg["input"] = inname
+        imgcfg["output"] = outname
+
+        imglist = []
+        if cfg["image"]["info"]["media"]["type"] == "spi-nand":
+            imglist = []
+            orglist = cfg["image"]["info"]["media"]["array_organization"]
+            for item in orglist:
+                paramstr = "_page_{}_block_{}".format(item["page"], item["block"])
+                paramstr = paramstr.lower()
+                status_ok = True
+                if not inname.endswith(".ubi") and not inname.endswith(".ubifs"):
+                    continue
+
+                if inname.find("*") <= 0:
+                    # No need to check
+                    continue
+
+                imgcfg["output"] = outname.replace("*", paramstr)
+                imgcfg["input"] = inname.replace("*", paramstr)
+                imgcfg["input"] = get_file_path(imgcfg["input"], datadir)
+                if imgcfg["input"] is None:
+                    status_ok = False
+                    print("{} is not found".format(inname))
+                    continue
+
+                if status_ok:
+                    imglist.append(paramstr)
+
+        if len(imglist) > 0:
+            for img in imglist:
+                imgcfg["input"] = inname.replace("*", paramstr)
+                imgcfg["output"] = outname.replace("*", paramstr)
+                if get_file_path(imgcfg["input"], datadir):
+                    if VERBOSE:
+                        print("\tCreating {} ...".format(imgcfg["output"]))
+                    data_crypt_create_image(imgcfg, bindir)
+                else:
+                    print("{} is not found".format(imgcfg["input"]))
+        else:
+            if VERBOSE:
+                print("\tCreating {} ...".format(outname))
+            data_crypt_create_image(imgcfg, bindir)
+
+
 def firmware_component_preproc_concatenate(cfg, datadir, keydir, bindir):
     preproc_cfg = get_pre_process_cfg(cfg)
     imgnames = preproc_cfg["concatenate"].keys()
@@ -2385,10 +2506,12 @@ def firmware_component_preproc(cfg, datadir, keydir, bindir):
         firmware_component_preproc_aicboot(cfg, datadir, keydir, bindir)
     if "aicimage" in preproc_cfg:
         firmware_component_preproc_aicimage(cfg, datadir, keydir, bindir)
-    if "spienc" in preproc_cfg:
-        firmware_component_preproc_spienc(cfg, datadir, keydir, bindir)
     if "concatenate" in preproc_cfg:
         firmware_component_preproc_concatenate(cfg, datadir, keydir, bindir)
+    if "spienc" in preproc_cfg:
+        firmware_component_preproc_spienc(cfg, datadir, keydir, bindir)
+    if "data_crypt" in preproc_cfg:
+        firmware_component_preproc_data_crypt(cfg, datadir, keydir, bindir)
 
 
 def generate_bootcfg(bcfgfile, cfg):

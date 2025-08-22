@@ -17,6 +17,7 @@
 #include "nand_fwc_spl.h"
 #include "spi_enc_spl.h"
 #include <u-boot/crc.h>
+#include <artinchip/firmware_security.h>
 
 struct aicupg_nand_spl {
 	struct mtd_info *mtd;
@@ -419,19 +420,31 @@ static s32 nand_fwc_spl_program(struct fwc_info *fwc,
 	u32 data_size, blkidx, blkcnt, pa, pgidx, slice_size;
 	size_t retlen;
 	loff_t offs;
-	s32 ret = -1, i, calc_len;
-	u32 trans_crc;
-	u32 partition_crc;
+	s32 ret = -1, i;
 	u32 trans_size;
 	u32 page_per_blk;
 
+	fwc->calc_partition_crc = crc32(fwc->calc_partition_crc, spl->image_buf, fwc->meta.size);
+#ifdef CONFIG_AICUPG_FIRMWARE_SECURITY
+	firmware_security_decrypt(spl->image_buf, spl->rx_size);
+#endif
+
 	pt = malloc(PAGE_TABLE_USE_SIZE);
 	page_data = malloc(PAGE_MAX_SIZE);
-	rd_page_data = malloc(PAGE_MAX_SIZE);
-	if (!page_data || !rd_page_data || !pt) {
-		ret = -1;
+	if (!page_data) {
+		pr_err("malloc page_data failed.\n");
+		ret = -ENOMEM;
 		goto out;
 	}
+
+#ifdef CONFIG_AICUPG_SINGLE_TRANS_BURN_CRC32_VERIFY
+	rd_page_data = malloc(PAGE_MAX_SIZE);
+	if (!rd_page_data || !pt) {
+		pr_err("malloc rd_page_data failed.\n");
+		ret = -ENOMEM;
+		goto out;
+	}
+#endif
 
 	ret = spl_build_page_table(spl, pt);
 	if (ret) {
@@ -482,8 +495,6 @@ static s32 nand_fwc_spl_program(struct fwc_info *fwc,
 	}
 
 	/* Write image data to page */
-	trans_crc = 0;
-	partition_crc = 0;
 	trans_size = 0;
 	p = spl->image_buf;
 	end = p + spl->buf_size;
@@ -512,6 +523,7 @@ static s32 nand_fwc_spl_program(struct fwc_info *fwc,
 			ret = -1;
 			goto out;
 		}
+#ifdef CONFIG_AICUPG_SINGLE_TRANS_BURN_CRC32_VERIFY
 		// Read data to calc crc
 		ret = mtd_read(spl->mtd, offs, slice_size, &retlen,
 			       rd_page_data);
@@ -521,19 +533,9 @@ static s32 nand_fwc_spl_program(struct fwc_info *fwc,
 			goto out;
 		}
 
-		if ((trans_size + data_size) > fwc->meta.size)
-			calc_len = fwc->meta.size % slice_size;
-		else
-			calc_len = slice_size;
-
-		partition_crc = crc32(partition_crc, rd_page_data, calc_len);
-#ifdef CONFIG_AICUPG_SINGLE_TRANS_BURN_CRC32_VERIFY
-		trans_crc = crc32(trans_crc, page_data, calc_len);
-		if (trans_crc != partition_crc) {
-			pr_err("calc_len:%d\n", calc_len);
+		if (crc32(0, page_data, slice_size) != crc32(0, rd_page_data, slice_size)) {
+			pr_err("calc_len:%d\n", slice_size);
 			pr_err("crc err at trans len %u\n", trans_size);
-			pr_err("trans crc:0x%x, partition crc:0x%x\n",
-			       trans_crc, partition_crc);
 			ret = -1;
 			goto out;
 		}
@@ -541,8 +543,6 @@ static s32 nand_fwc_spl_program(struct fwc_info *fwc,
 		trans_size += data_size;
 	}
 
-	fwc->calc_partition_crc = partition_crc;
-	fwc->calc_trans_crc = trans_crc;
 out:
 	if (page_data)
 		free(page_data);

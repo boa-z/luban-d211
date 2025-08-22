@@ -3,6 +3,7 @@
 obj-y += d211.o
 obj-y += env_location.o
 obj-y += efuse_cmd.o
+obj-$(CONFIG_ARTINCHIP_SID_BURN_SPIENC_KEY_CMD) += efuse_burn_spienc_key_cmd.o
 obj-$(CONFIG_AICUPG_ARTINCHIP) += usb_device_check.o
 obj-$(CONFIG_UPDATE_UDISK_FATFS_ARTINCHIP) += usb_host_check.o
 obj-$(CONFIG_$(SPL_TPL_)ENV_IS_IN_MMC) += mmc_env.o

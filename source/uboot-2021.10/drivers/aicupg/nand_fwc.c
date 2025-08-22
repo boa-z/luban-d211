@@ -15,6 +15,7 @@
 #include "nand_fwc_priv.h"
 #include "upg_internal.h"
 #include "nand_fwc_spl.h"
+#include <artinchip/firmware_security.h>
 
 #ifdef CONFIG_NAND_BBT_MANAGE
 #include <linux/mtd/spinand.h>
@@ -938,6 +939,10 @@ void nand_fwc_start(struct fwc_info *fwc)
 	memset(priv, 0, sizeof(struct aicupg_nand_priv));
 	fwc->priv = priv;
 
+#ifdef CONFIG_AICUPG_FIRMWARE_SECURITY
+	firmware_security_init();
+#endif
+
 	/*
 	 * If the meta.name contains the "image" string, the program is going to
 	 * write data to the partition, otherwise the the program is going to read
@@ -961,6 +966,7 @@ void nand_fwc_start(struct fwc_info *fwc)
 			goto err;
 		}
 		fwc->block_size = mtd->writesize;
+
 		if (strstr(fwc->meta.name, "target.spl")) {
 			ret = nand_fwc_spl_prepare(fwc);
 			if (ret) {
@@ -1059,11 +1065,25 @@ static s32 nand_fwc_mtd_writer(struct fwc_info *fwc, u8 *buf, s32 len)
 	if (!priv)
 		return 0;
 
+	if ((fwc->meta.size - fwc->trans_size) < len)
+		calc_len = fwc->meta.size - fwc->trans_size;
+	else
+		calc_len = len;
+
+	fwc->calc_partition_crc = crc32(fwc->calc_partition_crc, buf, calc_len);
+
+#ifdef CONFIG_AICUPG_FIRMWARE_SECURITY
+	firmware_security_decrypt(buf, len);
+#endif
+
+#ifdef CONFIG_AICUPG_SINGLE_TRANS_BURN_CRC32_VERIFY
 	rdbuf = malloc(len);
 	if (!rdbuf) {
 		pr_err("Error: malloc buffer failed.\n");
 		return 0;
 	}
+#endif
+
 	for (i = 0; i < MAX_DUPLICATED_PART; i++) {
 		mtd = priv->mtds[i];
 		if (!mtd)
@@ -1088,41 +1108,35 @@ static s32 nand_fwc_mtd_writer(struct fwc_info *fwc, u8 *buf, s32 len)
 				pr_err("Write mtd %s error.\n", mtd->name);
 				return 0;
 			}
+#ifdef CONFIG_AICUPG_SINGLE_TRANS_BURN_CRC32_VERIFY
 			// Read data to calc crc
 			ret = mtd_read(mtd, offs, mtd->writesize, &retlen,
 								buf_to_read);
 			if (ret) {
-				pr_err("Write mtd %s error.\n", mtd->name);
+				pr_err("Read mtd %s error.\n", mtd->name);
 				return 0;
 			}
+			buf_to_read += retlen;
+#endif
 			/* Update for next write */
 			buf_to_write += retlen;
-			buf_to_read += retlen;
 			priv->offs[i] = offs + retlen;
 			offs = priv->offs[i];
 		}
 	}
 
-	if ((fwc->meta.size - fwc->trans_size) < len)
-		calc_len = fwc->meta.size - fwc->trans_size;
-	else
-		calc_len = len;
-
-	fwc->calc_partition_crc = crc32(fwc->calc_partition_crc,
-						rdbuf, calc_len);
 #ifdef CONFIG_AICUPG_SINGLE_TRANS_BURN_CRC32_VERIFY
 	fwc->calc_trans_crc = crc32(fwc->calc_trans_crc, buf, calc_len);
-	if (fwc->calc_trans_crc != fwc->calc_partition_crc) {
+	if (crc32(0, buf, calc_len) != crc32(0, rdbuf, calc_len)) {
 		pr_err("calc_len:%d\n", calc_len);
 		pr_err("crc err at trans len %u\n", fwc->trans_size);
-		pr_err("trans crc:0x%x, partition crc:0x%x\n",
-				fwc->calc_trans_crc, fwc->calc_partition_crc);
 	}
 #endif
 	debug("%s, data len %d, trans len %d, calc len %d\n", __func__, len,
 	      fwc->trans_size, calc_len);
 
-	free(rdbuf);
+	if (rdbuf)
+		free(rdbuf);
 	return len;
 }
 
@@ -1130,11 +1144,23 @@ static s32 nand_fwc_ubi_writer(struct fwc_info *fwc, u8 *buf, s32 len)
 {
 	struct aicupg_nand_priv *priv;
 	struct ubi_volume *vol;
-	s32 ret, i;
+	s32 calc_len, ret, i;
 
 	priv = (struct aicupg_nand_priv *)fwc->priv;
 	if (!priv)
 		return 0;
+
+	if ((fwc->meta.size - fwc->trans_size) < len)
+		calc_len = fwc->meta.size - fwc->trans_size;
+	else
+		calc_len = len;
+
+	fwc->calc_partition_crc = crc32(fwc->calc_partition_crc, buf, calc_len);
+
+#ifdef CONFIG_AICUPG_FIRMWARE_SECURITY
+	firmware_security_decrypt(buf, len);
+#endif
+
 	for (i = 0; i < MAX_DUPLICATED_PART; i++) {
 		if (!priv->vols[i])
 			continue;
@@ -1146,7 +1172,6 @@ static s32 nand_fwc_ubi_writer(struct fwc_info *fwc, u8 *buf, s32 len)
 		}
 	}
 
-	fwc->calc_partition_crc = fwc->meta.crc; /* TODO: need to calc CRC */
 	return len;
 }
 

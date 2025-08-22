@@ -227,6 +227,37 @@ static int do_mtd_list(struct cmd_tbl *cmdtp, int flag, int argc,
 	return CMD_RET_SUCCESS;
 }
 
+#ifdef CONFIG_ARTINCHIP_SPIENC
+#include <misc.h>
+#include <artinchip/aic_spienc.h>
+static int do_mtd_bypass(struct cmd_tbl *cmdtp, int flag, int argc,
+			char *const argv[])
+{
+	struct udevice *dev = NULL;
+	unsigned long status;
+
+	if (argc < 2)
+		return CMD_RET_USAGE;
+
+	status = hextoul(argv[1], NULL);
+
+	uclass_first_device_err(UCLASS_MISC, &dev);
+	do {
+		if (device_is_compatible(dev, "artinchip,aic-spienc-v1.0"))
+			break;
+		else
+			dev = NULL;
+		uclass_next_device_err(&dev);
+	} while (dev);
+
+	if (dev) {
+		return misc_ioctl(dev, AIC_SPIENC_IOCTL_BYPASS, (void *)status);
+	} else {
+		return CMD_RET_FAILURE;
+	}
+}
+#endif
+
 static int mtd_special_write_oob(struct mtd_info *mtd, u64 off,
 				 struct mtd_oob_ops *io_op,
 				 bool write_empty_pages, bool woob)
@@ -586,6 +617,9 @@ static int mtd_name_complete(int argc, char *const argv[], char last_char,
 static char mtd_help_text[] =
 	"- generic operations on memory technology devices\n\n"
 	"mtd list\n"
+#ifdef CONFIG_ARTINCHIP_SPIENC
+	"mtd bypass <status>\n"
+#endif
 	"mtd read[.raw][.oob]                  <name> <addr> [<off> [<size>]]\n"
 	"mtd dump[.raw][.oob]                  <name>        [<off> [<size>]]\n"
 	"mtd write[.raw][.oob][.dontskipff]    <name> <addr> [<off> [<size>]]\n"
@@ -596,6 +630,9 @@ static char mtd_help_text[] =
 	"mtd mark                              <name>		 [<off>\n"
 	"\n"
 	"With:\n"
+#ifdef CONFIG_ARTINCHIP_SPIENC
+	"\t<status>: 1;bypass spienc, 0;enable spienc\n"
+#endif
 	"\t<name>: NAND partition/chip name (or corresponding DM device name or OF path)\n"
 	"\t<addr>: user address from/to which data will be retrieved/stored\n"
 	"\t<off>: offset in <name> in bytes (default: start of the part)\n"
@@ -610,6 +647,10 @@ static char mtd_help_text[] =
 
 U_BOOT_CMD_WITH_SUBCMDS(mtd, "MTD utils", mtd_help_text,
 		U_BOOT_SUBCMD_MKENT(list, 1, 1, do_mtd_list),
+#ifdef CONFIG_ARTINCHIP_SPIENC
+		U_BOOT_SUBCMD_MKENT_COMPLETE(bypass, 2, 0, do_mtd_bypass,
+					     mtd_name_complete),
+#endif
 		U_BOOT_SUBCMD_MKENT_COMPLETE(read, 5, 0, do_mtd_io,
 					     mtd_name_complete),
 		U_BOOT_SUBCMD_MKENT_COMPLETE(write, 5, 0, do_mtd_io,

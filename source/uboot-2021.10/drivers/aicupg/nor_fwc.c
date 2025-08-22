@@ -13,6 +13,7 @@
 #include <dm/device-internal.h>
 #include <mtd.h>
 #include <artinchip/aic_spienc.h>
+#include <artinchip/firmware_security.h>
 
 #include "spi_enc_spl.h"
 
@@ -208,6 +209,9 @@ void nor_fwc_start(struct fwc_info *fwc)
 #endif
 	fwc->block_size = mtd->writesize;
 	debug("%s, FWC name %s\n", __func__, fwc->meta.name);
+#ifdef CONFIG_AICUPG_FIRMWARE_SECURITY
+    firmware_security_init();
+#endif
 	return;
 err:
 	pr_err("error:free(priv)\n");
@@ -234,6 +238,17 @@ s32 nor_fwc_data_write(struct fwc_info *fwc, u8 *buf, s32 len)
 	priv = (struct aicupg_nor_priv *)fwc->priv;
 	if (!priv)
 		return 0;
+
+	if ((fwc->meta.size - fwc->trans_size) < len)
+		calc_len = fwc->meta.size - fwc->trans_size;
+	else
+		calc_len = len;
+
+	fwc->calc_partition_crc = crc32(fwc->calc_partition_crc, buf, calc_len);
+
+#ifdef CONFIG_AICUPG_FIRMWARE_SECURITY
+	firmware_security_decrypt(buf, len);
+#endif
 
 	for (i = 0; i < MAX_DUPLICATED_PART; i++) {
 		mtd = priv->mtds[i];
@@ -299,19 +314,10 @@ s32 nor_fwc_data_write(struct fwc_info *fwc, u8 *buf, s32 len)
 		priv->offs[i] = offset + retlen;
 	}
 
-	if ((fwc->meta.size - fwc->trans_size) < len)
-		calc_len = fwc->meta.size - fwc->trans_size;
-	else
-		calc_len = len;
-
-	fwc->calc_partition_crc = crc32(fwc->calc_partition_crc, rdbuf, calc_len);
 #ifdef CONFIG_AICUPG_SINGLE_TRANS_BURN_CRC32_VERIFY
-	fwc->calc_trans_crc = crc32(fwc->calc_trans_crc, buf, calc_len);
-	if (fwc->calc_trans_crc != fwc->calc_partition_crc) {
+	if (crc32(0, buf, calc_len) != crc32(0, rdbuf, calc_len)) {
 		pr_err("calc_len:%d\n", calc_len);
 		pr_err("crc err at trans len %u\n", fwc->trans_size);
-		pr_err("trans crc:0x%x, partition crc:0x%x\n",
-				fwc->calc_trans_crc, fwc->calc_partition_crc);
 	}
 #endif
 	fwc->trans_size += len;

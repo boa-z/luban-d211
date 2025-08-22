@@ -87,6 +87,10 @@ static int do_upgrade_detect(struct cmd_tbl *cmdtp, int flag, int argc,
 {
 	int ret = 0;
 
+#if CONFIG_ARTINCHIP_SID_BURN_SPIENC_KEY_CMD
+	run_command("efuse_spienc", 0);
+#endif
+
 	env_set("upg_type", "");
 	if (check_usb_upg()) {
 		aic_upg_flag_clear();
