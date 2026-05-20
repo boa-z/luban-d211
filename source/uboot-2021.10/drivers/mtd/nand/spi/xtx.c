@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (c) 2022-2025 ArtInChip
+ * Copyright (c) 2022-2026 ArtInChip
  *
  * Authors:
  * keliang.liu <keliang.liu@artinchip.com>
@@ -13,12 +13,19 @@
 #endif
 #include <linux/bitops.h>
 #include <linux/mtd/spinand.h>
+#include <linux/bitfield.h>
 
 #define SPINAND_MFR_XTX 0x0B
 
 #define XTX_STATUS_ECC_MASK (0xF << 4)
 #define XTX_STATUS_ECC_NO_BITFLIPS (0 << 4)
 #define XTX_STATUS_ECC_UNCOR_ERROR (0xF << 4)
+
+#define XT26XXXD_STATUS_ECC3_ECC2_MASK	   	GENMASK(7, 6)
+#define XT26XXXD_STATUS_ECC_NO_DETECTED    	(0)
+#define XT26XXXD_STATUS_ECC_1_7_CORRECTED  	(1)
+#define XT26XXXD_STATUS_ECC_8_CORRECTED    	(3)
+#define XT26XXXD_STATUS_ECC_UNCOR_ERROR    	(2)
 
 static SPINAND_OP_VARIANTS(read_cache_variants,
 		SPINAND_PAGE_READ_FROM_CACHE_X4_OP(0, 1, NULL, 0),
@@ -91,6 +98,35 @@ static const struct mtd_ooblayout_ops xt26xxxg04c_ooblayout = {
 	.rfree = xt26xxxg04c_ooblayout_free,
 };
 
+static int xt26xxxd_ooblayout_ecc(struct mtd_info *mtd, int section,
+	struct mtd_oob_region *region)
+{
+	if (section)
+		return -ERANGE;
+
+	region->offset = mtd->oobsize / 2;
+	region->length = mtd->oobsize / 2;
+
+	return 0;
+}
+
+static int xt26xxxd_ooblayout_free(struct mtd_info *mtd, int section,
+	 struct mtd_oob_region *region)
+{
+	if (section)
+		return -ERANGE;
+
+	region->offset = 2;
+	region->length = mtd->oobsize / 2 - 2;
+
+	return 0;
+}
+
+static const struct mtd_ooblayout_ops xt26xxxd_ooblayout = {
+	.ecc = xt26xxxd_ooblayout_ecc,
+	.rfree = xt26xxxd_ooblayout_free,
+};
+
 static int xtx_ecc_get_status(struct spinand_device *spinand,
 			      u8 status)
 {
@@ -118,6 +154,25 @@ static int xtx_ecc_get_status(struct spinand_device *spinand,
 	return -EINVAL;
 }
 
+static int xt26xxxd_ecc_get_status(struct spinand_device *spinand,
+									u8 status)
+{
+	switch (FIELD_GET(STATUS_ECC_MASK, status)) {
+	case XT26XXXD_STATUS_ECC_NO_DETECTED:
+		return 0;
+	case XT26XXXD_STATUS_ECC_UNCOR_ERROR:
+		return -EBADMSG;
+	case XT26XXXD_STATUS_ECC_1_7_CORRECTED:
+		return 4 + FIELD_GET(XT26XXXD_STATUS_ECC3_ECC2_MASK, status);
+	case XT26XXXD_STATUS_ECC_8_CORRECTED:
+		return 8;
+	default:
+		break;
+	}
+
+	return -EINVAL;
+}
+
 static const struct spinand_info xtx_spinand_table[] = {
     SPINAND_INFO("XT26G01C",
 			 SPINAND_ID(0x11),
@@ -137,6 +192,15 @@ static const struct spinand_info xtx_spinand_table[] = {
 						  &update_cache_variants),
 			 SPINAND_HAS_QE_BIT,
 			 SPINAND_ECCINFO(&xt26xxxg04c_ooblayout, xtx_ecc_get_status)),
+	SPINAND_INFO("XT26G01D",
+			 SPINAND_ID(0x31),
+			 NAND_MEMORG(1, 2048, 128, 64, 1024, 1, 1, 1),
+			 NAND_ECCREQ(8, 528),
+			 SPINAND_INFO_OP_VARIANTS(&read_cache_variants,
+						  &write_cache_variants,
+						  &update_cache_variants),
+			 SPINAND_HAS_QE_BIT,
+			 SPINAND_ECCINFO(&xt26xxxd_ooblayout, xt26xxxd_ecc_get_status)),
 };
 
 static int xtx_spinand_init(struct spinand_device *spinand)
