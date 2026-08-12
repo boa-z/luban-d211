@@ -1,0 +1,19 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -3,6 +3,15 @@
+ # Setup project
+ project(LwLibPROJECT C)
+
++# Consume standard Buildroot variables to avoid warnings
++set(BUILD_DOC OFF CACHE BOOL "Build documentation")
++set(BUILD_DOCS OFF CACHE BOOL "Build documentation")
++set(BUILD_EXAMPLE OFF CACHE BOOL "Build examples")
++set(BUILD_EXAMPLES OFF CACHE BOOL "Build examples")
++set(BUILD_TEST OFF CACHE BOOL "Build tests")
++set(BUILD_TESTING OFF CACHE BOOL "Build tests")
++set(BUILD_TESTS OFF CACHE BOOL "Build tests")
++
+ if(NOT PROJECT_IS_TOP_LEVEL)
+     add_subdirectory(lwrb)
+ else()

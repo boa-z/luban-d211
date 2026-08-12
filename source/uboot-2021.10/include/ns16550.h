@@ -112,6 +112,8 @@ struct ns16550 {
 	UART_REG(uasr);		/* F */
 	UART_REG(scr);		/* 10*/
 	UART_REG(ssr);		/* 11*/
+	UART_REG(pad[22]);	/* 12 ~ 39 */
+	UART_REG(rxctl);	/* 40 */
 #endif
 #ifdef CONFIG_DM_SERIAL
 	struct ns16550_plat *plat;

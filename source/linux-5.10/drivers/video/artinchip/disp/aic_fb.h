@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /*
- * Copyright (C) 2020-2022 ArtInChip Technology Co., Ltd.
+ * Copyright (C) 2020-2026 ArtInChip Technology Co., Ltd.
  * Authors:  Ning Fang <ning.fang@artinchip.com>
  */
 
@@ -177,6 +177,7 @@ struct aic_panel {
 	struct aic_panel_funcs *funcs;
 	struct aic_panel_callbacks callbacks;
 	struct aic_tearing_effect te;
+	int id;
 	int disp_dither;
 	struct videomode *vm;
 	struct device *dev;
@@ -203,6 +204,7 @@ struct aicfb_info {
 	struct mpp_size screen_size;
 	u32 pseudo_palette[16];
 
+	struct device *fb_dev;
 	struct device *de_dev;
 	struct device *di_dev;
 	struct device *panel_dev;

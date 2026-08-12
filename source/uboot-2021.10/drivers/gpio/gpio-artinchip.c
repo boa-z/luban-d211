@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 /*
- * Copyright (c) 2020 ArtInChip Inc.
+ * Copyright (c) 2020-2026 ArtInChip Inc.
  */
 
 #include <common.h>
@@ -260,8 +260,8 @@ static int aic_gpio_probe(struct udevice *dev)
 	priv->bank->count = uc_priv->gpio_count;
 	p_priv->gpio_cnt += uc_priv->gpio_count;
 
-	pr_info("%s: bank_name:%s, index:%d, gpio_cnt:%d\n", __func__, name,
-		priv->index, uc_priv->gpio_count);
+	pr_debug("%s: bank_name:%s, index:%d, gpio_cnt:%d\n", __func__, name,
+		 priv->index, uc_priv->gpio_count);
 
 	return 0;
 }

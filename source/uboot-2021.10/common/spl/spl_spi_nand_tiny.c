@@ -24,6 +24,7 @@
 #include <nand.h>
 #include <ubispl.h>
 #include <spl.h>
+#include <init.h>
 #include <asm/arch/boot_param.h>
 #include <artinchip_spinand.h>
 #include <linux/mtd/spinand.h>
@@ -31,6 +32,10 @@
 #include <dm/uclass-internal.h>
 #include <artinchip_ve.h>
 #include <artinchip/artinchip_fb.h>
+#include <bmp_layout.h>
+#include <dm/device_compat.h>
+#include <video.h>
+#include <asm/unaligned.h>
 
 #ifdef CONFIG_AUTO_CALCULATE_PART_CONFIG
 #include <generated/image_cfg_part_config.h>
@@ -96,7 +101,7 @@ int spl_spi_nand_read(struct spinand_device *spinand, size_t from, size_t len,
 #ifdef CONFIG_SPI_NAND_WINBOND_CONT_READ
 			rdlen = remaining;
 #endif
-		spinand_read(spinand, off, rdlen, &rdlen, buf);
+		ret = spinand_read(spinand, off, rdlen, &rdlen, buf);
 		if (ret) {
 			pr_err("Failure while reading at offset 0x%lx\n",
 			       (unsigned long)off);
@@ -173,7 +178,7 @@ int spi_nand_load_image(struct spl_image_info *spl_image,
 
 #ifdef CONFIG_SPL_OS_BOOT
 #ifdef CONFIG_VIDEO_ARTINCHIP
-#define LOGO_OFFSET	(0x340000)
+#define LOGO_OFFSET	CONFIG_SPL_SPI_NAND_LOGO_OFFSET
 #define IMAGE_HEADER_SIZE (4 << 10)
 
 static int spi_nand_load_logo(struct spinand_device *spinand,
@@ -260,6 +265,74 @@ out:
 	return ret;
 }
 
+static int spl_bmp_display(struct udevice *dev, ulong bmp_image)
+{
+	struct video_uc_plat *uplat = dev_get_uclass_plat(dev);
+	struct video_priv *priv = dev_get_uclass_priv(dev);
+	struct aicfb_dt *plat = dev_get_plat(dev);
+
+	unsigned int bpix, bmp_bpix, byte_width, padded_byte;
+	struct bmp_image *bmp = (struct bmp_image *)bmp_image;
+	int height_signed, height_abs;
+	int width, line_length;
+	uchar *fb, *bmap;
+	int i, x, y;
+	int step;
+
+	if (!bmp || !(bmp->header.signature[0] == 'B' &&
+				bmp->header.signature[1] == 'M')) {
+		dev_err(dev, "no valid bmp image at %lx\n", bmp_image);
+		return -EINVAL;
+	}
+
+	width = get_unaligned_le32(&bmp->header.width);
+	height_signed = (int)get_unaligned_le32(&bmp->header.height);
+	height_abs = height_signed < 0 ? -height_signed : height_signed;
+	bmp_bpix = get_unaligned_le16(&bmp->header.bit_count);
+
+	bpix = plat->format->bits_per_pixel;
+	if (bpix != bmp_bpix) {
+		dev_err(dev, "%d bit/pixel mode, but BMP has %d bit/pixel\n",
+				bpix, bmp_bpix);
+		return -EINVAL;
+	}
+
+	if (width > plat->width || height_abs > plat->height) {
+		dev_err(dev, "Video buffer %d x %d y"
+			" but BMP has %d x %d y\n",
+			plat->width, plat->height,
+			width, height_abs);
+		return -EINVAL;
+	}
+
+	line_length = plat->stride;
+	x = (plat->width - width) / 2;
+	y = (plat->height - height_abs) / 2;
+
+	byte_width = width * (bmp_bpix / 8);
+	padded_byte = (byte_width & 0x3 ? 4 - (byte_width & 0x3) : 0);
+
+	bmap = (uchar *)bmp + get_unaligned_le32(&bmp->header.data_offset);
+	if (height_signed > 0) {
+		fb = (uchar *)(uplat->base +
+				(y + height_abs) * line_length + x * bpix / 8);
+		step = -line_length;
+	} else {
+		fb = (uchar *)(uplat->base + y * line_length + x * bpix / 8);
+		step = line_length;
+	}
+
+	for (i = 0; i < height_abs; ++i) {
+		memcpy(fb, bmap, byte_width);
+
+		bmap += byte_width + padded_byte;
+		fb += step;
+	}
+
+	flush_dcache_range((uintptr_t)priv->fb, (uintptr_t)priv->fb + priv->fb_size);
+	return 0;
+}
+
 static int spi_nand_show_logo(struct spinand_device *spinand)
 {
 	struct udevice *dev;
@@ -277,12 +350,14 @@ static int spi_nand_show_logo(struct spinand_device *spinand)
 	if (ret)
 		goto out;
 
-	if (dst[1] == 'P' || dst[2] == 'N' || dst[3] == 'G')
+	if (dst[0] == 'B' && dst[1] == 'M')
+		ret = spl_bmp_display(dev, (ulong)dst);
+	else if (dst[1] == 'P' || dst[2] == 'N' || dst[3] == 'G')
 		aic_png_decode(dst, len);
 	else if (dst[0] == 0xff || dst[1] == 0xd8)
 		aic_jpeg_decode(dst, len);
 	else
-		pr_err("Invaild logo file format, need a png/jpeg image\n");
+		pr_err("Invaild logo file format, need a bmp/png/jpeg image\n");
 
 out:
 	aicfb_update_ui_layer(dev);
@@ -300,8 +375,8 @@ static int spi_nand_load_image_os(struct spl_image_info *spl_image,
 
 	/* load dtb from falcon partition in falcon mode */
 	spl_spi_nand_read(spinand, CONFIG_SYS_SPL_NAND_OFS,
-			  CONFIG_SYS_SPL_WRITE_SIZE, &retlen, (void *)
-			  CONFIG_SYS_SPL_ARGS_ADDR);
+			  CONFIG_SYS_SPL_WRITE_SIZE, &retlen,
+			  (void *)(uintptr_t)board_get_dtb_ram_top(0));
 
 	err = spi_nand_load_image(spl_image, spinand, offset);
 	if (err)

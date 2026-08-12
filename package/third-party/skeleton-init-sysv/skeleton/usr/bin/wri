@@ -1,0 +1,12 @@
+#!/bin/sh
+
+cd  /sys/devices/platform/soc/*wri || exit 110
+
+[ -f reboot_reason ] && cat reboot_reason
+# for Luban-1.0
+[ -f soft_reboot_reason ] && cat soft_reboot_reason
+# for Luban-2.0
+[ -f sw_reset_reason ] && cat sw_reset_reason
+[ -f hw_reset_reason ] && cat hw_reset_reason
+
+cd - > /dev/null || exit 110

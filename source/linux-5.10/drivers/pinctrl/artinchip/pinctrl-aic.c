@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 /*
- * Copyright (c) 2020 Artinchip Inc.
+ * Copyright (c) 2020-2025 ArtInChip Inc.
  */
 
 #include <linux/gpio/driver.h>
@@ -905,6 +905,9 @@ static void aic_gpio_irq_unmask(struct irq_data *d)
 	struct irq_chip_generic *gc = irq_data_get_irq_chip_data(d);
 	struct aic_gpio_bank *bank = gc->private;
 
+	// Clear the GPIO pin interrupt status before enabling the GPIO pin interrupt
+	irq_reg_writel(gc, 1 << d->hwirq, bank->regs.irq_sta);
+
 	irq_en = irq_reg_readl(gc, bank->regs.irq_en);
 	irq_reg_writel(gc, irq_en | (1 << d->hwirq), bank->regs.irq_en);
 }
@@ -916,7 +919,7 @@ static void aic_gpio_irq_ack(struct irq_data *d)
 	struct aic_gpio_bank *bank = gc->private;
 
 	irq_sta = irq_reg_readl(gc, bank->regs.irq_sta);
-	irq_reg_writel(gc, irq_sta | (1 << d->hwirq), bank->regs.irq_sta);
+	irq_reg_writel(gc, irq_sta & (1 << d->hwirq), bank->regs.irq_sta);
 }
 
 static void aic_gpio_irq_suspend(struct irq_data *d)
@@ -1049,9 +1052,6 @@ static int aic_gpiolib_register_bank(struct aic_pinctrl *pctl,
 					IRQ_NOREQUEST | IRQ_NOPROBE |
 					IRQ_NOAUTOEN,
 					0, IRQ_GC_INIT_MASK_CACHE);
-
-	/* clear gpio irq pending */
-	writel(0xffffffff, bank->pctl->base + bank->regs.irq_sta);
 
 	gc = irq_get_domain_generic_chip(bank->domain, 0);
 	gc->reg_base = pctl->base;

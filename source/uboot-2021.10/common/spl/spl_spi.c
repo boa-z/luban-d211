@@ -15,6 +15,7 @@
 #include <spi_flash.h>
 #include <errno.h>
 #include <spl.h>
+#include <init.h>
 #include <dm.h>
 #include <asm/global_data.h>
 
@@ -125,7 +126,7 @@ static int spi_load_image_os(struct spl_image_info *spl_image,
 
 	spi_flash_read(flash, CONFIG_SYS_SPI_ARGS_OFFS,
 		       CONFIG_SYS_SPI_ARGS_SIZE,
-		       (void *)CONFIG_SYS_SPL_ARGS_ADDR);
+		       (void *)(uintptr_t)board_get_dtb_ram_top(0));
 
 	spi_flash_read(flash, CONFIG_SYS_SPI_KERNEL_OFFS, sizeof(*header),
 		       (void *)header);

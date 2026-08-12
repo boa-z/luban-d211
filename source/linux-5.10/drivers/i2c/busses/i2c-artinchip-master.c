@@ -201,8 +201,7 @@ static void i2c_handle_write(struct aic_i2c_dev *i2c_dev)
 		if (i2c_dev->buf_write_idx == msg->len) {
 			intr_mask &= ~I2C_INTR_TX_EMPTY;
 			i2c_writel(i2c_dev, intr_mask, I2C_INTR_MASK);
-			/* message transfer done if it is a write message */
-			if (!(msg->flags & I2C_M_RD)) {
+			if (!(msg->flags & I2C_M_RD) && !i2c_dev->is_last_message) {
 				i2c_disable_interrupts(i2c_dev);
 				complete(&i2c_dev->cmd_complete);
 			}
@@ -251,6 +250,17 @@ static int i2c_xfer_msg(struct aic_i2c_dev *i2c_dev, struct i2c_msg *msg,
 			ret = i2c_handle_tx_abort(i2c_dev);
 		else
 			ret = -EIO;
+	} else if (timeout) {
+		if (msg->flags & I2C_M_RD) {
+			/* Read operation */
+		} else {
+			i2c_dev->abort_source =
+				i2c_readl(i2c_dev, I2C_TX_ABRT_SOURCE);
+			if (i2c_dev->abort_source & I2C_TX_ABRT_NOACK) {
+				i2c_dev->msg_err |= I2C_INTR_ERROR_ABRT;
+				ret = i2c_handle_tx_abort(i2c_dev);
+			}
+		}
 	}
 
 	return ret;

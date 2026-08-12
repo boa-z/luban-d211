@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2024 Artinchip Technology Co. Ltd
+ * Copyright (C) 2020-2026 ArtInChip Technology Co. Ltd
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -14,6 +14,7 @@
 #include "read_bits.h"
 #include "mpp_mem.h"
 #include "mpp_log.h"
+#include "rotation_config.h"
 
 #define BASELINE_PROFILE	66
 #define MAIN_PROFILE		77
@@ -90,6 +91,37 @@ static const u8 zigzag_scan8x8[64]=
     5+6*8, 4+7*8, 5+7*8, 6+6*8,
     7+5*8, 7+6*8, 6+7*8, 7+7*8,
 };
+
+void h264_get_rotmir_offset(struct h264_dec_ctx *s)
+{
+	int rotate = MPP_ROTATION_GET(s->decoder.rotmir_flag);
+	int flip_h = MPP_FLIP_H_GET(s->decoder.rotmir_flag);
+	int flip_v = MPP_FLIP_V_GET(s->decoder.rotmir_flag);
+
+	s->rotmir_h_offset = 0;
+	s->rotmir_v_offset = 0;
+	s->rotmir_width = s->width;
+	s->rotmir_height = s->height;
+
+	const rotation_config *config = find_rotation_config(rotate, flip_h, flip_v);
+	if (config != NULL) {
+		if (config->set_h_offset) {
+			s->rotmir_h_offset = s->width - s->height;
+		}
+
+		if (config->set_v_offset) {
+			s->rotmir_v_offset = s->height - s->width;
+		}
+
+		if (config->h_v_switch) {
+			swap_val(&s->rotmir_h_offset, &s->rotmir_v_offset);
+			swap_val(&s->rotmir_width, &s->rotmir_height);
+		}
+
+		logi("Found matching : rotate=%d, flip_h=%d, flip_v=%d",
+			config->rotate, config->flip_h, config->flip_v);
+	}
+}
 
 static int dec_ref_pic_marking(struct h264_dec_ctx *s)
 {
@@ -214,9 +246,13 @@ static int h264_alloc_frame_buffer(struct h264_dec_ctx *s)
 	int intrap_buf_size = 0;
 	int mb_info_buf_size = 0;
 	int mb_col_info_size = 0;
+	int pic_mb_width, pic_mb_height;
 	struct h264_sps_info* cur_sps = s->sps_buffers[s->active_sps_id];
 
 	s->frame_info.max_valid_frame_num = cur_sps->max_num_ref_frames + 1 + s->extra_frame_num;
+	if (s->decoder.rotmir_flag) {
+		s->frame_info.max_valid_frame_num += cur_sps->max_num_ref_frames;
+	}
 
 	if(s->frame_info.max_valid_frame_num > MAX_FRAME_NUM) {
 		s->frame_info.max_valid_frame_num = MAX_FRAME_NUM;
@@ -232,20 +268,35 @@ static int h264_alloc_frame_buffer(struct h264_dec_ctx *s)
 	}
 
 	// 1. create frame manager, alloc frame buffer
-	struct frame_manager_init_cfg cfg;
+	struct frame_manager_init_cfg cfg = {0};
 	cfg.frame_count = s->frame_info.max_valid_frame_num;
 	cfg.height = s->height;
 	cfg.width = s->width;
-	cfg.height_align = s->height;
-	cfg.stride = s->width;
+	if (s->max_height && s->max_width) {
+		cfg.height_align = s->max_height;
+		cfg.stride = s->max_width;
+	} else {
+		cfg.height_align = s->height;
+		cfg.stride = s->width;
+	}
+
 	cfg.pixel_format = s->pix_format;
 	cfg.allocator = s->decoder.allocator;
 	s->decoder.fm = fm_create(&cfg);
 
+	if (s->max_width && s->max_height) {
+		pic_mb_width = (s->max_width + 15)/ 16;
+		pic_mb_height = (s->max_height + 15) / 16;
+	} else {
+		pic_mb_width = cur_sps->pic_mb_width;
+		pic_mb_height = cur_sps->pic_mb_height;
+	}
+
 	// 2. create physic buffer for co-located buffer
-	field_col_buf_size = cur_sps->pic_mb_height * (2 - cur_sps->frame_mbs_only_flag);
+	field_col_buf_size = pic_mb_height * (2 - cur_sps->frame_mbs_only_flag);
 	field_col_buf_size = (field_col_buf_size + 1) / 2;
-	field_col_buf_size = cur_sps->pic_mb_width * field_col_buf_size * 32;
+	field_col_buf_size = pic_mb_width * field_col_buf_size * 32;
+
 	if(cur_sps->direct_8x8_inference_flag == 0)
 		field_col_buf_size *= 2;
 	field_col_buf_size = (field_col_buf_size + 1023) & (~1023); // 1024 byte align
@@ -264,8 +315,8 @@ static int h264_alloc_frame_buffer(struct h264_dec_ctx *s)
 	}
 
 	// 3. create physic buffer used by dblk
-	dblk_y_buf_size = (cur_sps->pic_mb_width + 1)*16*4*(2 - cur_sps->frame_mbs_only_flag);
-	dblk_c_buf_size = (cur_sps->pic_mb_width + 1)*16*4*(2 - cur_sps->frame_mbs_only_flag);
+	dblk_y_buf_size = (pic_mb_width + 1)*16*4*(2 - cur_sps->frame_mbs_only_flag);
+	dblk_c_buf_size = (pic_mb_width + 1)*16*4*(2 - cur_sps->frame_mbs_only_flag);
 	s->frame_info.dblk_y_buf = ve_buffer_alloc(s->ve_buf_handle, dblk_y_buf_size, 0);
 	s->frame_info.dblk_c_buf = ve_buffer_alloc(s->ve_buf_handle, dblk_c_buf_size, 0);
 	if(s->frame_info.dblk_y_buf == NULL || s->frame_info.dblk_c_buf == NULL) {
@@ -274,7 +325,7 @@ static int h264_alloc_frame_buffer(struct h264_dec_ctx *s)
 	}
 
 	// 4. create physic buffer for intrap
-	intrap_buf_size = cur_sps->pic_mb_width * 16 * 2 * (2 - cur_sps->frame_mbs_only_flag);
+	intrap_buf_size = pic_mb_width * 16 * 2 * (2 - cur_sps->frame_mbs_only_flag);
 	s->frame_info.intrap_buf = ve_buffer_alloc(s->ve_buf_handle, intrap_buf_size, 0);
 	if(s->frame_info.intrap_buf == NULL) {
 		loge("alloc intrap buffer failed");
@@ -594,11 +645,12 @@ int h264_decode_pps(struct h264_dec_ctx *s)
 	int left_cnt_7 = left_cnt & 7;
 	if (left_cnt <= 8 && (show_bits(&s->gb, left_cnt) == (1<<(left_cnt-1))))
 		more_bits = 0;
-	if (left_cnt > 16 && (show_bits(&s->gb, left_cnt_7+16) == (1<<(left_cnt_7+15)) )) {
+	if (left_cnt > 8 && (show_bits(&s->gb, left_cnt_7+8) == (1<<(left_cnt_7+7)) )) {
 		// if pps and slice data in the same packet,
 		// judge the end of PPS with the start code.
 		more_bits = 0;
 	}
+
 	if (more_bits && more_rbsp_data_in_pps(sps)) {
 		pps->transform_8x8_mode_flag = read_bits(&s->gb, 1);
 		logd("PPS: pic_scaling_matrix_present_flag: %d, left bits: %d", show_bits(&s->gb, 1), read_bits_left(&s->gb));
@@ -812,6 +864,19 @@ static void set_frame_info(struct h264_dec_ctx *s)
 	int crop_unit_y = (2 - cur_sps->frame_mbs_only_flag) << sub;
 	int crop_unit_x = 1 << sub;
 
+	if (s->max_width) {
+		f->mpp_frame.buf.size.width = s->width;
+		f->mpp_frame.buf.size.height = s->height;
+		f->mpp_frame.buf.stride[0] = s->width;
+		if (f->mpp_frame.buf.format == MPP_FMT_YUV420P) {
+			f->mpp_frame.buf.stride[1] = s->width / 2;
+			f->mpp_frame.buf.stride[2] = s->width / 2;
+		} else {
+			f->mpp_frame.buf.stride[1] = s->width;
+			f->mpp_frame.buf.stride[2] = s->width;
+		}
+	}
+
 	f->mpp_frame.pts = s->curr_packet->pts;
 	f->mpp_frame.buf.crop_en = 1;
 	f->mpp_frame.buf.crop.x	= crop_unit_x * cur_sps->frame_cropping_rect_left_offset;
@@ -913,11 +978,23 @@ int h264_decode_slice_header(struct h264_dec_ctx *s)
 	width = cur_sps->pic_mb_width * 16;
 	height = cur_sps->pic_mb_height * (2-cur_sps->frame_mbs_only_flag) * 16;
 	if((s->width && s->width != width) || (s->height && s->height != height)) {
-		logw("resolution change");
+		if (s->max_width && s->max_height &&
+			(width*height <= s->max_width * s->max_height)) {
+			printf("resolution change(%dx%d)->(%dx%d), buffer is enough\n",
+				s->width, s->height, width, height);
+		} else {
+			logw("resolution change(%dx%d)->(%dx%d), buffer is not enough",
+				s->width, s->height, width, height);
+			logw("max wxh: %d %d", s->max_width, s->max_height);
+			return -1;
+		}
 	}
 
 	s->width = width;
 	s->height = height;
+	if (s->decoder.rotmir_flag) {
+		h264_get_rotmir_offset(s);
+	}
 
 	// 1. alloc frame buffer if it is the first time
 	if(s->frame_info.max_valid_frame_num == 0)
@@ -1012,11 +1089,31 @@ int h264_decode_slice_header(struct h264_dec_ctx *s)
 			s->frame_info.picture[f->mpp_frame.id].buf_idx = f->mpp_frame.id;
 			s->frame_info.picture[f->mpp_frame.id].mmco_reset = 0;
 			s->frame_info.picture[f->mpp_frame.id].key_frame = s->idr_pic_flag;
+			s->frame_info.picture[f->mpp_frame.id].rotmir_idx = -1;
 			s->frame_info.cur_pic_ptr = &s->frame_info.picture[f->mpp_frame.id];
+
+			if (s->decoder.rotmir_flag) {
+				struct frame *rotmir_f = fm_decoder_get_frame(s->decoder.fm);
+				if (rotmir_f == NULL) {
+					loge("fm_decoder_get_frame failed for rotmir_f!");
+					pm_reclaim_ready_packet(s->decoder.pm, s->curr_packet);
+					return DEC_NO_EMPTY_FRAME;
+				}
+				s->frame_info.picture[rotmir_f->mpp_frame.id].frame = rotmir_f;
+				s->frame_info.picture[rotmir_f->mpp_frame.id].refrence = 0;
+				s->frame_info.picture[rotmir_f->mpp_frame.id].buf_idx = rotmir_f->mpp_frame.id;
+				s->frame_info.picture[rotmir_f->mpp_frame.id].rotmir_idx = -1;
+
+				s->frame_info.picture[f->mpp_frame.id].rotmir_idx = rotmir_f->mpp_frame.id;
+			}
 
 			set_frame_info(s);
 		}
 
+		if (!s->frame_info.cur_pic_ptr) {
+			loge("s->frame_info.cur_pic_ptr is null");
+			return -1;
+		}
 		int cur_buf_id = s->frame_info.cur_pic_ptr->buf_idx;
 		if(s->picture_structure == PICT_FRAME) {
 			s->frame_info.picture[cur_buf_id].nal_ref_idc[0] = s->nal_ref_idc;
@@ -1026,6 +1123,11 @@ int h264_decode_slice_header(struct h264_dec_ctx *s)
 		} else { // bottom field
 			s->frame_info.picture[cur_buf_id].nal_ref_idc[1] = s->nal_ref_idc;
 		}
+	}
+
+	if (!s->frame_info.cur_pic_ptr) {
+		loge("s->frame_info.cur_pic_ptr is null");
+		return -1;
 	}
 
 	s->frame_info.cur_pic_ptr->frame_num = sh->frame_num;

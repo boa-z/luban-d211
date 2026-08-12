@@ -627,6 +627,7 @@ static int boot_from_devices(struct spl_image_info *spl_image,
 		if (CONFIG_IS_ENABLED(SERIAL_SUPPORT) &&
 		    CONFIG_IS_ENABLED(LIBCOMMON_SUPPORT) &&
 		    !IS_ENABLED(CONFIG_SILENT_CONSOLE)) {
+			printf("\n");
 			if (loader)
 				printf("Trying to boot from %s\n",
 				       spl_loader_name(loader));
@@ -755,7 +756,7 @@ void board_init_r(gd_t *dummy1, ulong dummy2)
 
 	memset(&spl_image, '\0', sizeof(spl_image));
 #ifdef CONFIG_SYS_SPL_ARGS_ADDR
-	spl_image.arg = (void *)CONFIG_SYS_SPL_ARGS_ADDR;
+	spl_image.arg = (void *)(uintptr_t)board_get_dtb_ram_top(0);
 #endif
 	spl_image.boot_device = BOOT_DEVICE_NONE;
 	board_boot_order(spl_boot_list);
@@ -775,6 +776,7 @@ void board_init_r(gd_t *dummy1, ulong dummy2)
 			       ret);
 		else
 			puts(SPL_TPL_PROMPT "failed to boot from all boot devices\n");
+
 		hang();
 	}
 
@@ -832,7 +834,7 @@ void board_init_r(gd_t *dummy1, ulong dummy2)
 			puts("Jumping to Linux via RISC-V OpenSBI\n");
 #ifndef CONFIG_ARCH_ARTINCHIP
 #if defined(CONFIG_SYS_SPL_ARGS_ADDR)
-			spl_fixup_fdt((void *)CONFIG_SYS_SPL_ARGS_ADDR);
+			spl_fixup_fdt((void *)(uintptr_t)board_get_dtb_ram_top(0);
 #endif
 			spl_board_prepare_for_linux();
 #endif
@@ -850,7 +852,7 @@ void board_init_r(gd_t *dummy1, ulong dummy2)
 		debug("Jumping to Linux\n");
 #ifndef CONFIG_ARCH_RISCV_ARTINCHIP
 #if defined(CONFIG_SYS_SPL_ARGS_ADDR)
-		spl_fixup_fdt((void *)CONFIG_SYS_SPL_ARGS_ADDR);
+		spl_fixup_fdt((void *)(uintptr_t)board_get_dtb_ram_top(0));
 #endif
 		spl_board_prepare_for_linux();
 		jump_to_image_linux(&spl_image);

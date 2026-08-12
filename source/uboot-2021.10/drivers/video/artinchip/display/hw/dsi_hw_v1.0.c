@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * Copyright (C) 2020-2021 ArtInChip Technology Co., Ltd.
+ * Copyright (C) 2020-2026 ArtInChip Technology Co., Ltd.
  * Authors:  matteo <duanmt@artinchip.com>
  */
 
@@ -141,7 +141,7 @@ static void dsi_dphy_cfg_hsfreq(void __iomem *base, ulong mclk)
 	for (i = 0; i < ARRAY_SIZE(hs_clk_div); ++i) {
 		if (hs_clk_div[i].div >= freq_rdata) {
 			value = hs_clk_div[i].value;
-#ifdef AIC_DSI_LEGACY_PACKET_CONFIG
+#ifdef CONFIG_AIC_DSI_LEGACY_PACKET
 			value = value << 1;
 #endif
 			break;

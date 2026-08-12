@@ -15,6 +15,7 @@
 #include <signal.h>
 #include <fcntl.h>
 #include <sys/ioctl.h>
+#include <linux/dma-buf.h>
 #include "lvgl.h"
 #include "mpp_ge.h"
 #include "mpp_decoder.h"
@@ -578,6 +579,7 @@ static lv_result_t frame_buf_alloc(mpp_decoder_data_t *mpp_data, struct mpp_buf 
                 goto alloc_error;
             } else {
                 mpp_data->dec_buf.fd[i] = alloc_buf->fd[i];
+                ioctl(mpp_data->dec_buf.fd[i], DMA_BUF_IOCTL_GET_PHY_ADDR, &mpp_data->dec_buf.phy_addr[i]);
                 mpp_data->data[i] = dmabuf_mmap(alloc_buf->fd[i], size[i]);
                 if (mpp_data->data[i] == MAP_FAILED) {
                     goto alloc_error;
@@ -588,6 +590,9 @@ static lv_result_t frame_buf_alloc(mpp_decoder_data_t *mpp_data, struct mpp_buf 
         }
     }
 
+    mpp_data->dec_buf.size.width = alloc_buf->size.width;
+    mpp_data->dec_buf.size.height = alloc_buf->size.height;
+
     mpp_data->decoded.header.w = alloc_buf->size.width;
     mpp_data->decoded.header.h = alloc_buf->size.height;
     mpp_data->decoded.header.cf = cf;
@@ -597,10 +602,14 @@ static lv_result_t frame_buf_alloc(mpp_decoder_data_t *mpp_data, struct mpp_buf 
     mpp_data->decoded.header.flags = LV_IMAGE_FLAGS_USER8;
 
     if (lv_fmt_is_yuv(cf)) {
+        mpp_data->dec_buf.stride[0] = alloc_buf->stride[0];
+        mpp_data->dec_buf.stride[1] = alloc_buf->stride[1];
+        mpp_data->dec_buf.stride[2] = alloc_buf->stride[2];
         mpp_data->decoded.data =(uint8_t *)(&mpp_data->dec_buf);
         mpp_data->decoded.data_size = data_size;
         mpp_data->decoded.unaligned_data = (uint8_t *)(&mpp_data->dec_buf);
     } else {
+        mpp_data->dec_buf.stride[0] = alloc_buf->stride[0];
         mpp_data->decoded.header.stride = alloc_buf->stride[0];
         mpp_data->decoded.data =(uint8_t *)mpp_data->data[0];
         mpp_data->decoded.data_size = size[0];
@@ -806,7 +815,17 @@ static lv_result_t lv_mpp_dec_open(lv_image_decoder_t *decoder, lv_image_decoder
     mpp_decoder_get_frame(dec, &frame);
     mpp_decoder_put_frame(dec, &frame);
 
-    memcpy(&mpp_data->dec_buf, &frame.buf, sizeof(struct mpp_buf));
+    mpp_data->dec_buf.crop_en = 1;
+    if (frame.buf.crop_en) {
+        memcpy(&mpp_data->dec_buf.crop, &frame.buf.crop, sizeof(struct mpp_rect));
+    } else {
+        mpp_data->dec_buf.crop.x = 0;
+        mpp_data->dec_buf.crop.y = 0;
+        mpp_data->dec_buf.crop.width = mpp_data->dec_buf.size.width;
+        mpp_data->dec_buf.crop.height = mpp_data->dec_buf.size.height;
+    }
+    mpp_data->dec_buf.buf_type = MPP_PHY_ADDR;
+
     dsc->decoded = &mpp_data->decoded;
 
 #if LV_CACHE_DEF_SIZE > 0

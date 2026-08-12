@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2024 ArtInChip Technology Co. Ltd
+ * Copyright (C) 2020-2026 ArtInChip Technology Co. Ltd
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -32,6 +32,8 @@ struct mini_player_audio_info {
 	s32 sample_rate;
 };
 
+struct mini_audio_player* mini_audio_player_create_ext(int track_id);
+
 struct mini_audio_player* mini_audio_player_create(void);
 
 int mini_audio_player_destroy(struct mini_audio_player *player);
@@ -51,6 +53,10 @@ int mini_audio_player_set_volume(struct mini_audio_player *player,int vol);
 int mini_audio_player_get_volume(struct mini_audio_player *player,int *vol);
 
 int mini_audio_player_get_state(struct mini_audio_player *player);
+
+void mini_audio_player_enable_pcm_dump(struct mini_audio_player *player, int enable);
+
+int mini_audio_player_set_pcm_dump_file(struct mini_audio_player *player, const char *filepath);
 
 
 #ifdef __cplusplus

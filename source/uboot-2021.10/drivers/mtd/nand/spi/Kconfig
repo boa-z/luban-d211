@@ -125,4 +125,10 @@ config SPI_NAND_XINCUN
 	help
 	  Enable this driver for XINCUN SPI NAND flash.
 
+config SPI_NAND_DOSILICON
+	bool "Support DOSILICON SPI NAND"
+	default n
+	help
+	  Enable this driver for DOSILICON SPI NAND flash.
+
 endif

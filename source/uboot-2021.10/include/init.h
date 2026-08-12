@@ -277,6 +277,10 @@ int show_board_info(void);
  */
 ulong board_get_usable_ram_top(ulong total_size);
 
+ulong board_get_opensbi_ram_top(ulong total_size);
+
+ulong board_get_dtb_ram_top(ulong total_size);
+
 int board_early_init_f(void);
 
 /* manipulate the U-Boot fdt before its relocation */

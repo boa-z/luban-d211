@@ -24,6 +24,8 @@
 
 #define MICRON_CFG_CR			BIT(0)
 
+#define SUPPORT_MT29F2G01AAAED	0
+
 /*
  * As per datasheet, die selection is done by the 6th bit of Die
  * Select Register (Address 0xD0).
@@ -48,6 +50,7 @@ static SPINAND_OP_VARIANTS(x4_update_cache_variants,
 		SPINAND_PROG_LOAD_X4(false, 0, NULL, 0),
 		SPINAND_PROG_LOAD(false, 0, NULL, 0));
 
+#if SUPPORT_MT29F2G01AAAED
 /* Micron  MT29F2G01AAAED Device */
 static SPINAND_OP_VARIANTS(x4_read_cache_variants,
 		SPINAND_PAGE_READ_FROM_CACHE_X4_OP(0, 1, NULL, 0),
@@ -60,6 +63,7 @@ static SPINAND_OP_VARIANTS(x1_write_cache_variants,
 
 static SPINAND_OP_VARIANTS(x1_update_cache_variants,
 			   SPINAND_PROG_LOAD(false, 0, NULL, 0));
+#endif
 
 static int micron_8_ooblayout_ecc(struct mtd_info *mtd, int section,
 				  struct mtd_oob_region *region)
@@ -91,6 +95,7 @@ static const struct mtd_ooblayout_ops micron_8_ooblayout = {
 	.rfree = micron_8_ooblayout_free,
 };
 
+#if SUPPORT_MT29F2G01AAAED
 static int micron_4_ooblayout_ecc(struct mtd_info *mtd, int section,
 				  struct mtd_oob_region *region)
 {
@@ -131,6 +136,7 @@ static const struct mtd_ooblayout_ops micron_4_ooblayout = {
 	.ecc = micron_4_ooblayout_ecc,
 	.rfree = micron_4_ooblayout_free,
 };
+#endif
 
 static int micron_select_target(struct spinand_device *spinand,
 				unsigned int target)

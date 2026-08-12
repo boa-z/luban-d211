@@ -17,6 +17,7 @@
 #include <errno.h>
 #include <mmc.h>
 #include <image.h>
+#include <init.h>
 #if CONFIG_SPL_FS_FAT_ARTINCHIP
 #include <artinchip_spl_fat.h>
 #endif
@@ -361,7 +362,7 @@ static int mmc_load_image_raw_os(struct spl_image_info *spl_image,
 	count = blk_dread(mmc_get_blk_desc(mmc),
 		CONFIG_SYS_MMCSD_RAW_MODE_ARGS_SECTOR,
 		CONFIG_SYS_MMCSD_RAW_MODE_ARGS_SECTORS,
-		(void *) CONFIG_SYS_SPL_ARGS_ADDR);
+		(void *)(uintptr_t)board_get_dtb_ram_top(0));
 	if (count != CONFIG_SYS_MMCSD_RAW_MODE_ARGS_SECTORS) {
 #ifdef CONFIG_SPL_LIBCOMMON_SUPPORT
 		puts("mmc_load_image_raw_os: mmc block read error\n");

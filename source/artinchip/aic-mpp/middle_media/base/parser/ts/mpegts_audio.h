@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2024 ArtInChip Technology Co. Ltd
+ * Copyright (C) 2020-2025 ArtInChip Technology Co. Ltd
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -13,6 +13,7 @@
 #include <unistd.h>
 #include "aic_parser.h"
 
+#define AAC_SEQUENCE_HEADER_SIZE 5
 #define MPEGTS_ARRAY_ELEMS(a) (sizeof(a) / sizeof((a)[0]))
 
 struct mpegts_mp3_decode_header {
@@ -43,5 +44,6 @@ struct mpegts_audio_decode_header {
 };
 
 int mpegaudio_decode_mp3_header(uint8_t *data, struct mpegts_audio_decode_header *s);
-int mpegaudio_decode_aac_header(uint8_t *data, struct mpegts_audio_decode_header *s);
+int mpegaudio_decode_aac_header(uint8_t *data, struct mpegts_audio_decode_header *s,
+                                int is_generate_seq_header, uint8_t *seq_header_data);
 #endif

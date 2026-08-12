@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2024 Artinchip Technology Co. Ltd
+ * Copyright (C) 2020-2026 ArtInChip Technology Co. Ltd
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -163,9 +163,15 @@ static int add_dmabuf(struct frame_impl *frame, int line_stride)
 
 	frame->comp_num = comp;
 
-	for(i=0; i<comp; i++) {
-		ve_add_dma_buf(frame->frm.mpp_frame.buf.fd[i], &frame->frm.phy_addr[i]);
-		frame->frm.mpp_frame.buf.stride[i]	= stride[i];
+	for (i = 0; i < comp; i++) {
+		if (frame->frm.mpp_frame.buf.buf_type == MPP_DMA_BUF_FD) {
+			ve_add_dma_buf(frame->frm.mpp_frame.buf.fd[i], &frame->frm.phy_addr[i]);
+			frame->frm.mpp_frame.buf.phy_addr[i] = frame->frm.phy_addr[i];
+		} else {
+			frame->frm.phy_addr[i] = frame->frm.mpp_frame.buf.phy_addr[i];
+		}
+
+		frame->frm.mpp_frame.buf.stride[i] = stride[i];
 	}
 
 	return 0;
@@ -180,8 +186,9 @@ static int rm_dmabuf(struct frame_impl *frame)
 		return -1;
 	}
 
-	for(i=0; i<frame->comp_num; i++) {
-		ve_rm_dma_buf(frame->frm.mpp_frame.buf.fd[i], frame->frm.phy_addr[i]);
+	for (i = 0; i < frame->comp_num; i++) {
+		if (frame->frm.mpp_frame.buf.buf_type == MPP_DMA_BUF_FD)
+			ve_rm_dma_buf(frame->frm.mpp_frame.buf.fd[i], frame->frm.phy_addr[i]);
 	}
 
 	return 0;

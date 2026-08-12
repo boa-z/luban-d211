@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2024 ArtInChip Technology Co. Ltd
+ * Copyright (C) 2020-2026 ArtInChip Technology Co. Ltd
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -19,9 +19,12 @@
 extern "C" {
 #endif /* __cplusplus */
 
+#define MPP_AUDIO_TRACK_MAX_COUNT 8
 #define MPP_TIME_BASE 1000000LL
 #define MPP_MAX(a, b) ((a)>(b)? (a) : (b))
 #define MPP_MIN(a, b) ((a)<(b)? (a) : (b))
+#define MPP_ARRAY_ELEMS(a) (sizeof(a) / sizeof((a)[0]))
+#define MPP_SWAP(type, a, b) do {type tmp = b; b = a; a = tmp;}while(0)
 
 enum aic_stream_type {
 	MPP_MEDIA_TYPE_UNKNOWN = -1,
@@ -39,7 +42,8 @@ struct aic_av_packet {
 	u32 flag;
 	s64 dts;
 	s32 duration;
-	//s32 stream_index;
+	s32 stream_index;
+	int pid;
 };
 
 struct aic_av_video_stream {
@@ -50,6 +54,7 @@ struct aic_av_video_stream {
 	u8    *extra_data;
 	s32   bit_rate;
 	s32   frame_rate;
+	s32   max_ref_frames;
 };
 
 struct aic_av_audio_stream {
@@ -60,6 +65,7 @@ struct aic_av_audio_stream {
 	s32 extra_data_size;
 	u8 *extra_data;
 	s32 bit_rate;
+	s32 track_id;
 };
 
 struct aic_av_media_info {
@@ -68,8 +74,9 @@ struct aic_av_media_info {
 	u8   has_video;
 	u8   has_audio;
 	u8   seek_able;
+	u8   audio_track_count;
 	struct aic_av_video_stream video_stream;
-	struct aic_av_audio_stream audio_stream;
+	struct aic_av_audio_stream audio_stream[MPP_AUDIO_TRACK_MAX_COUNT];
 };
 
 
@@ -77,6 +84,9 @@ enum aic_muxer_type {
 	AIC_MUXER_TYPE_UNKNOWN = -1,
 	AIC_MUXER_TYPE_MP4,
 	AIC_MUXER_TYPE_AVI,
+	AIC_MUXER_TYPE_TS,
+	AIC_MUXER_TYPE_MKV,
+	AIC_MUXER_TYPE_FLV,
 };
 
 #ifdef __cplusplus

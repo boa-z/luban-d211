@@ -398,6 +398,7 @@ static int spl_load_fit_image(struct spl_load_info *info, ulong sector,
 	if (image_info) {
 		ulong entry_point;
 
+		image_info->fdt_addr = (void *)(uintptr_t)board_get_dtb_ram_top(0);
 		image_info->load_addr = load_addr;
 		image_info->size = length;
 
@@ -716,8 +717,8 @@ static int spl_simple_fit_read(struct spl_fit_info *ctx,
 		d = time * 1024 * 1024;
 		speed_int =  n / d;
 		speed_pnt = n * 100 / d - speed_int * 100;
-		pr_info("Read firamware speed (size %lu time %lu ms) %lu.%lu MB/s\n",
-			rdsiz, time, speed_int, speed_pnt);
+		pr_info("Read firmware speed: %lu.%lu MB/s (%lu / %lu ms)\n",
+			speed_int, speed_pnt, rdsiz, time);
 	}
 
 	ctx->fit = buf;
@@ -797,7 +798,7 @@ int spl_load_simple_fit(struct spl_image_info *spl_image,
 			 * if it is needed to move OpenSBI to the RAM top,
 			 * then set the load address and entry point to RAM top
 			 */
-			spl_image->load_addr = board_get_usable_ram_top(0);
+			spl_image->load_addr = board_get_opensbi_ram_top(0);
 			spl_image->entry_point = spl_image->load_addr;
 		}
 	}
@@ -872,7 +873,7 @@ int spl_load_simple_fit(struct spl_image_info *spl_image,
 			else
 				goto falcon_end;
 
-			spl_image->fdt_addr = (void *)CONFIG_SYS_SPL_ARGS_ADDR;
+			spl_image->fdt_addr = image_info.fdt_addr;
 			spl_opensbi_set_uboot_entry(image_info.entry_point);
 		}
 	}

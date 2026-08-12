@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2022 ArtInChip Technology Co. Ltd
+ * Copyright (C) 2020-2025 ArtInChip Technology Co. Ltd
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -17,13 +17,6 @@
 #include "packet_manager.h"
 #include "read_bits.h"
 
-/*
- * the macro COPY_DATA is used for debug.
- * copy jpeg data after SOS chunk to a new buffer,
- * it is not need to config the offset of bitstream
- */
-//#define COPY_DATA
-
 #define MAX_COMPONENTS 4
 #define MAX_INDEX 4
 
@@ -34,6 +27,16 @@
 #define JPEG422T	4
 #define JPEG400		5
 #define JPEGERR		6
+
+enum decoder_err{
+	JPEG_DECODER_ERROR_NONE = 0,         /* ok */
+	JPEG_DECODER_ERROR_INPUTLEN,         /* input packet too small */
+	JPEG_DECODER_ERROR_INPUTERROR,       /* input packet data error */
+	JPEG_DECODER_ERROR_INVPTR,           /* invalid (null) buffer pointer */
+	JPEG_DECODER_ERROR_NOEMPTYFRAME,     /* no empty frame for decoder */
+	JPEG_DECODER_ERROR_UNSUPPORTTYPE,    /* unsupport type */
+	JPEG_DECODER_ERROR_HARDWARE,         /* an error happen whlie hard decoder processing */
+};
 
 struct jpeg_huffman_table {
 	unsigned short start_code[16]; 	// start_code[i], the minimum code of huffman code length i
@@ -65,6 +68,7 @@ struct mjpeg_dec_ctx {
 	enum mpp_pixel_format out_pix_fmt; // output pixel format from config
 	int yuv2rgb;
 	int uv_interleave;
+	int yuva;
 
 	const uint8_t *raw_scan_buffer;
 	size_t         raw_scan_buffer_size;
@@ -100,12 +104,8 @@ struct mjpeg_dec_ctx {
 	int rm_v_real_size[MAX_COMPONENTS];	// ver real size after post-process
 	int h_offset[MAX_COMPONENTS];		// hor crop offset after post-process
 	int v_offset[MAX_COMPONENTS];		// ver crop offset after post-process
-
-#ifdef COPY_DATA
-	int sos_length;
-	struct ve_buffer *sos_buf;
-#endif
 	int extra_frame_num;
+	int error;
 };
 
 #endif /* MJPEG_DECODER_H */

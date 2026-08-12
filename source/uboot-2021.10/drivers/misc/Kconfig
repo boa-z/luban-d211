@@ -70,6 +70,10 @@ config ARTINCHIP_SID_BURN_SPIENC_KEY_CMD
 
 if ARTINCHIP_SID_BURN_SPIENC_KEY_CMD
 
+config ARTINCHIP_SID_BURN_DEBUG_MODE
+	bool "Enable SID(eFuse) debug mode"
+	default n
+
 config ARTINCHIP_SID_BURN_SIMULATED
 	bool "Enable SID(eFuse) simulated burning"
 	default n
@@ -86,6 +90,13 @@ config ARTINCHIP_SYSCFG
 	help
 	  Syscfg should enable some configuration for USB/GMAC before
 	  initialization. Select this if you want to use them.
+
+config ARTINCHIP_ADCIM
+	bool "ADCIM driver for ArtInChip SoC"
+	depends on ARCH_ARTINCHIP
+	help
+	  ADC Interface Management is the base module of ADC/THS/RTP
+	  in ArtInChip SoC. So, select this if you want to use them first.
 
 config ROCKCHIP_EFUSE
         bool "Rockchip e-fuse support"

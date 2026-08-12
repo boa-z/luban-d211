@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 /*
- * Copyright (c) 2020-2023 ArtInChip Inc.
+ * Copyright (c) 2020-2026 ArtInChip Inc.
  */
 
 #include <linux/clk.h>
@@ -44,8 +44,11 @@
 #define DMA_CH_SRC_REG		(0x10)
 #define DMA_CH_SINK_REG		(0x14)
 #define DMA_CH_LEFT_REG		(0x18)
+#define DMA_CH_RDC_COMPLETE_REG 	(0x20)
 #define DMA_CH_MODE_REG		(0x28)
 #define DMA_CH_STA		(0x30)
+
+#define AIC_DMA_1MS_TIMEOUT		msecs_to_jiffies(1)
 
 /*
  * define macro for access register for specific channel
@@ -282,11 +285,15 @@ static void *aic_dma_link_add(struct aic_dma_task *prev,
 
 static size_t aic_get_chan_size(struct aic_pchan *pchan)
 {
-	struct aic_desc *txd = pchan->vchan->desc;
+	struct aic_desc *txd;
 	struct aic_dma_task *task;
 	size_t bytes;
 	dma_addr_t pos;
 
+	if (!pchan->vchan || !pchan->vchan->desc)
+		return 0;
+
+	txd = pchan->vchan->desc;
 	pos = readl(pchan->base + DMA_CH_TASK_REG);
 	bytes = readl(pchan->base + DMA_CH_LEFT_REG);
 
@@ -373,7 +380,7 @@ static int aic_set_burst(struct aic_dma_dev *sdev,
 	vchan = container_of(sconfig, struct aic_vchan, cfg);
 	slave_table = sdev->dma_inf->slave_table[vchan->port];
 
-	if (slave_table->id != vchan->port)
+	if (!slave_table || slave_table->id != vchan->port)
 		return -EINVAL;
 
 	src_addr_width = sconfig->src_addr_width;
@@ -543,6 +550,7 @@ aic_dma_prep_slave_sg(struct dma_chan *chan, struct scatterlist *sgl,
 	if (vchan->pchan && (vchan->pchan->id >=
 		AIC_DDMA_CH0_NO(sdev->num_pchans, AIC_DDMA_CH_NUM))) {
 		txd->vd.tx.chan = chan;
+		dma_cookie_assign(&txd->vd.tx);
 		list_add_tail(&txd->vd.node, &vchan->vc.desc_issued);
 		return &txd->vd.tx;
 	}
@@ -550,8 +558,11 @@ aic_dma_prep_slave_sg(struct dma_chan *chan, struct scatterlist *sgl,
 	return vchan_tx_prep(&vchan->vc, &txd->vd, flags);
 
 err_link_free:
-	for (prev = txd->vlink; prev; prev = prev->v_next)
-		dma_pool_free(sdev->pool, prev, virt_to_phys(prev));
+	plink = txd->plink;
+	for (prev = txd->vlink; prev; prev = prev->v_next) {
+		dma_pool_free(sdev->pool, prev, plink);
+		plink = prev->p_next;
+	}
 	kfree(txd);
 	return NULL;
 }
@@ -570,6 +581,9 @@ aic_dma_prep_dma_cyclic(struct dma_chan *chan, dma_addr_t buf_addr,
 	u32 ch_cfg;
 	unsigned int i, periods = buf_len / period_len;
 	int ret;
+
+	if (!periods)
+		return NULL;
 
 	ret = aic_set_burst(sdev, sconfig, dir, &ch_cfg);
 	if (ret) {
@@ -623,8 +637,11 @@ aic_dma_prep_dma_cyclic(struct dma_chan *chan, dma_addr_t buf_addr,
 	return vchan_tx_prep(&vchan->vc, &txd->vd, flags);
 
 err_link_free:
-	for (prev = txd->vlink; prev; prev = prev->v_next)
-		dma_pool_free(sdev->pool, prev, virt_to_phys(prev));
+	plink = txd->plink;
+	for (prev = txd->vlink; prev; prev = prev->v_next) {
+		dma_pool_free(sdev->pool, prev, plink);
+		plink = prev->p_next;
+	}
 	kfree(txd);
 	return NULL;
 }
@@ -642,7 +659,11 @@ static int aic_dma_config(struct dma_chan *chan,
 static int aic_dma_pause(struct dma_chan *chan)
 {
 	struct aic_vchan *vchan = to_aic_vchan(chan);
-	struct aic_pchan *pchan = vchan->pchan;
+	struct aic_pchan *pchan;
+	unsigned long flags;
+
+	spin_lock_irqsave(&vchan->vc.lock, flags);
+	pchan = vchan->pchan;
 
 	if (pchan) {
 		/* pause the physical channel */
@@ -650,18 +671,26 @@ static int aic_dma_pause(struct dma_chan *chan)
 		vchan->status = DMA_PAUSED;
 	}
 
+	spin_unlock_irqrestore(&vchan->vc.lock, flags);
+
 	return 0;
 }
 
 static int aic_dma_resume(struct dma_chan *chan)
 {
 	struct aic_vchan *vchan = to_aic_vchan(chan);
-	struct aic_pchan *pchan = vchan->pchan;
+	struct aic_pchan *pchan;
+	unsigned long flags;
+
+	spin_lock_irqsave(&vchan->vc.lock, flags);
+	pchan = vchan->pchan;
 
 	if (pchan) {
 		writel(0, pchan->base + DMA_CH_PAUSE_REG);
 		vchan->status = DMA_IN_PROGRESS;
 	}
+
+	spin_unlock_irqrestore(&vchan->vc.lock, flags);
 
 	return 0;
 }
@@ -686,9 +715,9 @@ static enum dma_status aic_dma_tx_status(struct dma_chan *chan,
 	spin_lock_irqsave(&vchan->vc.lock, flags);
 
 	vd = vchan_find_desc(&vchan->vc, cookie);
-	txd = to_aic_desc(&vd->tx);
 
 	if (vd) {
+		txd = to_aic_desc(&vd->tx);
 		for (task = txd->vlink; task != NULL; task = task->v_next)
 			bytes += task->len;
 	} else if (!pchan || !vchan->desc) {
@@ -706,39 +735,78 @@ static enum dma_status aic_dma_tx_status(struct dma_chan *chan,
 
 static int aic_dma_terminate_all(struct dma_chan *chan)
 {
+	struct aic_dma_dev *sdev = to_aic_dma_dev(chan->device);
 	struct aic_vchan *vchan = to_aic_vchan(chan);
-	struct aic_pchan *pchan = vchan->pchan;
+	struct aic_pchan *pchan;
 	unsigned long flags;
 	LIST_HEAD(head);
+	unsigned long timeout = 0;
+	u32 irq_mask = 0;
+	int ret = 0;
 
 	spin_lock_irqsave(&vchan->vc.lock, flags);
+	pchan = vchan->pchan;
 
-	if (vchan->cyclic) {
-		vchan->cyclic = false;
-		if (pchan && vchan->desc) {
-			struct virt_dma_desc *vd = &vchan->desc->vd;
-			struct virt_dma_chan *vc = &vchan->vc;
-
-			list_add_tail(&vd->node, &vc->desc_completed);
-		}
+	if (vchan->desc) {
+		vchan_terminate_vdesc(&vchan->desc->vd);
+		vchan->desc = NULL;
 	}
 
+	vchan->cyclic = false;
 	vchan_get_all_descriptors(&vchan->vc, &head);
 
 	if (pchan) {
-		writel(0x00, pchan->base + DMA_CH_PAUSE_REG);
-		writel(0x00, pchan->base + DMA_CH_EN_REG);
+		irq_mask = DMA_IRQ_MASK(pchan->id);
 
-		vchan->pchan = NULL;
-		vchan->desc = NULL;
-		pchan->vchan = NULL;
+		spin_lock(&sdev->lock);
+		if (vchan->pchan == pchan && pchan->vchan == vchan) {
+			writel_clrbits(irq_mask, sdev->base + DMA_IRQ_EN_REG);
+			writel(0x01, pchan->base + DMA_CH_PAUSE_REG);
+			timeout = jiffies + AIC_DMA_1MS_TIMEOUT;
+			while (readl(pchan->base + DMA_CH_RDC_COMPLETE_REG)) {
+				if (time_after(jiffies, timeout)) {
+					dev_err(chan2dev(chan), "Wait chan %d complete timeout!\n", chan->chan_id);
+					ret = -ETIMEDOUT;
+					goto clear_binding;
+				}
+				cpu_relax();
+			}
+
+			writel(0x00, pchan->base + DMA_CH_EN_REG);
+			timeout = jiffies + AIC_DMA_1MS_TIMEOUT;
+			while (readl(pchan->base + DMA_CH_EN_REG)) {
+				if (time_after(jiffies, timeout)) {
+					dev_err(chan2dev(chan), "Wait chan %d disable timeout!\n", chan->chan_id);
+					ret = -ETIMEDOUT;
+					goto clear_binding;
+				}
+				cpu_relax();
+			}
+		}
+
+clear_binding:
+		if (vchan->pchan == pchan && pchan->vchan == vchan) {
+			writel(0x00, pchan->base + DMA_CH_EN_REG);
+			writel(irq_mask, sdev->base + DMA_IRQ_STA_REG);
+			readl(sdev->base + DMA_IRQ_STA_REG);
+			vchan->pchan = NULL;
+			pchan->vchan = NULL;
+		}
+		spin_unlock(&sdev->lock);
 	}
 
 	spin_unlock_irqrestore(&vchan->vc.lock, flags);
 
 	vchan_dma_desc_free_list(&vchan->vc, &head);
 
-	return 0;
+	return ret;
+}
+
+static void aic_dma_synchronize(struct dma_chan *chan)
+{
+	struct aic_vchan *vchan = to_aic_vchan(chan);
+
+	vchan_synchronize(&vchan->vc);
 }
 
 static void aic_dma_free_desc(struct virt_dma_desc *vd)
@@ -1001,15 +1069,34 @@ int aic_ddma_transfer(struct dma_chan *chan)
 	struct aic_dma_dev *sdev = g_ddma_dev;
 	struct aic_vchan *vchan = to_aic_vchan(chan);
 	struct virt_dma_desc *desc = NULL;
+	unsigned long timeout;
 
 	aic_dma_xfer(sdev, vchan);
-	while (readl_bit(BIT(vchan->pchan->id), sdev->base + DMA_CH_STA))
-		;
+
+	if (!vchan->pchan) {
+		dev_err(sdev->slave.dev, "DDMA transfer failed: no pchan\n");
+		return -ENODEV;
+	}
+
+	timeout = jiffies + AIC_DDMA_TIMEOUT;
+	while (readl_bit(BIT(vchan->pchan->id), sdev->base + DMA_CH_STA)) {
+		if (time_after(jiffies, timeout)) {
+			dev_err(sdev->slave.dev, "DDMA transfer timeout\n");
+			return -ETIMEDOUT;
+		}
+		cpu_relax();
+	}
+
+	if (!vchan->desc) {
+		dev_err(sdev->slave.dev, "DDMA transfer failed: no desc\n");
+		return -ENODEV;
+	}
 
 	desc = &vchan->desc->vd;
 	if (desc->tx.callback)
 		desc->tx.callback(desc->tx.callback_param);
 	aic_dma_free_desc(desc);
+	vchan->desc = NULL;
 	return 0;
 }
 EXPORT_SYMBOL(aic_ddma_transfer);
@@ -1061,6 +1148,10 @@ static irqreturn_t aic_dma_interrupt(int irq, void *dev_id)
 			vchan_cyclic_callback(&vchan->desc->vd);
 		} else {
 			spin_lock(&vchan->vc.lock);
+			if (!vchan->desc) {
+				spin_unlock(&vchan->vc.lock);
+				continue;
+			}
 			vchan_cookie_complete(&vchan->desc->vd);
 
 			spin_lock(&sdev->lock);
@@ -1158,6 +1249,7 @@ static int aic_dma_probe(struct platform_device *pdev)
 	sdev->slave.device_pause = aic_dma_pause;
 	sdev->slave.device_resume = aic_dma_resume;
 	sdev->slave.device_terminate_all = aic_dma_terminate_all;
+	sdev->slave.device_synchronize = aic_dma_synchronize;
 	sdev->slave.device_tx_status = aic_dma_tx_status;
 	sdev->slave.device_issue_pending = aic_dma_issue_pending;
 

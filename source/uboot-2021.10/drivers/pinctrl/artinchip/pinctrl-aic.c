@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 /*
- * Copyright (c) 2020 ArtInChip Inc.
+ * Copyright (c) 2020-2025 ArtInChip Inc.
  */
 
 #include <common.h>
@@ -288,6 +288,8 @@ static const struct udevice_id aic_pinctrl_ids[] = {
 	{ .compatible = "artinchip,aic-pinctrl-v0.1" },
 	{ .compatible = "artinchip,aic-pinctrl-v1.0" },
 	{ .compatible = "artinchip,aic-pinctrl-v1.3" },
+	{ .compatible = "artinchip,aic-pinctrl-v1.4" },
+	{ .compatible = "artinchip,aic-pinctrl-v2.0" },
 	{ /* sentinel */ }
 };
 

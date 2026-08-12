@@ -22,8 +22,6 @@ extern "C" {
 
 mpp_decoder_data_t *lv_mpp_image_alloc(int width, int height, enum mpp_pixel_format fmt);
 
-void lv_mpp_image_flush_cache(mpp_decoder_data_t *image);
-
 void lv_mpp_image_free(mpp_decoder_data_t *image);
 
 int lv_ge_fill(struct mpp_buf *buf, enum ge_fillrect_type type,

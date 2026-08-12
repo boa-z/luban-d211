@@ -16,6 +16,11 @@
 #include "hw/reg_util.h"
 #include "aic_com.h"
 
+enum aic_rgb_version {
+	AIC_RGB_V1_0 = 0,
+	AIC_RGB_V1_2 = 1,
+};
+
 struct aic_rgb_priv {
 	/* di_funcs must be the first member */
 	struct di_funcs funcs;
@@ -25,6 +30,7 @@ struct aic_rgb_priv {
 	struct clk mclk;
 	struct clk sclk;
 	ulong sclk_rate;
+	enum aic_rgb_version version;
 	struct panel_rgb *rgb;
 };
 static struct aic_rgb_priv *g_aic_rgb_priv;
@@ -93,7 +99,6 @@ static int aic_rgb_enable(void)
 	struct aic_rgb_priv *priv = aic_rgb_request_drvdata();
 	struct panel_rgb *rgb = priv->rgb;
 
-	aic_rgb_swap();
 	reg_set_bits(priv->regs + RGB_LCD_CTL,
 			RGB_LCD_CTL_MODE_MASK,
 			RGB_LCD_CTL_MODE(rgb->mode));
@@ -114,6 +119,7 @@ static int aic_rgb_enable(void)
 		break;
 	}
 
+	aic_rgb_swap();
 	reg_set_bit(priv->regs + RGB_LCD_CTL, RGB_LCD_CTL_EN);
 
 	aic_rgb_release_drvdata();
@@ -127,10 +133,14 @@ static int aic_rgb_pixclk2mclk(ulong pixclk)
 	struct panel_rgb *rgb = priv->rgb;
 
 	debug("Current pix-clk is %ld\n", pixclk);
-	if (rgb->mode == PRGB)
-		priv->sclk_rate = pixclk * 4;
-	else if (rgb->mode == SRGB)
+	if (rgb->mode == PRGB) {
+		if (priv->version == AIC_RGB_V1_2)
+			priv->sclk_rate = pixclk * 2;
+		else
+			priv->sclk_rate = pixclk * 4;
+	} else if (rgb->mode == SRGB) {
 		priv->sclk_rate = pixclk * 12;
+	}
 
 	aic_rgb_release_drvdata();
 	return ret;
@@ -161,6 +171,7 @@ static int aic_rgb_probe(struct udevice *dev)
 	int ret;
 
 	priv->dev = dev;
+	priv->version = dev_get_driver_data(dev);
 
 	priv->regs = (void *)dev_read_addr(dev);
 	if (IS_ERR(priv->regs))
@@ -190,7 +201,10 @@ static int aic_rgb_probe(struct udevice *dev)
 }
 
 static const struct udevice_id aic_rgb_match_ids[] = {
-	{ .compatible = "artinchip,aic-rgb-v1.0" },
+	{ .compatible = "artinchip,aic-rgb-v1.0",
+	  .data = AIC_RGB_V1_0 },
+	{ .compatible = "artinchip,aic-rgb-v1.2",
+	  .data = AIC_RGB_V1_2 },
 	{ /* sentinel*/ },
 };
 

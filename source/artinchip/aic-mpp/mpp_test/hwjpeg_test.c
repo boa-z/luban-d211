@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2023 Artinchip Technology Co. Ltd
+ * Copyright (C) 2020-2025 ArtInChip Technology Co. Ltd
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -215,7 +215,7 @@ static void ve_config_bitstream_register(struct jpeg_ctx *s,  int offset, int is
 	int busy = 1;
 	logi("config bitstream");
 	// Note: if it is the last stream, we need add 1 here, or it will halt
-	int stream_num = (s->buf_size + 255) / 256 +1 ;
+	int stream_num = (s->buf_size + 255) / 256 +1;
 
 	uint32_t packet_base_addr = s->input_phy_addr;
 	uint32_t base_addr = (packet_base_addr + offset) & (~7);
@@ -303,7 +303,7 @@ static void ve_config_huffman_table(struct jpeg_ctx *s)
 
 	logd("config huffman table");
 
-	//* 1. config start_code
+	// 1. config start_code
 	write_reg_u32(s->regs_base + JPG_HUFF_INFO_REG, 3);
 	write_reg_u32(s->regs_base + JPG_HUFF_ADDR_REG, 0);
 
@@ -326,7 +326,7 @@ static void ve_config_huffman_table(struct jpeg_ctx *s)
 	}
 
 
-	//* 2. config max code
+	// 2. config max code
 	logd("max_code");
 	write_reg_u32(s->regs_base + JPG_HUFF_INFO_REG, (1<< 10) | 3);
 	write_reg_u32(s->regs_base + JPG_HUFF_ADDR_REG, (1<< 10));
@@ -348,7 +348,7 @@ static void ve_config_huffman_table(struct jpeg_ctx *s)
 		write_reg_u32(s->regs_base + JPG_HUFF_VAL_REG, val);
 	}
 
-	//* 3. config huffman offset
+	// 3. config huffman offset
 	write_reg_u32(s->regs_base + JPG_HUFF_INFO_REG, (2<<10) | 3);
 	write_reg_u32(s->regs_base + JPG_HUFF_ADDR_REG, (2<<10));
 
@@ -369,7 +369,7 @@ static void ve_config_huffman_table(struct jpeg_ctx *s)
 		write_reg_u32(s->regs_base + JPG_HUFF_VAL_REG, val);
 	}
 
-	//* 4.1 config huffman val (dc luma)
+	// 4.1 config huffman val (dc luma)
 	logd("huff_val dc_luma");
 	write_reg_u32(s->regs_base + JPG_HUFF_INFO_REG, (3<<10) | 3);
 	write_reg_u32(s->regs_base + JPG_HUFF_ADDR_REG, (3<<10));
@@ -383,7 +383,7 @@ static void ve_config_huffman_table(struct jpeg_ctx *s)
 		write_reg_u32(s->regs_base + JPG_HUFF_VAL_REG, val);
 	}
 
-	//* 4.2 config huffman val (dc chroma)
+	// 4.2 config huffman val (dc chroma)
 	logd("huff_val dc_chroma");
 	write_reg_u32(s->regs_base + JPG_HUFF_INFO_REG, (3<<10) | 3);
 
@@ -398,7 +398,7 @@ static void ve_config_huffman_table(struct jpeg_ctx *s)
 		logv("write JPG_HUFF_VAL_REG %02X %02X", JPG_HUFF_VAL_REG, val);
 	}
 
-	//* 4.3 config huffman val (ac luma)
+	// 4.3 config huffman val (ac luma)
 	write_reg_u32(s->regs_base + JPG_HUFF_INFO_REG, (3<<10) | 3);
 	write_reg_u32(s->regs_base + JPG_HUFF_ADDR_REG, (3<<10) | 24);
 
@@ -411,7 +411,7 @@ static void ve_config_huffman_table(struct jpeg_ctx *s)
 		write_reg_u32(s->regs_base + JPG_HUFF_VAL_REG, val);
 	}
 
-	//* 4.4 config huffman val (ac chroma)
+	// 4.4 config huffman val (ac chroma)
 	write_reg_u32(s->regs_base + JPG_HUFF_INFO_REG, (3<<10) | 3);
 	write_reg_u32(s->regs_base + JPG_HUFF_ADDR_REG, (3<<10) | 186);
 
@@ -503,25 +503,25 @@ int ve_decode_jpeg(struct jpeg_ctx *s, int byte_offset)
 
 	ve_get_client();
 
-	//* 1. config ve top
+	// 1. config ve top
 	ve_config_ve_top_reg(s);
 
-	//* 2. config header info
+	// 2. config header info
 	config_header_info(s);
 	config_jpeg_picture_info_register(s);
 
-	//* 3. config quant matrix
+	// 3. config quant matrix
 	ve_config_quant_matrix(s);
 
-	//* 4. config huffman table
+	// 4. config huffman table
 	if(s->have_dht) {
 		ve_config_huffman_table(s);
 	}
 
-	//* 5. config bitstream
+	// 5. config bitstream
 	ve_config_bitstream_register(s, byte_offset, 1);
 
-	//* 6. decode start
+	// 6. decode start
 	write_reg_u32(s->regs_base + JPG_START_REG, 1);
 
 	if(ve_wait(&status) < 0) {
@@ -643,7 +643,7 @@ static void video_layer_set(int fb0_fd, struct mpp_buf *picture_buf)
 		hw_data[i] = mmap(NULL, data_size[i], PROT_READ, MAP_SHARED, picture_buf->fd[i], 0);
 		if (hw_data[i] == MAP_FAILED) {
 			loge("dmabuf alloc mmap failed!");
-			return ;
+			return;
 		}
 		if(fp_save)
 			fwrite(hw_data[i], 1, data_size[i], fp_save);
@@ -654,29 +654,29 @@ static void video_layer_set(int fb0_fd, struct mpp_buf *picture_buf)
 	}
 	fclose(fp_save);
 #endif
-	//* add dmabuf to de driver
+	// add dmabuf to de driver
 	for(i=0; i<dmabuf_num; i++) {
 		dmabuf_fd[i].fd = picture_buf->fd[i];
 		if (ioctl(fb0_fd, AICFB_ADD_DMABUF, &dmabuf_fd[i]) < 0)
 			loge("fb ioctl() AICFB_UPDATE_LAYER_CONFIG failed!");
 	}
 
-	//* update layer config (it is async interface)
+	// update layer config (it is async interface)
 	if (ioctl(fb0_fd, AICFB_UPDATE_LAYER_CONFIG, &layer) < 0)
 		loge("fb ioctl() AICFB_UPDATE_LAYER_CONFIG failed!");
 
-	//* wait vsync (wait layer config)
+	// wait vsync (wait layer config)
 	ioctl(fb0_fd, AICFB_WAIT_FOR_VSYNC, NULL);
 
-	//* display this picture 2 seconds
+	// display this picture 2 seconds
 	usleep(2000000);
 
-	//* disable layer
+	// disable layer
 	layer.enable = 0;
 	if(ioctl(fb0_fd, AICFB_UPDATE_LAYER_CONFIG, &layer) < 0)
 		loge("fb ioctl() AICFB_UPDATE_LAYER_CONFIG failed!");
 
-	//* remove dmabuf to de driver
+	// remove dmabuf to de driver
 	for(i=0; i<dmabuf_num; i++) {
 		if (ioctl(fb0_fd, AICFB_RM_DMABUF, &dmabuf_fd[i]) < 0)
 			loge("fb ioctl() AICFB_UPDATE_LAYER_CONFIG failed!");
@@ -688,7 +688,7 @@ static int render_frame(struct mpp_frame* frame)
 	int fb0_fd = 0;
 	struct fb_fix_screeninfo finfo;
 
-	//* 1. open fb0
+	// 1. open fb0
 	fb0_fd = open("/dev/fb0", O_RDWR);
 	if (fb0_fd < 0) {
 		logw("open fb0 failed!");
@@ -701,7 +701,7 @@ static int render_frame(struct mpp_frame* frame)
 		return -1;
 	}
 
-	//* 2 disp frame;
+	// 2 disp frame;
 	set_fb_layer_alpha(fb0_fd, 10);
 	video_layer_set(fb0_fd, &frame->buf);
 
@@ -831,7 +831,7 @@ int mjpeg_decode_dht(struct jpeg_ctx *s)
 		// number of huffman code with code length i
 		bits_table[0] = 0;
 
-		//* 1. parse BITS(BITS is the number of huffman code which is the same
+		// 1. parse BITS(BITS is the number of huffman code which is the same
 		// code length,
 		//     the max code length is 16), generate HUFFSIZE according BITS
 		//     table
@@ -846,7 +846,7 @@ int mjpeg_decode_dht(struct jpeg_ctx *s)
 			return -1;
 
 		code_max = 0;
-		//* 2.parse HUFFVAL table, the huffman code to symbol
+		// 2.parse HUFFVAL table, the huffman code to symbol
 		for (i = 0; i < n; i++) {
 			v = read_bits(&s->gb, 8);
 			if (v > code_max)
@@ -855,7 +855,7 @@ int mjpeg_decode_dht(struct jpeg_ctx *s)
 		}
 		len -= n;
 
-		//* 3. generate HUFFCODE table, it is used for config ve
+		// 3. generate HUFFCODE table, it is used for config ve
 		fill_huffman_startcode(s, class, index, bits_table);
 	}
 	return 0;
@@ -897,13 +897,87 @@ int mjpeg_decode_dqt(struct jpeg_ctx *s)
 	return 0;
 }
 
-int mjpeg_decode_sof(struct jpeg_ctx *s)
+static void get_output_size(struct jpeg_ctx *s)
 {
-	int len, nb_components, i, bits;
 	int phy_h_stride[4]; // hor stride ( before post-process)
 	int phy_v_stride[4]; // ver stride ( before post-process)
 	int h_real_size[4];  // hor real size ( before post-process)
 	int v_real_size[4];  // hor real size ( before post-process)
+
+	// get the output size of scale down
+	s->nb_mcu_width = (s->width + 8 * s->h_count[0] - 1) / (8 * s->h_count[0]);
+	s->nb_mcu_height = (s->height + 8 * s->v_count[0] - 1) / (8 * s->v_count[0]);
+	int h_stride_y = (s->nb_mcu_width * s->h_count[0] * 8);
+	int v_stride_y = (s->nb_mcu_height * s->v_count[0] * 8);
+	phy_h_stride[0] = phy_h_stride[1] = phy_h_stride[2] = (h_stride_y + 15) / 16 * 16;
+	phy_v_stride[0] = phy_v_stride[1] = phy_v_stride[2] = (v_stride_y + 15) / 16 * 16;
+	h_real_size[0] = s->width;
+	v_real_size[0] = s->height;
+
+	if (s->pix_fmt == MPP_FMT_YUV420P) {
+		phy_h_stride[1] = phy_h_stride[2] = phy_h_stride[0] / 2;
+		phy_v_stride[1] = phy_v_stride[2] = phy_v_stride[0] / 2;
+		h_real_size[1] = h_real_size[2] = h_real_size[0] / 2;
+		v_real_size[1] = v_real_size[2] = v_real_size[0] / 2;
+	} else if (s->pix_fmt == MPP_FMT_YUV444P || s->pix_fmt == MPP_FMT_YUV400) {
+		phy_h_stride[0] = (h_stride_y + 7) / 8 * 8;
+		phy_v_stride[0] = (v_stride_y + 7) / 8 * 8;
+		phy_h_stride[1] = phy_h_stride[2] = phy_h_stride[0];
+		phy_v_stride[1] = phy_v_stride[2] = phy_v_stride[0];
+		h_real_size[1] = h_real_size[2] = h_real_size[0];
+		v_real_size[1] = v_real_size[2] = v_real_size[0];
+	} else if (s->pix_fmt == MPP_FMT_YUV422P) {
+		phy_h_stride[1] = phy_h_stride[2] = phy_h_stride[0] / 2;
+		phy_v_stride[1] = phy_v_stride[2] = phy_v_stride[0];
+		h_real_size[1] = h_real_size[2] = h_real_size[0] / 2;
+		v_real_size[1] = v_real_size[2] = v_real_size[0];
+	}
+
+	// get the output size of rotate
+	for (int k = 0; k < 3; k++) {
+		s->rm_h_real_size[k] = h_real_size[k];
+		s->rm_v_real_size[k] = v_real_size[k];
+		s->rm_h_stride[k] = phy_h_stride[k];
+		s->rm_v_stride[k] = phy_v_stride[k];
+	}
+}
+
+static int set_pix_format(struct jpeg_ctx *s)
+{
+	if (s->h_count[0] == 2 && s->v_count[0] == 2 && s->h_count[1] == 1 &&
+		s->v_count[1] == 1 && s->h_count[2] == 1 && s->v_count[2] == 1) {
+		s->pix_fmt = MPP_FMT_YUV420P;
+		logi("pixel format: yuv420");
+	} else if (s->h_count[0] == 2 && s->v_count[0] == 1 && s->h_count[1] == 1 &&
+			   s->v_count[1] == 1 && s->h_count[2] == 1 && s->v_count[2] == 1) {
+		s->pix_fmt = MPP_FMT_YUV422P;
+		logi("pixel format: yuv422");
+	} else if (s->h_count[0] == 1 && s->v_count[0] == 1 && s->h_count[1] == 1 &&
+			   s->v_count[1] == 1 && s->h_count[2] == 1 && s->v_count[2] == 1) {
+		s->pix_fmt = MPP_FMT_YUV444P;
+		logi("pixel format: yuv444");
+	} else if (s->h_count[0] == 1 && s->v_count[0] == 2 && s->h_count[1] == 1 &&
+			   s->v_count[1] == 2 && s->h_count[2] == 1 && s->v_count[2] == 2) {
+		s->pix_fmt = MPP_FMT_YUV444P;
+		logi("pixel format: ffmpeg yuv444");
+	} else if (s->h_count[1] == 0 && s->v_count[1] == 0 && s->h_count[2] == 0 &&
+			   s->v_count[2] == 0) {
+		s->pix_fmt = MPP_FMT_YUV400;
+		logi("pixel format: yuv400");
+	} else {
+		loge("Not support format! h_count: %d %d %d, v_count: %d %d %d",
+			s->h_count[0], s->h_count[1], s->h_count[2],
+			s->v_count[0], s->v_count[1], s->v_count[2]);
+		return -1;
+	}
+
+	return 0;
+}
+
+int mjpeg_decode_sof(struct jpeg_ctx *s)
+{
+	int len, nb_components, i, bits;
+
 
 	logd("===== ff_mjpeg_decode_sof ====== ");
 
@@ -930,8 +1004,9 @@ int mjpeg_decode_sof(struct jpeg_ctx *s)
 	}
 
 	nb_components = read_bits(&s->gb, 8);
-	if (nb_components <= 0 || nb_components > MAX_COMPONENTS)
+	if (nb_components <= 0 || nb_components > MAX_COMPONENTS) {
 		return -1;
+	}
 
 	if (len != 8 + 3 * nb_components) {
 		loge("decode_sof0: error, len(%d) mismatch %d components", len, nb_components);
@@ -961,69 +1036,11 @@ int mjpeg_decode_sof(struct jpeg_ctx *s)
 
 	logi("s->width %d, s->height %d", s->width, s->height);
 
-	if (s->h_count[0] == 2 && s->v_count[0] == 2 && s->h_count[1] == 1 &&
-		s->v_count[1] == 1 && s->h_count[2] == 1 && s->v_count[2] == 1) {
-		s->pix_fmt = MPP_FMT_YUV420P;
-		logi("pixel format: yuv420");
-	} else if (s->h_count[0] == 2 && s->v_count[0] == 1 && s->h_count[1] == 1 &&
-			   s->v_count[1] == 1 && s->h_count[2] == 1 && s->v_count[2] == 1) {
-		s->pix_fmt = MPP_FMT_YUV422P;
-		logi("pixel format: yuv422");
-	} else if (s->h_count[0] == 1 && s->v_count[0] == 1 && s->h_count[1] == 1 &&
-			   s->v_count[1] == 1 && s->h_count[2] == 1 && s->v_count[2] == 1) {
-		s->pix_fmt = MPP_FMT_YUV444P;
-		logi("pixel format: yuv444");
-	} else if (s->h_count[0] == 1 && s->v_count[0] == 2 && s->h_count[1] == 1 &&
-			   s->v_count[1] == 2 && s->h_count[2] == 1 && s->v_count[2] == 2) {
-		s->pix_fmt = MPP_FMT_YUV444P;
-		logi("pixel format: ffmpeg yuv444");
-	} else if (s->h_count[1] == 0 && s->v_count[1] == 0 && s->h_count[2] == 0 &&
-			   s->v_count[2] == 0) {
-		s->pix_fmt = MPP_FMT_YUV400;
-		logi("pixel format: yuv400");
-	} else {
-		loge("Not support format! h_count: %d %d %d, v_count: %d %d %d",
-			s->h_count[0], s->h_count[1], s->h_count[2],
-			s->v_count[0], s->v_count[1], s->v_count[2]);
+	if (set_pix_format(s)) {
 		return -1;
 	}
 
-	//* get the output size of scale down
-	s->nb_mcu_width = (s->width + 8 * s->h_count[0] - 1) / (8 * s->h_count[0]);
-	s->nb_mcu_height = (s->height + 8 * s->v_count[0] - 1) / (8 * s->v_count[0]);
-	int h_stride_y = (s->nb_mcu_width * s->h_count[0] * 8);
-	int v_stride_y = (s->nb_mcu_height * s->v_count[0] * 8);
-	phy_h_stride[0] = phy_h_stride[1] = phy_h_stride[2] = (h_stride_y + 15) / 16 * 16;
-	phy_v_stride[0] = phy_v_stride[1] = phy_v_stride[2] = (v_stride_y + 15) / 16 * 16;
-	h_real_size[0] = s->width;
-	v_real_size[0] = s->height;
-
-	if (s->pix_fmt == MPP_FMT_YUV420P) {
-		phy_h_stride[1] = phy_h_stride[2] = phy_h_stride[0] / 2;
-		phy_v_stride[1] = phy_v_stride[2] = phy_v_stride[0] / 2;
-		h_real_size[1] = h_real_size[2] = h_real_size[0] / 2;
-		v_real_size[1] = v_real_size[2] = v_real_size[0] / 2;
-	} else if (s->pix_fmt == MPP_FMT_YUV444P || s->pix_fmt == MPP_FMT_YUV400) {
-		phy_h_stride[0] = (h_stride_y + 7) / 8 * 8;
-		phy_v_stride[0] = (v_stride_y + 7) / 8 * 8;
-		phy_h_stride[1] = phy_h_stride[2] = phy_h_stride[0];
-		phy_v_stride[1] = phy_v_stride[2] = phy_v_stride[0];
-		h_real_size[1] = h_real_size[2] = h_real_size[0];
-		v_real_size[1] = v_real_size[2] = v_real_size[0];
-	} else if (s->pix_fmt == MPP_FMT_YUV422P) {
-		phy_h_stride[1] = phy_h_stride[2] = phy_h_stride[0] / 2;
-		phy_v_stride[1] = phy_v_stride[2] = phy_v_stride[0];
-		h_real_size[1] = h_real_size[2] = h_real_size[0] / 2;
-		v_real_size[1] = v_real_size[2] = v_real_size[0];
-	}
-
-	//* get the output size of rotate
-	for (int k = 0; k < 3; k++) {
-		s->rm_h_real_size[k] = h_real_size[k];
-		s->rm_v_real_size[k] = v_real_size[k];
-		s->rm_h_stride[k] = phy_h_stride[k];
-		s->rm_v_stride[k] = phy_v_stride[k];
-	}
+	get_output_size(s);
 
 	s->got_picture = 1;
 
@@ -1044,7 +1061,7 @@ static int mjpeg_decode_sos(struct jpeg_ctx *s,
 		return -1;
 	}
 
-	//* 1. parse SOS info
+	// 1. parse SOS info
 	len = read_bits(&s->gb, 16);
 	nb_components = read_bits(&s->gb, 8);
 	if (nb_components == 0 || nb_components > MAX_COMPONENTS) {
@@ -1168,7 +1185,7 @@ static int decode_jpeg(struct jpeg_ctx *s, FILE* fp, int buf_size)
 			return -1;
 		}
 
-		ret = init_read_bits(&s->gb, unescaped_buf_ptr, unescaped_buf_size*8);
+		ret = init_read_bits(&s->gb, unescaped_buf_ptr, unescaped_buf_size*8, 0);
 
 		if (ret < 0) {
 			loge("invalid buffer");

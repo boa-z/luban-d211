@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2022 Artinchip Technology Co. Ltd
+ * Copyright (C) 2020-2026 ArtInChip Technology Co. Ltd
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -36,6 +36,9 @@
 #include "mpp_decoder.h"
 #include "mpp_encoder.h"
 #include "mpp_log.h"
+#ifdef MIDDLEWARE
+#include "aic_render.h"
+#endif
 
 #define FRAME_BUF_NUM		(18)
 #define MAX_TEST_FILE           (256)
@@ -55,11 +58,9 @@ struct dec_ctx {
 	struct mpp_decoder  *decoder;
 	struct frame_info frame_info[FRAME_BUF_NUM];	//
 
-	struct bit_stream_parser *parser;
-
-	int stream_eos;
-	int render_eos;
-	int dec_err;
+	volatile int stream_eos;
+	volatile int render_eos;
+	volatile int dec_err;
 	int cmp_data_err;
 
 	char file_input[MAX_TEST_FILE][1024];	// test file name
@@ -69,6 +70,8 @@ struct dec_ctx {
 	int cmp_en;
 	int display_en;
 	int save_data;
+	int input_by_frame;			// 0: by slice (default), 1: by frame
+	int drop_b_frame;			// 1: drop non-reference B-frames
 	FILE* fp_yuv;				// compare yuv
 	FILE* fp_save;				// hw decode save yuv
 	FILE* fp_result;			// test result (pass/fail)
@@ -86,6 +89,8 @@ static void print_help(const char* prog)
 		"\t-f                             output pixel format\n"
 		"\t-l                             loop time\n"
 		"\t-s                             save output data\n"
+		"\t-m                             input mode: 0-slice(default), 1-frame\n"
+		"\t-b                             drop non-reference B-frames\n"
 		"\t-h                             help\n\n"
 		"Example1(test single file): mpp_test -i test.264\n"
 		"Example2(test some files) : mpp_test -t /usr/data/\n");
@@ -265,7 +270,8 @@ static int cmp_data(struct dec_ctx *data, FILE* fp, struct mpp_buf* video, FILE*
 		hw_data[i] = mmap(NULL, data_size[i], PROT_READ, MAP_SHARED, video->fd[i], 0);
 		if (hw_data[i] == MAP_FAILED) {
 			loge("dmabuf alloc mmap failed!");
-			return -1;
+			ret = -1;
+			goto out;
 		}
 		if(fp_save)
 			fwrite(hw_data[i], 1, data_size[i], fp_save);
@@ -300,7 +306,8 @@ static int cmp_data(struct dec_ctx *data, FILE* fp, struct mpp_buf* video, FILE*
 out:
 	// unmap dmabuf
 	for(i=0; i<comp; i++) {
-		munmap(hw_data[i], data_size[i]);
+		if (hw_data[i] > 0)
+			munmap(hw_data[i], data_size[i]);
 	}
 
 	if(buf[0]) free(buf[0]);
@@ -319,44 +326,40 @@ static void swap(int *a, int *b)
 
 void* render_thread(void *p)
 {
-	int fb0_fd = -1;
-	int cur_frame_id = 0;
-	int last_frame_id = 1;
-	struct mpp_frame frame[2];
-	struct mpp_buf *pic_buffer = NULL;
-	int frame_num = 0;
-	int ret;
-	int i, j;
-	long long time = 0;
-	long long duration_time = 0;
-	int disp_frame_cnt = 0;
-	long long total_duration_time = 0;
-	int total_disp_frame_cnt = 0;
 	struct dec_ctx *data = (struct dec_ctx*)p;
+#ifdef MIDDLEWARE
+	struct aic_video_render *render = NULL;
+#endif
+	struct mpp_frame frame[2];
+	int cur_frame_id = 0, last_frame_id = 1;
+	int frame_num = 0, ret;
+	long long time = 0, duration_time = 0;
+	int disp_frame_cnt = 0, total_disp_frame_cnt = 0;
+	long long total_duration_time = 0;
 
-	int first = 0;
-
-	//* 1. open fb0
-	fb0_fd = open(dev_fb0, O_RDWR);
-	if (fb0_fd < 0) {
-		logw("open fb0 failed!");
+#ifdef MIDDLEWARE
+	if (data->display_en) {
+		aic_video_render_create(&render);
+		if (render)
+			aic_video_render_init(render, AICFB_LAYER_TYPE_VIDEO, 0);
 	}
+#endif
 
 	time = get_now_us();
-	//* 2. render frame until eos
-	while(!data->render_eos) {
+	while (!data->render_eos) {
 		memset(&frame[cur_frame_id], 0, sizeof(struct mpp_frame));
 
-		if(data->dec_err)
+		if (data->dec_err) {
+			data->render_eos = 1;
 			break;
+		}
 
-		//* 2.1 get frame
 		ret = mpp_decoder_get_frame(data->decoder, &frame[cur_frame_id]);
-		if(ret == DEC_NO_RENDER_FRAME || ret == DEC_ERR_FM_NOT_CREATE
-		|| ret == DEC_NO_EMPTY_FRAME) {
+		if (ret == DEC_NO_RENDER_FRAME || ret == DEC_ERR_FM_NOT_CREATE
+		    || ret == DEC_NO_EMPTY_FRAME) {
 			usleep(10000);
 			continue;
-		} else if(ret) {
+		} else if (ret) {
 			logw("mpp_dec_get_frame error, ret: %x", ret);
 			data->dec_err = 1;
 			break;
@@ -369,45 +372,25 @@ void* render_thread(void *p)
 		logi("decode_get_frame successful: frame id %d, number %d, flag: %d",
 			frame[cur_frame_id].id, frame_num, frame[cur_frame_id].flags);
 
-		if (frame[cur_frame_id].flags & FRAME_FLAG_ERROR) {
+		if (frame[cur_frame_id].flags & FRAME_FLAG_ERROR)
 			loge("frame error");
-		}
-		pic_buffer = &frame[cur_frame_id].buf;
-		//* 2.2 compare data
-		if((data->cmp_en || data->fp_save) && cmp_data(data, data->fp_yuv, pic_buffer, data->fp_save))
+
+		// compare / save data
+		if ((data->cmp_en || data->fp_save) &&
+		    cmp_data(data, data->fp_yuv, &frame[cur_frame_id].buf, data->fp_save))
 			data->cmp_data_err = 1;
 
-		if(!first) {
-			int len = 0;
-			int buf_len = 1024*1024;
-			int dma_fd = dmabuf_device_open();
-			int jpeg_data_fd = dmabuf_alloc(dma_fd, buf_len);
-			unsigned char* jpeg_vir_addr = dmabuf_mmap(jpeg_data_fd, buf_len);
-			mpp_encode_jpeg(&frame[cur_frame_id], 90, jpeg_data_fd, buf_len, &len);
-			logi("encode jpeg len: %d", len);
-			FILE* fp_jpeg = fopen("/save.jpg", "wb");
-			fwrite(jpeg_vir_addr, 1, len, fp_jpeg);
-			fclose(fp_jpeg);
-			dmabuf_munmap(jpeg_vir_addr, buf_len);
-			dmabuf_free(jpeg_data_fd);
-			dmabuf_device_close(dma_fd);
-			first ++;
-		}
+#ifdef MIDDLEWARE
+		if (render)
+			aic_video_render_rend(render, &frame[cur_frame_id]);
+#endif
 
-		//* 2.3 disp frame;
-		if(data->display_en || !(frame[cur_frame_id].flags & FRAME_FLAG_ERROR)) {
-			set_fb_layer_alpha(fb0_fd, 10);
-			video_layer_set(fb0_fd, pic_buffer, &data->frame_info[frame[cur_frame_id].id]);
-		}
-
-		//* 2.4 return the last frame
-		if(frame_num) {
-			ret = mpp_decoder_put_frame(data->decoder, &frame[last_frame_id]);
-		}
+		if (frame_num)
+			mpp_decoder_put_frame(data->decoder, &frame[last_frame_id]);
 
 		swap(&cur_frame_id, &last_frame_id);
 
-		if(disp_frame_cnt > FRAME_COUNT) {
+		if (disp_frame_cnt > FRAME_COUNT) {
 			float fps, avg_fps;
 			total_disp_frame_cnt += disp_frame_cnt;
 			total_duration_time += duration_time;
@@ -424,28 +407,14 @@ void* render_thread(void *p)
 		usleep(30000);
 	}
 
-	//* put the last frame when eos
 	mpp_decoder_put_frame(data->decoder, &frame[last_frame_id]);
 
-	//* disable layer
-	struct aicfb_layer_data layer = {0};
-	layer.enable = 0;
-	if (ioctl(fb0_fd, AICFB_UPDATE_LAYER_CONFIG, &layer) < 0)
-		loge("fb ioctl() AICFB_UPDATE_LAYER_CONFIG failed!");
-
-	//* remove all dmabuf from de driver
-	for(i=0; i<FRAME_BUF_NUM; i++) {
-		if(data->frame_info[i].used == 0)
-			continue;
-
-		for(j=0; j<data->frame_info[i].fd_num; j++) {
-			if (ioctl(fb0_fd, AICFB_RM_DMABUF, &data->frame_info[i].fd[j]) < 0)
-				loge("fb ioctl() AICFB_UPDATE_LAYER_CONFIG failed!");
-		}
+#ifdef MIDDLEWARE
+	if (render) {
+		aic_video_render_destroy(render);
+		render = NULL;
 	}
-
-	if (fb0_fd >= 0)
-		close(fb0_fd);
+#endif
 
 	return NULL;
 }
@@ -460,6 +429,7 @@ void* decode_thread(void *p)
 	while(!data->render_eos) {
 		ret = mpp_decoder_decode(data->decoder);
 		if(ret == DEC_NO_READY_PACKET || ret == DEC_NO_EMPTY_FRAME) {
+			logi("decode ret: %d", ret);
 			usleep(1000);
 			continue;
 		} else if( ret ) {
@@ -467,6 +437,7 @@ void* decode_thread(void *p)
 			//data->dec_err = 1;
 			//break;
 		}
+
 		dec_num ++;
 		usleep(1000);
 	}
@@ -474,43 +445,111 @@ void* decode_thread(void *p)
 	return NULL;
 }
 
-int dec_decode(struct dec_ctx *data, char* filename)
+static int detect_dec_type(const char *filename, struct dec_ctx *data,
+			     char *yuv_file_name, size_t name_size)
 {
-	int ret;
-	int file_fd;
-	unsigned char *buf = NULL;
-	size_t buf_size = 0;
-	pthread_t render_thread_id;
-	pthread_t decode_thread_id;
 	int dec_type = 0;
+	char *ptr = strrchr(filename, '.');
+	if (ptr) {
+		if (!strncmp(ptr, ".h264", 5) || !strncmp(ptr, ".264", 4))
+			dec_type = MPP_CODEC_VIDEO_DECODER_H264;
+		else if (!strncmp(ptr, ".jpg", 4))
+			dec_type = MPP_CODEC_VIDEO_DECODER_MJPEG;
+		else if (!strncmp(ptr, ".png", 4))
+			dec_type = MPP_CODEC_VIDEO_DECODER_PNG;
+	}
+	logi("file type: 0x%02X", dec_type);
+
+	if (ptr) {
+		strncpy(yuv_file_name, filename, name_size - 1);
+		yuv_file_name[name_size - 1] = '\0';
+		ptr = strrchr(yuv_file_name, '.');
+		if (ptr) {
+			ptr[1] = 'y';
+			ptr[2] = 'u';
+			ptr[3] = 'v';
+			ptr[4] = '\0';
+		}
+		logi("yuv file name: %s", yuv_file_name);
+		data->fp_yuv = fopen(yuv_file_name, "rb");
+		if (data->fp_yuv == NULL)
+			logi("dec_data.fp_yuv open failed, erron(%d)", errno);
+	}
+	return dec_type;
+}
+
+static int send_h264_data(struct dec_ctx *data, int file_fd)
+{
+	struct bit_stream_parser *parser = bs_create(file_fd);
+	if (parser == NULL) {
+		loge("bs_create failed");
+		return -1;
+	}
+
+	struct mpp_packet packet;
+	memset(&packet, 0, sizeof(struct mpp_packet));
+
+	while ((packet.flag & PACKET_FLAG_EOS) == 0) {
+		int ret;
+
+		memset(&packet, 0, sizeof(struct mpp_packet));
+		if (data->input_by_frame)
+			bs_prefetch_frame(parser, &packet);
+		else
+			bs_prefetch(parser, &packet);
+		logi("bs_prefetch, size: %d", packet.size);
+
+		do {
+			if (data->dec_err) {
+				loge("decode error, break now");
+				bs_close(parser);
+				return -1;
+			}
+			ret = mpp_decoder_get_packet(data->decoder, &packet, packet.size);
+			if (ret == 0)
+				break;
+			usleep(1000);
+		} while (1);
+
+		bs_read(parser, &packet);
+		mpp_decoder_put_packet(data->decoder, &packet);
+	}
+
+	bs_close(parser);
+	return 0;
+}
+
+static int send_raw_data(struct dec_ctx *data, int file_fd, size_t buf_size)
+{
+	unsigned char *buf = malloc(buf_size);
+	if (!buf) {
+		loge("malloc buf failed");
+		return -1;
+	}
+
+	if (read(file_fd, buf, buf_size) <= 0) {
+		loge("read data error");
+		free(buf);
+		return -1;
+	}
+
+	data->stream_eos = 1;
+	send_data(data, buf, buf_size);
+	free(buf);
+	return 0;
+}
+
+int dec_decode(struct dec_ctx *data, char *filename)
+{
+	int ret, file_fd, dec_type;
+	size_t buf_size;
+	pthread_t render_thread_id, decode_thread_id;
 	char yuv_file_name[1024];
 
 	logd("dec_test start");
 
-	if (filename) {
-		char* ptr = strrchr(filename, '.');
-		if (!strcmp(ptr, ".h264") || !strcmp(ptr, ".264")) {
-			dec_type = MPP_CODEC_VIDEO_DECODER_H264;
-		} else if (!strcmp(ptr, ".jpg")) {
-			dec_type = MPP_CODEC_VIDEO_DECODER_MJPEG;
-		} else if (!strcmp(ptr, ".png")) {
-			dec_type = MPP_CODEC_VIDEO_DECODER_PNG;
-		}
-		logi("file type: 0x%02X", dec_type);
+	dec_type = detect_dec_type(filename, data, yuv_file_name, sizeof(yuv_file_name));
 
-		strcpy(yuv_file_name, filename);
-		ptr = strrchr(yuv_file_name, '.');
-		ptr[1] = 'y';
-		ptr[2] = 'u';
-		ptr[3] = 'v';
-		ptr[4] = '\0';
-		logi("yuv file name: %s", yuv_file_name);
-		data->fp_yuv = fopen(yuv_file_name, "rb");
-		if(data->fp_yuv == NULL)
-			logi("dec_data.fp_yuv open failed, erron(%d)", errno);
-	}
-
-	//* 1. read data
 	file_fd = open(filename, O_RDONLY);
 	if (file_fd < 0) {
 		loge("failed to open input file %s", filename);
@@ -520,7 +559,6 @@ int dec_decode(struct dec_ctx *data, char* filename)
 	buf_size = lseek(file_fd, 0, SEEK_END);
 	lseek(file_fd, 0, SEEK_SET);
 
-	//* 2. create and init mpp_decoder
 	data->decoder = mpp_decoder_create(dec_type);
 	if (!data->decoder) {
 		loge("mpp_dec_create failed");
@@ -528,15 +566,15 @@ int dec_decode(struct dec_ctx *data, char* filename)
 		goto out;
 	}
 
-	struct decode_config config;
-	if(dec_type == MPP_CODEC_VIDEO_DECODER_PNG || dec_type == MPP_CODEC_VIDEO_DECODER_MJPEG)
+	struct decode_config config = {0};
+	if (dec_type == MPP_CODEC_VIDEO_DECODER_PNG || dec_type == MPP_CODEC_VIDEO_DECODER_MJPEG)
 		config.bitstream_buffer_size = (buf_size + 1023) & (~1023);
 	else
-		config.bitstream_buffer_size = 1024*1024;
+		config.bitstream_buffer_size = 1024 * 1024;
 	config.extra_frame_num = 1;
 	config.packet_count = 10;
 	config.pix_fmt = data->output_format;
-	if(dec_type == MPP_CODEC_VIDEO_DECODER_PNG)
+	if (dec_type == MPP_CODEC_VIDEO_DECODER_PNG)
 		config.pix_fmt = MPP_FMT_ARGB_8888;
 	ret = mpp_decoder_init(data->decoder, &config);
 	if (ret) {
@@ -544,95 +582,53 @@ int dec_decode(struct dec_ctx *data, char* filename)
 		goto out;
 	}
 
-	//* 3. create decode thread
-	pthread_create(&decode_thread_id, NULL, decode_thread, data);
+	if (data->drop_b_frame && dec_type == MPP_CODEC_VIDEO_DECODER_H264) {
+		int enable = 1;
+		mpp_decoder_control(data->decoder, MPP_DEC_SET_DROP_B_FRAME, &enable);
+		logi("enable B-frame drop");
+	}
 
-	//* 4. create render thread
+	pthread_create(&decode_thread_id, NULL, decode_thread, data);
 	pthread_create(&render_thread_id, NULL, render_thread, data);
 
-	//* 5. send data
-	if (dec_type == MPP_CODEC_VIDEO_DECODER_H264) {
-		data->parser = bs_create(file_fd);
-		struct mpp_packet packet;
-		memset(&packet, 0, sizeof(struct mpp_packet));
+	if (dec_type == MPP_CODEC_VIDEO_DECODER_H264)
+		ret = send_h264_data(data, file_fd);
+	else
+		ret = send_raw_data(data, file_fd, buf_size);
 
-		while((packet.flag & PACKET_FLAG_EOS) == 0) {
-			memset(&packet, 0, sizeof(struct mpp_packet));
-			bs_prefetch(data->parser, &packet);
-			logi("bs_prefetch, size: %d", packet.size);
-
-			// get an empty packet
-			do {
-				if(data->dec_err) {
-					loge("decode error, break now");
-					return -1;
-				}
-
-				ret = mpp_decoder_get_packet(data->decoder, &packet, packet.size);
-				//logd("mpp_dec_get_packet ret: %x", ret);
-				if (ret == 0) {
-					break;
-				}
-				usleep(1000);
-			} while (1);
-
-
-			bs_read(data->parser, &packet);
-			unsigned char* buf = (unsigned char*)packet.data;
-			logd("packet: %p, size: %d, %x %x %x %x", packet.data, packet.size, buf[0], buf[1],
-			        buf[2], buf[3]);
-
-			ret = mpp_decoder_put_packet(data->decoder, &packet);
-		}
-
-		bs_close(data->parser);
-	} else {
-		buf = (unsigned char *)malloc(buf_size);
-		if (!buf) {
-			loge("malloc buf failed");
-			ret = -1;
-			goto out;
-		}
-
-		if(read(file_fd, buf, buf_size) <= 0) {
-			loge("read data error");
-			data->stream_eos = 1;
-			ret = -1;
-			goto out;
-		}
-
+	if (ret < 0) {
+		data->render_eos = 1;
 		data->stream_eos = 1;
-		ret = send_data(data, buf, buf_size);
 	}
 
 	pthread_join(decode_thread_id, NULL);
 	pthread_join(render_thread_id, NULL);
-	if(data->cmp_data_err)
+
+	if (data->cmp_data_err)
 		ret = -1;
 
 out:
-	if(data->fp_yuv == NULL) {
-		fprintf(data->fp_result, "%s: not compare data\n", filename);
-	} else if(ret < 0) {
-		fprintf(data->fp_result, "%s: fail\n", filename);
-	} else {
-		fprintf(data->fp_result, "%s: pass\n", filename);
+	if (data->fp_result) {
+		if (data->fp_yuv == NULL)
+			fprintf(data->fp_result, "%s: not compare data\n", filename);
+		else if (ret < 0)
+			fprintf(data->fp_result, "%s: fail\n", filename);
+		else
+			fprintf(data->fp_result, "%s: pass\n", filename);
+		fflush(data->fp_result);
 	}
-	fflush(data->fp_result);
 
 	if (data->decoder) {
 		mpp_decoder_destory(data->decoder);
 		data->decoder = NULL;
 	}
 
-	if(data->fp_yuv) {
+	if (data->fp_yuv) {
 		fclose(data->fp_yuv);
 		data->fp_yuv = NULL;
 	}
 
-	if (buf)
-		free(buf);
-	if(file_fd)
+	if (file_fd >= 0)
 		close(file_fd);
 
 	return ret;
@@ -649,19 +645,18 @@ static int read_dir(char* path, struct dec_ctx* dec_data)
 	}
 
 	while((dir_file = readdir(dir))) {
-		if(strcmp(dir_file->d_name, ".") == 0 || strcmp(dir_file->d_name, "..") == 0)
+		if(strncmp(dir_file->d_name, ".", 1) == 0 || strncmp(dir_file->d_name, "..", 2) == 0)
 			continue;
 
 		ptr = strrchr(dir_file->d_name, '.');
 		if(ptr == NULL)
 			continue;
 
-		if (strcmp(ptr, ".h264") && strcmp(ptr, ".264") && strcmp(ptr, ".png") && strcmp(ptr, ".jpg"))
+		if (strncmp(ptr, ".h264", 5) && strncmp(ptr, ".264", 4) && strncmp(ptr, ".png", 4) && strncmp(ptr, ".jpg", 4))
 			continue;
 
 		logi("name: %s", dir_file->d_name);
-		strcpy(dec_data->file_input[dec_data->file_num], path);
-		strcat(dec_data->file_input[dec_data->file_num], dir_file->d_name);
+		snprintf(dec_data->file_input[dec_data->file_num], 1024, "%s%s", path, dir_file->d_name);
 		logi("i: %d, filename: %s", dec_data->file_num, dec_data->file_input[dec_data->file_num]);
 		dec_data->file_num ++;
 
@@ -679,36 +674,41 @@ int main(int argc, char **argv)
 	int opt;
 	int loop_time = 1;
 
-	struct dec_ctx dec_data;
+	static struct dec_ctx dec_data;
 	memset(&dec_data, 0, sizeof(struct dec_ctx));
 	dec_data.output_format = MPP_FMT_YUV420P;
 
 	while (1) {
-		opt = getopt(argc, argv, "i:t:f:l:dhsc");
+		opt = getopt(argc, argv, "i:t:f:l:m:bdhsc");
 		if (opt == -1) {
 			break;
 		}
 		switch (opt) {
 		case 'i':
-			strcpy(dec_data.file_input[0], optarg);
+			strncpy(dec_data.file_input[0], optarg, 1023);
+			dec_data.file_input[0][1023] = '\0';
 			dec_data.file_num = 1;
 			logd("file path: %s", dec_data.file_input[0]);
 
 			break;
 		case 'f':
-			if (!strcmp(optarg, "nv12")) {
+			if (!strncmp(optarg, "nv12", 4)) {
 				logi("output format nv12");
 				dec_data.output_format = MPP_FMT_NV12;
-			} else if(!strcmp(optarg, "nv21")) {
+			} else if(!strncmp(optarg, "nv21", 4)) {
 				logi("output format nv21");
 				dec_data.output_format = MPP_FMT_NV21;
-			} else if(!strcmp(optarg, "yuv420")) {
+			} else if(!strncmp(optarg, "yuv420", 6)) {
 				logi("output format yuv420");
 				dec_data.output_format = MPP_FMT_YUV420P;
 			}
 			break;
 		case 'l':
 			loop_time = atoi(optarg);
+			break;
+		case 'm':
+			dec_data.input_by_frame = atoi(optarg);
+			logi("input mode: %s", dec_data.input_by_frame ? "frame" : "slice");
 			break;
 		case 't':
 			read_dir(optarg, &dec_data);
@@ -718,6 +718,10 @@ int main(int argc, char **argv)
 			break;
 		case 'c':
 			dec_data.cmp_en = 1;
+			break;
+		case 'b':
+			dec_data.drop_b_frame = 1;
+			logi("enable drop non-reference B-frames");
 			break;
 		case 's':
 			dec_data.save_data = 1;
@@ -736,7 +740,7 @@ int main(int argc, char **argv)
 	}
 
 	dec_data.fp_result = fopen("result.txt", "wb");
-	if(dec_data.fp_result) {
+	if(dec_data.fp_result == NULL) {
 		logw("file result open failed");
 	}
 

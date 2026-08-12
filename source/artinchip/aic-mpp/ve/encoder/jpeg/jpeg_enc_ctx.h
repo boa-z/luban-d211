@@ -1,10 +1,10 @@
 /*
- * Copyright (C) 2020-2023 ArtInChip Technology Co. Ltd
+ * Copyright (C) 2020-2026 ArtInChip Technology Co. Ltd
  *
  * SPDX-License-Identifier: Apache-2.0
  *
- *  author: <qi.xu@artinchip.com>
- *  Desc: jpeg enc context
+ * Author: <qi.xu@artinchip.com>
+ * Desc: jpeg enc context
  */
 
 #ifndef JPEG_ENC_CTX_H
@@ -14,6 +14,7 @@
 
 #include "put_bits.h"
 #include "jpeg_tables.h"
+#include "mpp_codec.h"
 
 #define QUANT_FIXED_POINT_BITS 19
 #define ALIGN_4K(x) (((x) + 4095) & ~(4095))
@@ -100,6 +101,7 @@ enum JpegMarker {
 };
 
 struct jpeg_ctx {
+	struct mpp_encoder encoder;
 	unsigned int luma_quant_table[64];
 	unsigned int chroma_quant_table[64];
 	uint8_t huff_size_dc_luminance[12];     ///< DC luminance Huffman table size.
@@ -130,11 +132,13 @@ struct jpeg_ctx {
 	int ve_fd;
 	unsigned long regs_base;
 	struct ve_buffer_allocator *alloc;
+	struct ve_buffer *bitstream_buf;
 
 	unsigned char* bitstream_vir_addr;
 	unsigned int bitstream_phy_addr;
 	int stream_num;
 	struct put_bit_ctx pb;
+	struct encode_config config;
 };
 
 int jpeg_hw_encode(struct jpeg_ctx *s);

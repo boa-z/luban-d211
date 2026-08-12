@@ -134,7 +134,7 @@ static int spl_nand_load_image(struct spl_image_info *spl_image,
 			CONFIG_CMD_SPL_WRITE_SIZE,
 			(void *)CONFIG_SYS_TEXT_BASE);
 		/* copy to destintion */
-		for (dst = (int *)CONFIG_SYS_SPL_ARGS_ADDR,
+		for (dst = (int *)board_get_dtb_ram_top(0),
 				src = (int *)CONFIG_SYS_TEXT_BASE;
 				src < (int *)(CONFIG_SYS_TEXT_BASE +
 				CONFIG_CMD_SPL_WRITE_SIZE);

@@ -304,10 +304,16 @@ void aicfb_draw_rect(struct udevice *dev,
 			uint x, uint y, uint width, uint height,
 			u8 red, u8 green, u8 blue);
 int aic_bmp_display(struct udevice *dev, ulong bmp_image);
+int aic_logo_decode(unsigned char *dst, unsigned int size);
 
 void draw_progress_bar(int value);
 
 int aic_disp_logo(const char *name, int boot_param);
+int aic_fat_load_logo(const char *name);
+int aic_spinand_load_logo(const char *name);
+int aic_mmc_load_logo(const char *name, int id);
+int aic_bootrom_load_logo(const char *name);
+int aic_spinor_load_logo(const char *name);
 
 #if defined(__cplusplus)
 }

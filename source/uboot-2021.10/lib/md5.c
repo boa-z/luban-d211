@@ -33,14 +33,12 @@
 #endif /* USE_HOSTCC */
 #include <u-boot/md5.h>
 
-static void
-MD5Transform(__u32 buf[4], __u32 const in[16]);
+static void MD5Transform(__u32 buf[4], __u32 const in[16]);
 
 /*
  * Note: this code is harmless on little-endian machines.
  */
-static void
-byteReverse(unsigned char *buf, unsigned longs)
+static void byteReverse(unsigned char *buf, unsigned longs)
 {
 	__u32 t;
 	do {
@@ -55,8 +53,7 @@ byteReverse(unsigned char *buf, unsigned longs)
  * Start MD5 accumulation.  Set bit count to 0 and buffer to mysterious
  * initialization constants.
  */
-static void
-MD5Init(struct MD5Context *ctx)
+void MD5Init(struct MD5Context *ctx)
 {
 	ctx->buf[0] = 0x67452301;
 	ctx->buf[1] = 0xefcdab89;
@@ -71,8 +68,7 @@ MD5Init(struct MD5Context *ctx)
  * Update context to reflect the concatenation of another buffer full
  * of bytes.
  */
-static void
-MD5Update(struct MD5Context *ctx, unsigned char const *buf, unsigned len)
+void MD5Update(struct MD5Context *ctx, unsigned char const *buf, unsigned len)
 {
 	register __u32 t;
 
@@ -120,8 +116,7 @@ MD5Update(struct MD5Context *ctx, unsigned char const *buf, unsigned len)
  * Final wrapup - pad to 64-byte boundary with the bit pattern
  * 1 0* (64-bit count of bits processed, MSB-first)
  */
-static void
-MD5Final(unsigned char digest[16], struct MD5Context *ctx)
+void MD5Final(unsigned char digest[16], struct MD5Context *ctx)
 {
 	unsigned int count;
 	unsigned char *p;
@@ -179,8 +174,7 @@ MD5Final(unsigned char digest[16], struct MD5Context *ctx)
  * reflect the addition of 16 longwords of new data.  MD5Update blocks
  * the data and converts bytes into longwords for this routine.
  */
-static void
-MD5Transform(__u32 buf[4], __u32 const in[16])
+static void MD5Transform(__u32 buf[4], __u32 const in[16])
 {
 	register __u32 a, b, c, d;
 
@@ -267,8 +261,7 @@ MD5Transform(__u32 buf[4], __u32 const in[16])
  * Calculate and store in 'output' the MD5 digest of 'len' bytes at
  * 'input'. 'output' must have enough space to hold 16 bytes.
  */
-void
-md5 (unsigned char *input, int len, unsigned char output[16])
+void md5(unsigned char *input, int len, unsigned char output[16])
 {
 	struct MD5Context context;
 
@@ -283,9 +276,8 @@ md5 (unsigned char *input, int len, unsigned char output[16])
  * 'output' must have enough space to hold 16 bytes. If 'chunk' Trigger the
  * watchdog every 'chunk_sz' bytes of input processed.
  */
-void
-md5_wd(const unsigned char *input, unsigned int len, unsigned char output[16],
-	unsigned int chunk_sz)
+void md5_wd(const unsigned char *input, unsigned int len,
+	    unsigned char output[16], unsigned int chunk_sz)
 {
 	struct MD5Context context;
 #if defined(CONFIG_HW_WATCHDOG) || defined(CONFIG_WATCHDOG)

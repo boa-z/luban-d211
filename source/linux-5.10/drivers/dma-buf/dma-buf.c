@@ -367,6 +367,46 @@ out_unlock:
 }
 
 #if IS_ENABLED(CONFIG_ARCH_ARTINCHIP) && IS_ENABLED(CONFIG_RISCV)
+static void dma_usr_va_wb(struct dma_buf_range *range)
+{
+	unsigned long height = range->size;
+	unsigned long start, end;
+	int i;
+
+	start = range->start;
+	end = start + range->width;
+
+	for (i = 0; i < height; i++) {
+		if (range->flags & DMA_BUF_SYNC_PHY_ADDR)
+		dma_wb_range(start, end);
+		else
+		dma_usr_va_wb_range((void *)start, range->width);
+
+		start += range->stride;
+		end = start + range->width;
+	}
+}
+
+static void dma_usr_va_inv(struct dma_buf_range *range)
+{
+	unsigned long height = range->size;
+	unsigned long start, end;
+	int i;
+
+	start = range->start;
+	end = start + range->width;
+
+	for (i = 0; i < height; i++) {
+		if (range->flags & DMA_BUF_SYNC_PHY_ADDR)
+		dma_wbinv_range(start, end);
+		else
+		dma_usr_va_inv_range((void *)start, range->width);
+
+		start += range->stride;
+		end = start + range->width;
+	}
+}
+
 static int dma_buf_sync_range(struct dma_buf_range *range)
 {
 	if (IS_ERR_OR_NULL((void *)range->start) ||
@@ -376,6 +416,15 @@ static int dma_buf_sync_range(struct dma_buf_range *range)
 		return -EFAULT;
 	}
 
+	if (range->flags & DMA_BUF_SYNC_RANGE_CROP) {
+		if (range->flags & DMA_BUF_SYNC_WB_RANGE)
+			dma_usr_va_wb(range);
+		else
+			dma_usr_va_inv(range);
+
+		return 0;
+	}
+
 	if (range->flags & DMA_BUF_SYNC_WB_RANGE)
 		dma_usr_va_wb_range((void *)range->start, (unsigned long)range->size);
 	else
@@ -383,6 +432,70 @@ static int dma_buf_sync_range(struct dma_buf_range *range)
 
 	return 0;
 }
+
+static int dma_buf_basic_get_phy_addr(struct dma_buf *dmabuf, unsigned int *phy_addr)
+{
+	struct device *dev;
+	dma_addr_t sg_addr;
+	struct dma_buf_attachment *attachment;
+	struct sg_table *sgt;
+	int err = 0;
+	static u64 dummy_mask;
+
+	dev = kzalloc(sizeof(*dev), GFP_KERNEL);
+	if (!dev) {
+		err = -ENOMEM;
+		pr_info("Failed to alloc device\n");
+		goto err_alloc;
+	}
+
+	dummy_mask = DMA_BIT_MASK(32);
+	dev->dma_mask = &dummy_mask;
+	dma_set_coherent_mask(dev, dummy_mask);
+	dev_set_name(dev, "dummy_dev_for_sg");
+
+	attachment = dma_buf_attach(dmabuf, dev);
+
+	if (IS_ERR(attachment)) {
+		err = PTR_ERR(attachment);
+		pr_info("Failed to attach %d\n", err);
+		goto err_buf_attach;
+	}
+
+	sgt = dma_buf_map_attachment(attachment, DMA_BIDIRECTIONAL);
+	if (IS_ERR(sgt)) {
+		err = PTR_ERR(sgt);
+		pr_info("Failed to attachement%d\n", err);
+		goto err_buf_attachment;
+	}
+
+	sg_addr = sg_dma_address(sgt->sgl);
+	*phy_addr = (unsigned int)sg_addr;
+	dma_buf_unmap_attachment(attachment, sgt, DMA_BIDIRECTIONAL);
+
+err_buf_attachment:
+	dma_buf_detach(dmabuf, attachment);
+err_buf_attach:
+	kfree(dev);
+err_alloc:
+	return err;
+}
+
+static int dma_buf_get_phy_addr(struct dma_buf *dmabuf, unsigned int *phy_addr)
+{
+	int ret;
+
+	if (WARN_ON(!dmabuf))
+		return -EINVAL;
+
+	if (dmabuf->ops->get_phy_addr)
+		ret = dmabuf->ops->get_phy_addr(dmabuf, phy_addr);
+	else
+		ret = dma_buf_basic_get_phy_addr(dmabuf, phy_addr);
+
+	return ret;
+}
+
 #endif
 
 static long dma_buf_ioctl(struct file *file,
@@ -392,6 +505,7 @@ static long dma_buf_ioctl(struct file *file,
 	struct dma_buf_sync sync;
 #if IS_ENABLED(CONFIG_ARCH_ARTINCHIP) && IS_ENABLED(CONFIG_RISCV)
 	struct dma_buf_range range;
+	unsigned int phy_addr;
 #endif
 	enum dma_data_direction direction;
 	int ret;
@@ -435,6 +549,16 @@ static long dma_buf_ioctl(struct file *file,
 		if (copy_from_user(&range, (void __user *) arg, sizeof(range)))
 			return -EFAULT;
 		ret = dma_buf_sync_range(&range);
+		return ret;
+
+	case DMA_BUF_IOCTL_GET_PHY_ADDR:
+		ret = dma_buf_get_phy_addr(dmabuf, &phy_addr);
+		if (ret)
+			ret = -EFAULT;
+
+		if (copy_to_user((void __user *)arg, &phy_addr, sizeof(unsigned int)))
+			ret = -EFAULT;
+
 		return ret;
 #endif
 

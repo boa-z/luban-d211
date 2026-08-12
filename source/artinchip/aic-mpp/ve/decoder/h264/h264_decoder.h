@@ -1,10 +1,10 @@
 /*
- * Copyright (C) 2020-2024 Artinchip Technology Co. Ltd
+ * Copyright (C) 2020-2026 ArtInChip Technology Co. Ltd
  *
  * SPDX-License-Identifier: Apache-2.0
  *
  *   author: <qi.xu@artinchip.com>
- *  Desc: h264 decoder contxet
+ *  Desc: h264 decoder context
  *
  */
 #ifndef _H264_DECODER_H_
@@ -16,6 +16,9 @@
 #include "read_bits.h"
 
 // #define SAVE_REG
+
+// search start code by software
+#define SW_SEARCH_START_CODE_EN
 
 // slice_type
 #define H264_SLICE_P  0 // Predicted
@@ -217,6 +220,7 @@ struct h264_picture {
 	u32 top_field_col_addr;		// phy addr for top field col buf, it is a part of col_buf in struct h264_frame_info
 	u32 bot_field_col_addr;		// phy addr for bot field col buf
 	struct frame* frame;		// frame ptr get from frame manager
+	int rotmir_idx;
 };
 
 /*
@@ -319,10 +323,26 @@ struct h264_dec_ctx
 	int bit_offset;			// bit offset of slice data this NALU
 
 	int slice_offset;		// slice offset in packet, in byte unit
+	int slice_end_offset;		// end offset of current slice in packet, byte unit
+	int cur_slice_bit_len;
+	int multi_slice;
+	int detect;
 
 	FILE* fp_reg;
 
 	int error;
+
+	int max_width;
+	int max_height;
+	int no_b_frame;
+	int drop_b_frame_en;		// user setting: drop non-reference B-frames
+	int dropping_b_frame;		// internal: currently dropping a multi-slice B-frame
+	int ve_version;
+
+	int rotmir_h_offset;
+	int rotmir_v_offset;
+	int rotmir_width;
+	int rotmir_height;
 };
 
 

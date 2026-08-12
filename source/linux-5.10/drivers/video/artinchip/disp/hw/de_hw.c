@@ -432,6 +432,14 @@ void de_set_ui_layer_size(void __iomem *base_addr, u32 w, u32 h,
 		  UI_LAYER_OFFSET_SET(x_offset, y_offset));
 }
 
+void de_ui_bg_blending_enable(void __iomem *base_addr, u32 enable)
+{
+	if (enable)
+		reg_set_bit(base_addr + UI_LAYER_CTRL, UI_LAYER_CTRL_BG_BLEND_EN);
+	else
+		reg_clr_bit(base_addr + UI_LAYER_CTRL, UI_LAYER_CTRL_BG_BLEND_EN);
+}
+
 void de_ui_alpha_blending_enable(void __iomem *base_addr, u32 g_alpha,
 				 u32 alpha_mode, u32 enable)
 {

@@ -331,7 +331,7 @@ static void artinchip_mmc_wait_while_busy(struct artinchip_mmc *host, u32 cmd_fl
 	    !(cmd_flags & SDMC_CMD_VOLT_SWITCH)) {
 		if (readl_poll_timeout_atomic(host->regs + SDMC_CTRST, status,
 					      !(status & SDMC_CTRST_BUSY),
-					      10, 500 * USEC_PER_MSEC))
+					      10, 10 * USEC_PER_MSEC))
 			dev_err(host->dev, "Busy; trying anyway\n");
 	}
 }
@@ -2951,220 +2951,6 @@ static void artinchip_mmc_enable_cd(struct artinchip_mmc *host)
 	}
 }
 
-static int artinchip_mmc_clk_enable(struct artinchip_mmc *host)
-{
-	int ret = 0;
-	struct device *dev = host->dev;
-
-	host->hif_clk = devm_clk_get(dev, NULL);
-	if (IS_ERR(host->hif_clk)) {
-		dev_err(dev, "SDMC host clock is not available\n");
-		host->sclk_rate = host->pdata->sclk_rate / 2;
-		goto err;
-	}
-
-	ret = clk_prepare_enable(host->hif_clk);
-	if (ret) {
-		dev_err(dev, "Failed to enable SDMC Host clock\n");
-		goto err;
-	}
-
-	if (host->pdata->sclk_rate) {
-		ret = clk_set_rate(host->hif_clk, host->pdata->sclk_rate);
-		if (ret)
-			dev_warn(dev, "Unable to set SDMC clk rate to %uHz\n",
-				 host->pdata->sclk_rate);
-	}
-	host->sclk_rate = clk_get_rate(host->hif_clk) / 2;
-	if (!host->sclk_rate) {
-		dev_err(dev, "Platform must supply SDMC clk\n");
-		goto err;
-	}
-
-	host->reset = devm_reset_control_get_optional_exclusive(dev, NULL);
-	if (IS_ERR(host->reset)) {
-		dev_err(dev, "Failed to find reset of SDMC Host\n");
-		goto err;
-	}
-	reset_control_assert(host->reset);
-	usleep_range(10, 50);
-	reset_control_deassert(host->reset);
-
-	ret = mci_readl(host, SDMC_DLYCTRL);
-	ret &= ~SDMC_DLYCTRL_CLK_DRV_PHA_MASK;
-	ret &= ~SDMC_DLYCTRL_CLK_SMP_PHA_MASK;
-	ret &= ~SDMC_DLYCTRL_CLK_DRV_DLY_MASK;
-	ret &= ~SDMC_DLYCTRL_CLK_SMP_DLY_MASK;
-	mci_writel(host, SDMC_DLYCTRL, ret |
-		   host->driver_phase << SDMC_DLYCTRL_CLK_DRV_PHA_SHIFT |
-		   host->driver_delay << SDMC_DLYCTRL_CLK_DRV_DLY_SHIFT |
-		   host->sample_phase << SDMC_DLYCTRL_CLK_SMP_PHA_SHIFT |
-		   host->sample_delay << SDMC_DLYCTRL_CLK_SMP_DLY_SHIFT);
-	return 0;
-err:
-	return -ENODEV;
-}
-
-int artinchip_mmc_probe(struct artinchip_mmc *host)
-{
-	int width, i, ret = 0;
-	u32 fifo_size;
-
-	if (!host->pdata) {
-		host->pdata = artinchip_mmc_parse_dt(host);
-		if (IS_ERR(host->pdata))
-			return dev_err_probe(host->dev, PTR_ERR(host->pdata),
-					     "platform data not available\n");
-	}
-
-	ret = artinchip_mmc_clk_enable(host);
-	if (ret)
-		goto err_clk;
-
-	timer_setup(&host->cmd11_timer, artinchip_mmc_cmd11_timer, 0);
-	timer_setup(&host->cto_timer, artinchip_mmc_cto_timer, 0);
-	timer_setup(&host->dto_timer, artinchip_mmc_dto_timer, 0);
-
-	spin_lock_init(&host->lock);
-	spin_lock_init(&host->irq_lock);
-	INIT_LIST_HEAD(&host->queue);
-
-	/*
-	 * Get the host data width -
-	 * assumes that SDMC_HINFO has been set with the correct values.
-	 */
-	i = SDMC_HINFO_HDATA_WIDTH(mci_readl(host, SDMC_HINFO));
-	if (!i) {
-		host->data_width = DATA_WIDTH_16BIT;
-		width = 16;
-		host->data_shift = 1;
-	} else if (i == 2) {
-		host->data_width = DATA_WIDTH_64BIT;
-		width = 64;
-		host->data_shift = 3;
-	} else {
-		/* Check for a reserved value, and warn if it is */
-		WARN((i != 1),
-		     "SDMC_HINFO reports a reserved host data width!\n"
-		     "Defaulting to 32-bit access.\n");
-		host->data_width = DATA_WIDTH_32BIT;
-		width = 32;
-		host->data_shift = 2;
-	}
-
-	/* Reset all blocks */
-	if (!artinchip_mmc_ctrl_reset(host, SDMC_HCTRL1_RESET_ALL)) {
-		ret = -ENODEV;
-		goto err_clk;
-	}
-
-	host->dma_ops = host->pdata->dma_ops;
-	artinchip_mmc_init_dma(host);
-
-	/* Clear the interrupts for the host controller */
-	mci_writel(host, SDMC_OINTST, 0xFFFFFFFF);
-	mci_writel(host, SDMC_INTEN, 0); /* disable all mmc interrupt first */
-
-	/* Put in max timeout */
-	mci_writel(host, SDMC_TTMC, 0xFFFFFFFF);
-
-	/*
-	 * FIFO threshold settings  RxMark  = fifo_size / 2 - 1,
-	 *                          Tx Mark = fifo_size / 2 DMA Size = 8
-	 */
-	if (!host->pdata->fifo_depth) {
-		/*
-		 * Power-on value of RX_WMark is FIFO_DEPTH-1, but this may
-		 * have been overwritten by the bootloader, just like we're
-		 * about to do, so if you know the value for your hardware, you
-		 * should put it in the platform data.
-		 */
-		fifo_size = mci_readl(host, SDMC_FIFOCFG);
-		fifo_size = 1 + ((fifo_size >> 16) & 0xfff);
-	} else {
-		fifo_size = host->pdata->fifo_depth;
-	}
-	host->fifo_depth = fifo_size;
-	host->fifoth_val =
-		SDMC_FIFOCFG_SET_THD(0x2, fifo_size / 2 - 1, fifo_size / 2);
-	mci_writel(host, SDMC_FIFOCFG, host->fifoth_val);
-
-	/* disable clock */
-	sdmc_reg_clrbit(host, SDMC_CLKCTRL, SDMC_CLKCTRL_EN);
-
-	host->verid = SDMC_VERID_GET(mci_readl(host, SDMC_VERID));
-	dev_info(host->dev, "Version ID is %04x\n", host->verid);
-
-	host->fifo_reg = host->regs + SDMC_FIFO_DATA;
-
-	tasklet_init(&host->tasklet, artinchip_mmc_tasklet_func, (unsigned long)host);
-	ret = devm_request_irq(host->dev, host->irq, artinchip_mmc_interrupt,
-			       host->irq_flags, "aic-mmc", host);
-	if (ret)
-		goto err_dmaunmap;
-
-	/*
-	 * Enable interrupts for command done, data over, data empty,
-	 * receive ready and error such as transmit, receive timeout, crc error
-	 */
-	mci_writel(host, SDMC_INTEN, SDMC_INT_CMD_DONE | SDMC_INT_DAT_DONE |
-		   SDMC_INT_TXDR | SDMC_INT_RXDR | SDMC_ERROR_FLAGS);
-	/* Enable mci interrupt */
-	sdmc_reg_setbit(host, SDMC_HCTRL1, SDMC_HCTRL1_INT_EN);
-
-	dev_info(host->dev,
-		 "SDMC at irq %d,%d bit host data width,%u deep fifo\n",
-		 host->irq, width, fifo_size);
-
-	/* We need at least one slot to succeed */
-	ret = artinchip_mmc_init_slot(host);
-	if (ret) {
-		dev_dbg(host->dev, "slot %d init failed\n", i);
-		goto err_dmaunmap;
-	}
-
-	/* Now that slots are all setup, we can enable card detect */
-	artinchip_mmc_enable_cd(host);
-
-	host->attrs.attrs = aic_mmc_attr;
-	return sysfs_create_group(&host->dev->kobj, &host->attrs);
-
-err_dmaunmap:
-	if (host->use_dma && host->dma_ops->exit)
-		host->dma_ops->exit(host);
-
-	if (!IS_ERR(host->reset))
-		reset_control_assert(host->reset);
-
-err_clk:
-	clk_disable_unprepare(host->hif_clk);
-
-	return ret;
-}
-
-void artinchip_mmc_remove(struct artinchip_mmc *host)
-{
-	dev_dbg(host->dev, "remove slot\n");
-	if (host->slot)
-		artinchip_mmc_cleanup_slot(host->slot);
-
-	mci_writel(host, SDMC_OINTST, 0xFFFFFFFF);
-	mci_writel(host, SDMC_INTEN, 0); /* disable all mmc interrupt first */
-
-	/* disable clock*/
-	sdmc_reg_clrbit(host, SDMC_CLKCTRL, SDMC_CLKCTRL_EN);
-
-
-	if (host->use_dma && host->dma_ops->exit)
-		host->dma_ops->exit(host);
-
-	if (!IS_ERR(host->reset))
-		reset_control_assert(host->reset);
-
-	clk_disable_unprepare(host->hif_clk);
-}
-EXPORT_SYMBOL(artinchip_mmc_remove);
-
 #ifdef CONFIG_PM
 int artinchip_mmc_runtime_suspend(struct device *dev)
 {
@@ -3361,49 +3147,265 @@ static const struct of_device_id artinchip_mmc_aic_match[] = {
 };
 MODULE_DEVICE_TABLE(of, artinchip_mmc_aic_match);
 
-static int artinchip_mmc_aic_probe(struct platform_device *pdev)
+static int artinchip_mmc_clk_enable(struct artinchip_mmc *host)
 {
-	const struct artinchip_mmc_drv_data *drv_data;
-	const struct of_device_id *match;
-	struct artinchip_mmc *host;
+	int ret = 0;
+	struct device *dev = host->dev;
+
+	host->hif_clk = devm_clk_get(dev, NULL);
+	if (IS_ERR(host->hif_clk)) {
+		dev_err(dev, "SDMC host clock is not available\n");
+		host->sclk_rate = host->pdata->sclk_rate / 2;
+		goto err;
+	}
+
+	ret = clk_prepare_enable(host->hif_clk);
+	if (ret) {
+		dev_err(dev, "Failed to enable SDMC Host clock\n");
+		goto err;
+	}
+
+	if (host->pdata->sclk_rate) {
+		ret = clk_set_rate(host->hif_clk, host->pdata->sclk_rate);
+		if (ret)
+			dev_warn(dev, "Unable to set SDMC clk rate to %uHz\n",
+				 host->pdata->sclk_rate);
+	}
+	host->sclk_rate = clk_get_rate(host->hif_clk) / 2;
+	if (!host->sclk_rate) {
+		dev_err(dev, "Platform must supply SDMC clk\n");
+		goto err_clk;
+	}
+
+	host->reset = devm_reset_control_get_optional_exclusive(dev, NULL);
+	if (IS_ERR(host->reset)) {
+		dev_err(dev, "Failed to find reset of SDMC Host\n");
+		goto err_clk;
+	}
+	reset_control_assert(host->reset);
+	usleep_range(10, 50);
+	reset_control_deassert(host->reset);
+
+	ret = mci_readl(host, SDMC_DLYCTRL);
+	ret &= ~SDMC_DLYCTRL_CLK_DRV_PHA_MASK;
+	ret &= ~SDMC_DLYCTRL_CLK_SMP_PHA_MASK;
+	ret &= ~SDMC_DLYCTRL_CLK_DRV_DLY_MASK;
+	ret &= ~SDMC_DLYCTRL_CLK_SMP_DLY_MASK;
+	mci_writel(host, SDMC_DLYCTRL, ret |
+		   host->driver_phase << SDMC_DLYCTRL_CLK_DRV_PHA_SHIFT |
+		   host->driver_delay << SDMC_DLYCTRL_CLK_DRV_DLY_SHIFT |
+		   host->sample_phase << SDMC_DLYCTRL_CLK_SMP_PHA_SHIFT |
+		   host->sample_delay << SDMC_DLYCTRL_CLK_SMP_DLY_SHIFT);
+	return 0;
+err_clk:
+	clk_disable_unprepare(host->hif_clk);
+err:
+	return -ENODEV;
+}
+
+static int artinchip_mmc_resource_request(struct artinchip_mmc *host, struct platform_device *pdev)
+{
+	int ret = 0;
 	struct resource	*regs;
 
-	if (!pdev->dev.of_node)
-		return -ENODEV;
-
-	match = of_match_node(artinchip_mmc_aic_match, pdev->dev.of_node);
-	drv_data = match->data;
-	host = devm_kzalloc(&pdev->dev, sizeof(struct artinchip_mmc), GFP_KERNEL);
-	if (!host)
-		return -ENOMEM;
+	if (!host->pdata) {
+		host->pdata = artinchip_mmc_parse_dt(host);
+		if (IS_ERR(host->pdata))
+			return dev_err_probe(host->dev, PTR_ERR(host->pdata),
+					     "platform data not available\n");
+	}
 
 	host->irq = platform_get_irq(pdev, 0);
 	if (host->irq < 0)
 		return host->irq;
 
-	host->drv_data = drv_data;
-	host->dev = &pdev->dev;
-	host->irq_flags = 0;
-	host->pdata = pdev->dev.platform_data;
-
-	regs = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	host->regs = devm_ioremap_resource(&pdev->dev, regs);
+	host->regs = devm_platform_get_and_ioremap_resource(pdev, 0, &regs);
 	if (IS_ERR(host->regs))
 		return PTR_ERR(host->regs);
 
 	/* Get registers' physical base address */
 	host->phy_regs = regs->start;
 
-	platform_set_drvdata(pdev, host);
-	return artinchip_mmc_probe(host);
+	ret = artinchip_mmc_clk_enable(host);
+	if (ret)
+		dev_err(host->dev, "SDMC clock enable failed!\n");
 
+	return ret;
 }
 
-static int artinchip_mmc_aic_remove(struct platform_device *pdev)
+static int artinchip_mmc_probe(struct platform_device *pdev)
+{
+	const struct artinchip_mmc_drv_data *drv_data;
+	const struct of_device_id *match;
+	struct artinchip_mmc *host;
+	int width, i, ret = 0;
+	u32 fifo_size;
+
+	if (!pdev->dev.of_node)
+		return -ENODEV;
+
+	host = devm_kzalloc(&pdev->dev, sizeof(struct artinchip_mmc), GFP_KERNEL);
+	if (!host)
+		return -ENOMEM;
+
+	platform_set_drvdata(pdev, host);
+
+	match = of_match_node(artinchip_mmc_aic_match, pdev->dev.of_node);
+	drv_data = match->data;
+	host->drv_data = drv_data;
+
+	host->dev = &pdev->dev;
+	host->irq_flags = 0;
+	host->pdata = pdev->dev.platform_data;
+
+	ret = artinchip_mmc_resource_request(host, pdev);
+	if (ret)
+		return ret;
+
+	timer_setup(&host->cmd11_timer, artinchip_mmc_cmd11_timer, 0);
+	timer_setup(&host->cto_timer, artinchip_mmc_cto_timer, 0);
+	timer_setup(&host->dto_timer, artinchip_mmc_dto_timer, 0);
+
+	spin_lock_init(&host->lock);
+	spin_lock_init(&host->irq_lock);
+	INIT_LIST_HEAD(&host->queue);
+
+	/*
+	 * Get the host data width -
+	 * assumes that SDMC_HINFO has been set with the correct values.
+	 */
+	i = SDMC_HINFO_HDATA_WIDTH(mci_readl(host, SDMC_HINFO));
+	if (!i) {
+		host->data_width = DATA_WIDTH_16BIT;
+		width = 16;
+		host->data_shift = 1;
+	} else if (i == 2) {
+		host->data_width = DATA_WIDTH_64BIT;
+		width = 64;
+		host->data_shift = 3;
+	} else {
+		/* Check for a reserved value, and warn if it is */
+		WARN((i != 1),
+		     "SDMC_HINFO reports a reserved host data width!\n"
+		     "Defaulting to 32-bit access.\n");
+		host->data_width = DATA_WIDTH_32BIT;
+		width = 32;
+		host->data_shift = 2;
+	}
+
+	/* Reset all blocks */
+	if (!artinchip_mmc_ctrl_reset(host, SDMC_HCTRL1_RESET_ALL)) {
+		ret = -ENODEV;
+		goto err_clk;
+	}
+
+	host->dma_ops = host->pdata->dma_ops;
+	artinchip_mmc_init_dma(host);
+
+	/* Clear the interrupts for the host controller */
+	mci_writel(host, SDMC_OINTST, 0xFFFFFFFF);
+	mci_writel(host, SDMC_INTEN, 0); /* disable all mmc interrupt first */
+
+	/* Put in max timeout */
+	mci_writel(host, SDMC_TTMC, 0xFFFFFFFF);
+
+	/*
+	 * FIFO threshold settings	RxMark	= fifo_size / 2 - 1,
+	 *							Tx Mark = fifo_size / 2 DMA Size = 8
+	 */
+	if (!host->pdata->fifo_depth) {
+		/*
+		 * Power-on value of RX_WMark is FIFO_DEPTH-1, but this may
+		 * have been overwritten by the bootloader, just like we're
+		 * about to do, so if you know the value for your hardware, you
+		 * should put it in the platform data.
+		 */
+		fifo_size = mci_readl(host, SDMC_FIFOCFG);
+		fifo_size = 1 + ((fifo_size >> 16) & 0xfff);
+	} else {
+		fifo_size = host->pdata->fifo_depth;
+	}
+	host->fifo_depth = fifo_size;
+	host->fifoth_val =
+		SDMC_FIFOCFG_SET_THD(0x2, fifo_size / 2 - 1, fifo_size / 2);
+	mci_writel(host, SDMC_FIFOCFG, host->fifoth_val);
+
+	/* disable clock */
+	sdmc_reg_clrbit(host, SDMC_CLKCTRL, SDMC_CLKCTRL_EN);
+
+	host->verid = SDMC_VERID_GET(mci_readl(host, SDMC_VERID));
+	dev_info(host->dev, "Version ID is %04x\n", host->verid);
+
+	host->fifo_reg = host->regs + SDMC_FIFO_DATA;
+
+	tasklet_init(&host->tasklet, artinchip_mmc_tasklet_func, (unsigned long)host);
+	ret = devm_request_irq(host->dev, host->irq, artinchip_mmc_interrupt,
+				   host->irq_flags, "aic-mmc", host);
+	if (ret)
+		goto err_dmaunmap;
+
+	/*
+	 * Enable interrupts for command done, data over, data empty,
+	 * receive ready and error such as transmit, receive timeout, crc error
+	 */
+	mci_writel(host, SDMC_INTEN, SDMC_INT_CMD_DONE | SDMC_INT_DAT_DONE |
+		   SDMC_INT_TXDR | SDMC_INT_RXDR | SDMC_ERROR_FLAGS);
+	/* Enable mci interrupt */
+	sdmc_reg_setbit(host, SDMC_HCTRL1, SDMC_HCTRL1_INT_EN);
+
+	dev_info(host->dev,
+		 "SDMC at irq %d,%d bit host data width,%u deep fifo\n",
+		 host->irq, width, fifo_size);
+
+	/* We need at least one slot to succeed */
+	ret = artinchip_mmc_init_slot(host);
+	if (ret) {
+		dev_dbg(host->dev, "slot %d init failed\n", i);
+		goto err_dmaunmap;
+	}
+
+	/* Now that slots are all setup, we can enable card detect */
+	artinchip_mmc_enable_cd(host);
+
+	host->attrs.attrs = aic_mmc_attr;
+	return sysfs_create_group(&host->dev->kobj, &host->attrs);
+
+err_dmaunmap:
+	if (host->use_dma && host->dma_ops->exit)
+		host->dma_ops->exit(host);
+
+	if (!IS_ERR(host->reset))
+		reset_control_assert(host->reset);
+
+err_clk:
+	clk_disable_unprepare(host->hif_clk);
+
+	return ret;
+}
+
+static int artinchip_mmc_remove(struct platform_device *pdev)
 {
 	struct artinchip_mmc *host = platform_get_drvdata(pdev);
 
-	artinchip_mmc_remove(host);
+	dev_dbg(host->dev, "remove slot\n");
+	if (host->slot)
+		artinchip_mmc_cleanup_slot(host->slot);
+
+	mci_writel(host, SDMC_OINTST, 0xFFFFFFFF);
+	mci_writel(host, SDMC_INTEN, 0); /* disable all mmc interrupt first */
+
+	/* disable clock*/
+	sdmc_reg_clrbit(host, SDMC_CLKCTRL, SDMC_CLKCTRL_EN);
+
+
+	if (host->use_dma && host->dma_ops->exit)
+		host->dma_ops->exit(host);
+
+	if (!IS_ERR(host->reset))
+		reset_control_assert(host->reset);
+
+	clk_disable_unprepare(host->hif_clk);
+
 	return 0;
 }
 
@@ -3416,8 +3418,8 @@ static const struct dev_pm_ops artinchip_mmc_aic_dev_pm_ops = {
 };
 
 static struct platform_driver artinchip_mmc_aic_pltfm_driver = {
-	.probe		= artinchip_mmc_aic_probe,
-	.remove		= artinchip_mmc_aic_remove,
+	.probe		= artinchip_mmc_probe,
+	.remove		= artinchip_mmc_remove,
 	.driver		= {
 		.name		= "aic_sdmc",
 		.of_match_table	= artinchip_mmc_aic_match,

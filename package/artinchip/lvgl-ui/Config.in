@@ -6,7 +6,7 @@ if BR2_PACKAGE_LVGL_UI
 
 choice
 	prompt "Select LVGL Version"
-	default BR2_LVGL_V_8
+	default BR2_LVGL_V_9
 
 	config BR2_LVGL_V_8
 		bool "LVGL V8"
@@ -35,6 +35,8 @@ config BR2_TEST_LVGL_USE_RTP
 config BR2_LVGL_FB_DMA_NONCOHERENT
 	bool "use dma noncoherent framebuffer"
 	default y
+	depends on BR2_LVGL_V_8
+	depends on BR2_LVGL_FBDEV
 	help
 		framebuffer cacheable
 

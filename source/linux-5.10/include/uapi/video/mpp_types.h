@@ -145,10 +145,8 @@ enum mpp_buf_type {
  */
 struct mpp_buf {
 	enum mpp_buf_type       buf_type;
-	union {
-		int             fd[3];
-		unsigned int    phy_addr[3];
-	};
+	int                     fd[3];
+	unsigned int            phy_addr[3];
 	unsigned int            stride[3];
 	struct mpp_size         size;
 	unsigned int            crop_en;

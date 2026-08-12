@@ -1,0 +1,103 @@
+pcm.track0 {
+    type softvol
+    slave {
+    	pcm "dmix:CARD=aicSoundCard,DEV=0"
+    }
+    control {
+    	name "track0 Volume"
+    	card 0
+    }
+    min_dB -20.0
+    max_dB 20.0
+}
+
+pcm.track1 {
+    type softvol
+    slave {
+    	pcm "dmix:CARD=aicSoundCard,DEV=0"
+    }
+    control {
+    	name "track1 Volume"
+    	card 0
+    }
+    min_dB -20.0
+    max_dB 20.0
+}
+
+pcm.track2 {
+    type softvol
+    slave {
+    	pcm "dmix:CARD=aicSoundCard,DEV=0"
+    }
+    control {
+    	name "track2 Volume"
+    	card 0
+    }
+    min_dB -20.0
+    max_dB 20.0
+}
+
+pcm.track3 {
+    type softvol
+    slave {
+    	pcm "dmix:CARD=aicSoundCard,DEV=0"
+    }
+    control {
+    	name "track3 Volume"
+    	card 0
+    }
+    min_dB -20.0
+    max_dB 20.0
+}
+
+pcm.track4 {
+    type softvol
+    slave {
+    	pcm "dmix:CARD=aicSoundCard,DEV=0"
+    }
+    control {
+    	name "track4 Volume"
+    	card 0
+    }
+    min_dB -20.0
+    max_dB 20.0
+}
+
+pcm.track5 {
+    type softvol
+    slave {
+    	pcm "dmix:CARD=aicSoundCard,DEV=0"
+    }
+    control {
+    	name "track5 Volume"
+    	card 0
+    }
+    min_dB -20.0
+    max_dB 20.0
+}
+
+pcm.track6 {
+    type softvol
+    slave {
+    	pcm "dmix:CARD=aicSoundCard,DEV=0"
+    }
+    control {
+    	name "track6 Volume"
+    	card 0
+    }
+    min_dB -20.0
+    max_dB 20.0
+}
+
+pcm.track7 {
+    type softvol
+    slave {
+    	pcm "dmix:CARD=aicSoundCard,DEV=0"
+    }
+    control {
+    	name "track7 Volume"
+    	card 0
+    }
+    min_dB -20.0
+    max_dB 20.0
+}

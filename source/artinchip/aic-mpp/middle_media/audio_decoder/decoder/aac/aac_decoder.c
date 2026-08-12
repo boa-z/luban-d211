@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2025 ArtInChip Technology Co. Ltd
+ * Copyright (C) 2020-2026 ArtInChip Technology Co. Ltd
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -23,6 +23,8 @@
 #define LATM_AAC (1)
 #define AAC      (2)
 
+// #define ENABLE_AAC_PCM_DUMP 1
+
 struct aac_audio_decoder
 {
     struct aic_audio_decoder decoder;
@@ -36,13 +38,30 @@ struct aac_audio_decoder
     int frame_id;
     int frame_count;
     int aac_type;
+#ifdef ENABLE_AAC_PCM_DUMP
+    FILE *fp_aac_pcm;
+#endif
 };
+
+#ifdef ENABLE_AAC_PCM_DUMP
+void init_pcm_file(struct aac_audio_decoder *aac_decoder) {
+    char file_path[64] = "/mnt/sdcard/testAAC.pcm";
+    aac_decoder->fp_aac_pcm = fopen(file_path, "wb");
+    if (!aac_decoder->fp_aac_pcm) {
+        loge("fopen file failed!");
+    }
+}
+#endif
 
 int __aac_decode_init(struct aic_audio_decoder *decoder, struct aic_audio_decode_config *config)
 {
     struct aac_audio_decoder *aac_decoder = (struct aac_audio_decoder *)decoder;
     NeAACDecConfigurationPtr aac_cfg;
     aac_decoder->decoder.pm = audio_pm_create(config);
+    if (!aac_decoder->decoder.pm) {
+        loge("audio_pm_create failed\n");
+        return -1;
+    }
     aac_decoder->frame_count = config->frame_count;
     aac_decoder->aac_handle = NeAACDecOpen();
     aac_cfg = NeAACDecGetCurrentConfiguration(aac_decoder->aac_handle);
@@ -57,7 +76,9 @@ int __aac_decode_init(struct aic_audio_decoder *decoder, struct aic_audio_decode
     aac_cfg->outputFormat = 1;
     aac_cfg->dontUpSampleImplicitSBR = 1;
     NeAACDecSetConfiguration(aac_decoder->aac_handle, aac_cfg);
-
+#ifdef ENABLE_AAC_PCM_DUMP
+    init_pcm_file(aac_decoder);
+#endif
     return 0;
 }
 
@@ -67,12 +88,22 @@ int __aac_decode_destroy(struct aic_audio_decoder *decoder)
     audio_pm_destroy(aac_decoder->decoder.pm);
     audio_fm_destroy(aac_decoder->decoder.fm);
     NeAACDecClose(aac_decoder->aac_handle);
+#ifdef ENABLE_AAC_PCM_DUMP
+    if (aac_decoder->fp_aac_pcm) {
+        fclose(aac_decoder->fp_aac_pcm);
+    }
+#endif
     mpp_free(aac_decoder);
     return 0;
 }
 
 static int check_aac_type(unsigned char* buf, int len)
 {
+    if (len < 2) {
+        loge("len < 2, default to using AAC\n");
+        return AAC;
+    }
+
     if (buf[0]==0xff && (buf[1]&0xf0)==0xf0)
         return ADTS_AAC;
 
@@ -177,19 +208,20 @@ int __aac_decode_frame(struct aic_audio_decoder *decoder)
         }
     }
 
-    frame = audio_fm_decoder_get_frame(aac_decoder->decoder.fm);
+    frame = audio_fm_dequeue_empty_frame(aac_decoder->decoder.fm);
     if (frame->size < pcm_data_size) {
         if (frame->data) {
             logd("frame->data realloc!!\n");
             mpp_free(frame->data);
             frame->data = NULL;
-            frame->data = mpp_alloc(pcm_data_size);
-            if (frame->data == NULL) {
-                loge("mpp_alloc frame->data fail!!!\n");
-                return DEC_ERR_NULL_PTR;
-            }
-            frame->size = pcm_data_size;
         }
+        frame->data = mpp_alloc(pcm_data_size);
+        if (frame->data == NULL) {
+            loge("mpp_alloc frame->data fail!!!\n");
+            audio_fm_enqueue_empty_frame(aac_decoder->decoder.fm, frame);
+            return DEC_ERR_NULL_PTR;
+        }
+        frame->size = pcm_data_size;
     }
     frame->channels = aac_decoder->channels;
     frame->sample_rate = aac_decoder->sample_rate;
@@ -199,6 +231,19 @@ int __aac_decode_frame(struct aic_audio_decoder *decoder)
 
     if (frame_info.error == 0) {
         memcpy(frame->data, pcm_data, pcm_data_size);
+#ifdef ENABLE_AAC_PCM_DUMP
+        if (aac_decoder->fp_aac_pcm) {
+            size_t write_size = fwrite(pcm_data, 1, pcm_data_size, aac_decoder->fp_aac_pcm);
+            if (write_size != pcm_data_size) {
+                loge("write_size != pcm_data_size\n");
+                return DEC_ERR_NOT_SUPPORT;
+            } else {
+                printf("channels = %d, sample_rate = %d, samples = %d\n",
+                aac_decoder->channels, aac_decoder->sample_rate, aac_decoder->samples);
+            }
+            fflush(aac_decoder->fp_aac_pcm);
+        }
+#endif
     } else {
         memset(frame->data, 0x00, pcm_data_size);
         loge("NeAACDecDecode error\n");
@@ -214,7 +259,7 @@ int __aac_decode_frame(struct aic_audio_decoder *decoder)
          frame->bits_per_sample,frame->channels,frame->flag
          ,frame->pts,frame->sample_rate,frame->id,frame->size);
 
-    if (audio_fm_decoder_put_frame(aac_decoder->decoder.fm, frame) != 0) {
+    if (audio_fm_enqueue_ready_frame(aac_decoder->decoder.fm, frame) != 0) {
         loge("please check code, why!!!\n");
         return DEC_ERR_NULL_PTR;
     }

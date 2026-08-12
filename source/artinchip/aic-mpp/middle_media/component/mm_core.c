@@ -1,9 +1,9 @@
 /*
- * Copyright (C) 2020-2023 Artinchip Technology Co. Ltd
+ * Copyright (C) 2020-2026 ArtInChip Technology Co. Ltd
  *
  * SPDX-License-Identifier: Apache-2.0
  *
- *  author: <jun.ma@artinchip.com>
+ *  author: <che.jiang@artinchip.com>
  *  Desc: middle media core
  */
 
@@ -20,6 +20,7 @@
 #include "mm_clock_component.h"
 #include "mm_muxer_component.h"
 #include "mm_venc_component.h"
+#include "mm_vin_component.h"
 
 mm_component_register g_cmponent_registered[] = {
     {MM_COMPONENT_DEMUXER_NAME, mm_demuxer_component_init},
@@ -28,8 +29,11 @@ mm_component_register g_cmponent_registered[] = {
     {MM_COMPONENT_ADEC_NAME, mm_adec_component_init},
     {MM_COMPONENT_AUDIO_RENDER_NAME, mm_audio_render_component_init},
     {MM_COMPONENT_CLOCK_NAME, mm_clock_component_init},
+#ifdef RECORDER
     {MM_COMPONENT_MUXER_NAME, mm_muxer_component_init},
-    {MM_COMPONENT_VENC_NAME, mm_venc_component_init}
+    {MM_COMPONENT_VENC_NAME, mm_venc_component_init},
+    {MM_COMPONENT_VIN_NAME, mm_vin_component_init}
+#endif
 };
 
 s32 mm_init(void)
@@ -52,12 +56,13 @@ s32 mm_get_handle(mm_handle *p_handle, char *component_name, void *p_app_data,
     s32 error = MM_ERROR_NONE;
     MM_BOOL b_find = MM_FALSE;
 
-    s32 i, index;
+    s32 i, index, len;
     s32 comp_num =
         sizeof(g_cmponent_registered) / sizeof(mm_component_register);
 
+    len = strlen(component_name);
     for (i = 0; i < comp_num; i++) {
-        if (!strcmp(component_name, g_cmponent_registered[i].p_name)) {
+        if (!strncmp(component_name, g_cmponent_registered[i].p_name, len)) {
             b_find = MM_TRUE;
             index = i;
             break;

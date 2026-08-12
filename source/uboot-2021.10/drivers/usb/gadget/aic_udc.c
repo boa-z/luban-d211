@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0+
 /*
- * Copyright (c) 2021-2024, ArtInChip Technology Co., Ltd
+ * Copyright (c) 2021-2026, ArtInChip Technology Co., Ltd
  */
 
 #undef DEBUG
@@ -2148,6 +2148,13 @@ static void reconfig_usbd(struct aic_udc *dev)
 
 	debug("Resetting UDC controller\n");
 
+#ifdef CONFIG_CLK_ARTINCHIP_CMU_V3_0
+	/* Enable PLL_INT0 for USB_PLL_INT_CFG */
+	uint32_t temp = readl((u8 *)reg + USB_DEV_PLL_INT_CFG_OFF);
+	temp |= 1;
+	writel(temp, (u8 *)reg + USB_DEV_PLL_INT_CFG_OFF);
+#endif
+
 	uTemp = readl(&reg->usbdevinit);
 	writel(uTemp | USBDEVINIT_CSFTRST, &reg->usbdevinit);
 	while (readl(&reg->usbdevinit) & USBDEVINIT_CSFTRST)
@@ -2162,7 +2169,11 @@ static void reconfig_usbd(struct aic_udc *dev)
 		| 0 << 9 | 0 << 8/*[0:HNP disable,1:HNP enable][0:SRP disable*/
 				/* 1:SRP enable] H1= 1,1*/
 		| 0 << 7	/* Ulpi DDR sel*/
+#ifdef CONFIG_USB_GADGET_DUALSPEED
 		| 0 << 6	/* 0: high speed utmi+, 1: full speed serial*/
+#else
+		| 1 << 6	/* 0: high speed utmi+, 1: full speed serial*/
+#endif
 		| 0 << 4	/* 0: utmi+, 1:ulpi*/
 #ifdef CONFIG_PHY_BUS_WIDTH_8
 		| 0 << 3	/* phy i/f  0:8bit, 1:16bit*/
@@ -2178,6 +2189,22 @@ static void reconfig_usbd(struct aic_udc *dev)
 
 	writel(dflt_gusbcfg, &reg->usbphyif);
 
+	if (dev->pdata->txpreempamptune) {
+		u32 phytune = readl((u8 *)reg + USBPHYTUNE);
+
+		phytune &= ~USBPHYTUNE_TXPREEMPAMPTUNE_MASK;
+		phytune |= USBPHYTUNE_TXPREEMPAMPTUNE(dev->pdata->txpreempamptune);
+
+		writel(phytune, (u8 *)reg + USBPHYTUNE);
+	}
+
+#if (defined(CONFIG_CLK_ARTINCHIP_CMU_V3_0) && defined(CONFIG_FPGA_BOARD_ARTINCHIP))
+	/* Enable USB_DEV_RHY */
+	uTemp = readl((u8 *)reg + USB_DEV_PHY_CTL_OFF);
+	uTemp |= (0x1 << 31);
+	writel(uTemp, (u8 *)reg + USB_DEV_PHY_CTL_OFF);
+#endif
+
 	/* 3. Put the UDC device core in the disconnected state.*/
 	uTemp = readl(&reg->usbdevfunc);
 	uTemp |= SOFT_DISCONNECT;
@@ -2187,7 +2214,11 @@ static void reconfig_usbd(struct aic_udc *dev)
 
 	/* 5. Configure UDC Core to initial settings of device mode.*/
 	/* [][1: full speed(30Mhz) 0:high speed]*/
+#ifdef CONFIG_USB_GADGET_DUALSPEED
 	writel(EP_MISS_CNT(1) | DEV_SPEED_HIGH_SPEED_20, &reg->usbdevconf);
+#else
+	writel(EP_MISS_CNT(1) | DEV_SPEED_FULL_SPEED_20, &reg->usbdevconf);
+#endif
 
 	mdelay(1);
 
@@ -2778,6 +2809,10 @@ static int aic_udc_of_to_plat(struct udevice *dev)
 	plat->force_vbus_detection =
 		dev_read_bool(dev, "u-boot,force-vbus-detection");
 
+	plat->txpreempamptune = dev_read_u32_default(dev, "aic,txpreempamptune", 0);
+	if (plat->txpreempamptune)
+		dev_info(dev, "txpreempamptune = 0x%x\n", plat->txpreempamptune);
+
 	/* force plat according compatible */
 	drvdata = dev_get_driver_data(dev);
 	if (drvdata) {
@@ -2795,7 +2830,11 @@ static void aic_udc_v10_params(struct aic_plat_udc_data *p)
 		| 0x5 << 10	/* USB Turnaround time (0x5 for HS phy) */
 		| 0 << 9	/* [0:HNP disable,1:HNP enable]*/
 		| 0 << 8	/* [0:SRP disable 1:SRP enable]*/
+#ifdef CONFIG_USB_GADGET_DUALSPEED
 		| 0 << 6	/* 0: high speed utmi+, 1: full speed serial*/
+#else
+		| 1 << 6	/* 0: high speed utmi+, 1: full speed serial*/
+#endif
 #ifdef CONFIG_FPGA_BOARD_ARTINCHIP
 		| 1 << 4	/* 0: utmi+, 1:ulpi*/
 #else
@@ -2815,7 +2854,11 @@ static void aic_udc_v20_params(struct aic_plat_udc_data *p)
 #endif
 		| 0 << 9	/* [0:HNP disable,1:HNP enable]*/
 		| 0 << 8	/* [0:SRP disable 1:SRP enable]*/
+#ifdef CONFIG_USB_GADGET_DUALSPEED
 		| 0 << 6	/* 0: high speed utmi+, 1: full speed serial*/
+#else
+		| 1 << 6	/* 0: high speed utmi+, 1: full speed serial*/
+#endif
 #ifdef CONFIG_FPGA_BOARD_ARTINCHIP
 		| 1 << 4	/* 0: utmi+, 1:ulpi*/
 #else
@@ -2940,6 +2983,8 @@ static const struct udevice_id aic_udc_ids[] = {
 	{ .compatible = "artinchip,aic-udc-v1.0",
 		.data = (ulong)aic_udc_v10_params },
 	{ .compatible = "artinchip,aic-udc-v2.0",
+		.data = (ulong)aic_udc_v20_params },
+	{ .compatible = "artinchip,aic-udc-v3.0",
 		.data = (ulong)aic_udc_v20_params },
 	{},
 };

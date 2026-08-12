@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2024 ArtInChip Technology Co. Ltd
+ * Copyright (C) 2020-2026 ArtInChip Technology Co. Ltd
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -19,6 +19,7 @@
 #include "mpp_log.h"
 #include "mpp_mem.h"
 #include <assert.h>
+#include <errno.h>
 #include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -137,17 +138,29 @@
 #define STREAM_TYPE_AUDIO_TRUEHD 0x83
 #define STREAM_TYPE_AUDIO_EAC3 0x87
 
+#define STREAM_ID_AUDIO_STREAM 0xc0
+#define STREAM_ID_VIDEO_STREAM 0xe0
+#define IS_AUDIO_STREAM_ID(id) ((id) >= 0xc0 && (id) < 0xe0)
+#define IS_VIDEO_STREAM_ID(id) ((id) >= 0xe0 && (id) < 0xf0)
+
 /* maximum size in which we look for synchronization if
  * synchronization is lost */
 #define MAX_RESYNC_SIZE 65536
-#define MAX_PES_PAYLOAD 200 * 1024
+#define MAX_PES_PAYLOAD 600 * 1024
+#define MAX_AUDIO_PES_PAYLOAD 48 * 1024
 #define MAX_MP4_DESCR_COUNT 16
 
 /* enough for PES header + length */
 #define PES_START_SIZE 6
 #define PES_HEADER_SIZE 9
 #define MAX_PES_HEADER_SIZE (9 + 255)
-#define PES_H264_NAL_AUD_SIZE 6
+
+#define H264_NAL_SLICE 1
+#define H264_NAL_IDR 5
+#define H264_NAL_SPS 7
+#define H264_NAL_PPS 8
+#define H264_SLICE_I 2
+#define H264_SLICE_SI 4
 
 #define MAX_PIDS_PER_PROGRAM 64
 
@@ -200,6 +213,8 @@ struct mpegts_ts_filter {
     int es_id;
     int last_cc; /* last cc code (-1 if first packet) */
     int64_t last_pcr;
+    int cc_error_count; /* CC mismatch counter for this segment */
+    int packet_count;   /* total packets processed for this filter */
     int discard;
     enum MPEGTS_FILTER_TYPE type;
     union {
@@ -215,6 +230,17 @@ typedef struct mpegts_section_header {
     uint8_t sec_num;
     uint8_t last_sec_num;
 } mpegts_section_header;
+
+typedef struct mpegts_pes_buf {
+    uint8_t *data;
+    uint32_t size;
+    int      used;
+} mpegts_pes_buf;
+
+typedef struct mpegts_ts_buf {
+    uint8_t data[TS_PACKET_SIZE];
+    uint32_t size;
+} mpegts_ts_buf;
 
 typedef struct mpegts_context {
     /* user data */
@@ -232,14 +258,24 @@ typedef struct mpegts_context {
     int stop_parse;
     /** packet temp Audio/Video data */
     struct aic_parser_packet pkt;
+    struct aic_parser_packet apkt;
+    mpegts_pes_buf video_buf;
+    mpegts_pes_buf audio_buf;
     enum CodecID cur_codec_id;
-    uint8_t first_pkt[TS_PACKET_SIZE];
-    int first_pkt_size;
-    mpegts_pes_context *last_pes;
+    enum CodecID cur_audio_codec_id;
+    mpegts_ts_buf first_video_ts;
+    mpegts_ts_buf first_audio_ts;
+
     uint32_t read_offset;
-    uint32_t no_need_peek;
-    uint32_t find_first_audio;
-    uint32_t has_audio;
+    uint32_t last_read_offset;
+    uint8_t no_need_peek;
+    uint8_t find_first_audio;
+    uint8_t audio_pes_end_frame;
+    uint8_t has_audio;
+    uint8_t find_sps;
+    uint8_t audio_delay_parse;
+    uint8_t skip_audio_track;
+    uint8_t skip_video_track;
     /** to detect seek */
     int64_t last_pos;
 
@@ -249,6 +285,8 @@ typedef struct mpegts_context {
     int resync_size;
     int merge_pmt_versions;
     int id;
+
+    int audio_track_id;
 
     /** filters for various streams specified by PMT + for the PAT and PMT */
     mpegts_ts_filter *pids[NB_PID_MAX];
@@ -287,6 +325,8 @@ static const mpegts_stream_type iso_types[] = {
     {STREAM_TYPE_AUDIO_MPEG1, MPP_MEDIA_TYPE_AUDIO, CODEC_ID_MP3},
     {STREAM_TYPE_AUDIO_MPEG2, MPP_MEDIA_TYPE_AUDIO, CODEC_ID_MP3},
     {STREAM_TYPE_AUDIO_AAC, MPP_MEDIA_TYPE_AUDIO, CODEC_ID_AAC},
+    {STREAM_TYPE_VIDEO_MPEG1, MPP_MEDIA_TYPE_VIDEO, CODEC_ID_MPEG12},
+    {STREAM_TYPE_VIDEO_MPEG2, MPP_MEDIA_TYPE_VIDEO, CODEC_ID_MPEG12},
     {STREAM_TYPE_VIDEO_MPEG4, MPP_MEDIA_TYPE_VIDEO, CODEC_ID_MPEG4},
     {STREAM_TYPE_VIDEO_H264, MPP_MEDIA_TYPE_VIDEO, CODEC_ID_H264},
     {STREAM_TYPE_PRIVATE_DATA, MPP_MEDIA_TYPE_VIDEO, CODEC_ID_MJPEG},
@@ -418,6 +458,7 @@ static mpegts_ts_filter *mpegts_open_section_filter(struct mpegts_context *ts,
     sec->last_ver = -1;
 
     if (!sec->section_buf) {
+        ts->pids[filter->pid] = NULL;
         mpp_free(filter);
         return NULL;
     } else {
@@ -491,6 +532,8 @@ static int mpegts_analyze(const uint8_t *buf, int size, int packet_size,
 static int get_packet_size(struct aic_mpegts_parser *s)
 {
     int score, fec_score, dvhs_score;
+    int max_iterations = 16;
+    int buf_size = 0;
     int margin;
     int ret;
 
@@ -500,9 +543,8 @@ static int get_packet_size(struct aic_mpegts_parser *s)
         loge("malloc probe packet buf failed");
         return PARSER_NOMEM;
     }
-    int buf_size = 0;
 
-    while (buf_size < PROBE_PACKET_MAX_BUF) {
+    while (buf_size < PROBE_PACKET_MAX_BUF && max_iterations--) {
         ret = aic_stream_read(s->stream, buf + buf_size, PROBE_PACKET_MAX_BUF - buf_size);
         if (ret < 0)
             goto FAILED;
@@ -563,6 +605,93 @@ static inline int get16(const uint8_t **pp, const uint8_t *p_end)
     return c;
 }
 
+static uint32_t read_bit(const uint8_t *d, int *p, int n, int len)
+{
+    uint32_t v = 0;
+    int max_bits = len * 8;
+    for (int i = 0; i < n; i++) {
+        if (*p >= max_bits)
+            break;
+        v = (v << 1) | ((d[*p >> 3] >> (7 - (*p & 7))) & 1);
+        (*p)++;
+    }
+    return v;
+}
+
+static inline uint8_t read_byte(const uint8_t *d, int *p, int len)
+{
+    if ((*p >> 3) >= len)
+        return 0;
+    uint8_t val = d[*p >> 3];
+    (*p) += 8;
+    return val;
+}
+
+static uint32_t read_ue_gelomb(const uint8_t *d, int *p, int len)
+{
+    int z = 0;
+    int max_bits = len * 8;
+    while (*p < max_bits && read_bit(d, p, 1, len) == 0 && z < 31) z++;
+    if (*p >= max_bits) return 0;
+    return z ? (1 << z) - 1 + read_bit(d, p, z, len) : 0;
+}
+
+static int parser_h264_sps(const uint8_t *sps, int len, struct aic_codec_param *params)
+{
+    // SPS minimum: 1 byte NAL header + at least 7 bytes of SPS data
+    if (len < 8) {
+        logw("SPS data too short: %d bytes\n", len);
+        return -1;
+    }
+
+    int p = 0;  // bit position
+    int prof = read_bit(sps, &p, 8, len); // profile_idc
+    read_bit(sps, &p, 16, len);           // constraint_set + level_idc
+    read_ue_gelomb(sps, &p, len);         // sps_id
+
+    if(prof != 66 && prof != 77 &&
+        prof != 88 && prof != 100) {
+        loge("unsupport profile(%d)", prof);
+        return -1;
+    }
+
+    if (prof == 100) {               // High profile
+        read_ue_gelomb(sps, &p, len);     // chroma_format_idc
+        read_ue_gelomb(sps, &p, len);     // bit_depth_luma
+        read_ue_gelomb(sps, &p, len);     // bit_depth_chroma
+        read_bit(sps, &p, 1, len);
+        if (read_bit(sps, &p, 1, len))
+            return -1;               // skip scaling matrix
+    }
+
+    read_ue_gelomb(sps, &p, len);         // log2_max_frame_num
+    int poc = read_ue_gelomb(sps, &p, len);  // poc_type
+    if (poc == 0) {
+        read_ue_gelomb(sps, &p, len);
+    } else if (poc == 1) {
+        read_bit(sps, &p, 1, len);
+        read_ue_gelomb(sps, &p, len);
+        read_ue_gelomb(sps, &p, len);
+        int n = read_ue_gelomb(sps, &p, len);
+        for (int i = 0; i < n; i++)
+            read_ue_gelomb(sps, &p, len);
+    }
+
+    int max_ref_frames = read_ue_gelomb(sps, &p, len); // max_num_ref_frames
+    read_bit(sps, &p, 1, len);            // gaps_in_frame_num
+
+    int w = read_ue_gelomb(sps, &p, len) + 1;  // pic_width_in_mbs_minus1
+    int h = read_ue_gelomb(sps, &p, len) + 1;  // pic_height_in_map_units_minus1
+    int f = read_bit(sps, &p, 1, len);    // frame_mbs_only_flag
+
+    params->width = w * 16;
+    params->height = (f ? h : h * 2) * 16;
+    params->max_ref_frames = max_ref_frames;
+
+    logd("profile_idc:%d, w:%d, h:%d, ref_frames:%d\n", prof, w, h, max_ref_frames);
+    return 0;
+}
+
 static int parse_section_header(mpegts_section_header *h,
                                 const uint8_t **pp, const uint8_t *p_end)
 {
@@ -618,7 +747,7 @@ static void mpegts_find_stream_type(struct mpegts_stream_ctx *st,
                                     uint32_t stream_type,
                                     const mpegts_stream_type *types)
 {
-    for (; types->stream_type; types++)
+    for (; types->stream_type; types++) {
         if (stream_type == types->stream_type) {
             if (st->codecpar.codec_type != types->codec_type ||
                 st->codecpar.codec_id != types->codec_id) {
@@ -627,6 +756,7 @@ static void mpegts_find_stream_type(struct mpegts_stream_ctx *st,
             }
             return;
         }
+    }
 }
 
 static struct mpegts_stream_ctx *mpegts_new_stream(struct aic_mpegts_parser *s)
@@ -643,6 +773,167 @@ static struct mpegts_stream_ctx *mpegts_new_stream(struct aic_mpegts_parser *s)
     s->streams[s->nb_streams++] = sc;
 
     return sc;
+}
+
+static int find_startcode(unsigned char* buf, int len, int *pos)
+{
+    int i = 0;
+
+    *pos = -1;
+
+    while (i + 2 < len) {
+        if (i + 3 < len && buf[i] == 0 && buf[i+1] == 0 &&
+            buf[i+2] == 0 && buf[i+3] == 1) {
+            // 4-byte startcode: 00 00 00 01
+            *pos = i;
+            return 4;
+        } else if (buf[i] == 0 && buf[i+1] == 0 && buf[i+2] == 1) {
+            // 3-byte startcode: 00 00 01
+            *pos = i;
+            return 3;
+        }
+        i++;
+    }
+
+    return 0;
+}
+
+static int mpegts_parse_video_config(struct mpegts_stream_ctx *st,
+                                     mpegts_pes_context *pes,
+                                     unsigned char *data, int size)
+{
+    struct mpegts_context *ts = pes->ts;
+    int nal_type = 0;
+    int offset = 0;
+    int startcode_len = 0;
+    int search_pos = 0;
+    int found_count = 0;
+
+    if (st->codecpar.codec_id != CODEC_ID_H264) {
+        logd("Not H.264, skip SPS parse, codec_id=%d\n", st->codecpar.codec_id);
+        return 0;
+    }
+
+    if (size < 5) {
+        logd("Data too small for SPS parse: %d bytes\n", size);
+        return -1;
+    }
+
+    logd("Searching SPS in %d bytes\n", size);
+
+    while (search_pos < size - 4) {
+        startcode_len = find_startcode(data + search_pos, size - search_pos, &offset);
+
+        if (startcode_len == 0) {
+            logd("No more start codes found after pos %d\n", search_pos);
+            break;
+        }
+
+        // calc NAL_TYPE pos
+        int nal_pos = search_pos + offset + startcode_len;
+
+        if (nal_pos >= size) {
+            logd("NAL position out of bounds: %d >= %d\n", nal_pos, size);
+            break;
+        }
+
+        nal_type = data[nal_pos] & 0x1f;
+        found_count++;
+
+        logd("Found NAL #%d at pos %d, type=%d, startcode_len=%d\n",
+             found_count, search_pos + offset, nal_type, startcode_len);
+
+        if (nal_type == H264_NAL_SPS) {
+            int sps_data_offset = nal_pos + 1;
+            int sps_data_len = size - sps_data_offset;
+
+            // try to find next startcode
+            int next_pos = 0;
+            int next_startcode = find_startcode(data + nal_pos + 1,
+                                                size - nal_pos - 1, &next_pos);
+            if (next_startcode > 0) {
+                sps_data_len = next_pos + 1;
+            }
+
+            logd("Found SPS! Parsing %d bytes from offset %d\n",
+                 sps_data_len, sps_data_offset);
+
+            int ret = parser_h264_sps(data + sps_data_offset, sps_data_len,
+                                      &st->codecpar);
+            if (ret == 0) {
+                logi("SPS parsed OK: width=%d, height=%d\n",
+                     st->codecpar.width, st->codecpar.height);
+                ts->find_sps = 1;
+                return 0;  // parser success
+            } else {
+                logw("parser_h264_sps failed, ret=%d\n", ret);
+            }
+        }
+
+        // move to next startcode
+        search_pos = search_pos + offset + startcode_len + 1;
+    }
+
+    logw("SPS not found in %d bytes, checked %d NAL units\n", size, found_count);
+    return -1;  // not find sps
+}
+
+static int h264_slice_is_intra(const uint8_t *nal_payload, int len)
+{
+    int bit_pos = 0;  // bit offset within nal_payload
+    int max_bits = len * 8;
+    uint32_t slice_type = 0;
+
+    // Need at least a few bytes for first_mb_in_slice + slice_type ue(v)
+    if (len < 4)
+        return 0;
+
+    /* first_mb_in_slice (ue(v)) */
+    read_ue_gelomb(nal_payload, &bit_pos, len);
+    if (bit_pos >= max_bits)
+        return 0;
+
+    /* slice_type (ue(v)) */
+    slice_type = read_ue_gelomb(nal_payload, &bit_pos, len);
+    if (bit_pos >= max_bits)
+        return 0;
+
+    return (slice_type == H264_SLICE_I) || (slice_type == H264_SLICE_SI);
+}
+
+static int mpegts_check_keyframe(const uint8_t *data, int size, int codec_id)
+{
+    int search_pos = 0, offset, startcode_len;
+
+    if (codec_id != CODEC_ID_H264)
+        return 0;
+
+    while (search_pos < size - 5) {
+        startcode_len = find_startcode((unsigned char *)data + search_pos,
+                                       size - search_pos, &offset);
+        if (startcode_len == 0)
+            break;
+
+        int nal_pos = search_pos + offset + startcode_len;
+        if (nal_pos >= size)
+            break;
+
+        int nal_type = data[nal_pos] & 0x1f;
+        if (nal_type == H264_NAL_IDR) {
+            logd("Found IDR slice at pos %d\n", nal_pos);
+            return 1;
+        } else if (nal_type == H264_NAL_SLICE) {
+            int payload_len = size - nal_pos - 1;
+            if (payload_len > 0 &&
+                h264_slice_is_intra(data + nal_pos + 1, payload_len)) {
+                logd("Found intra slice at pos %d\n", nal_pos);
+                return 1;
+            }
+        }
+
+        search_pos = nal_pos + 1;
+    }
+    return 0;
 }
 
 static int mpegts_set_stream_info(struct mpegts_stream_ctx *st, mpegts_pes_context *pes,
@@ -673,6 +964,7 @@ static int mpegts_set_stream_info(struct mpegts_stream_ctx *st, mpegts_pes_conte
     if (st->codecpar.codec_type == MPP_MEDIA_TYPE_AUDIO) {
         ts->has_audio = 1;
     }
+
     return 0;
 }
 
@@ -680,8 +972,10 @@ static int mpegts_set_audio_info(struct mpegts_stream_ctx *st, mpegts_pes_contex
 {
     int ret = PARSER_OK;
     struct mpegts_context *ts = pes->ts;
-
     struct mpegts_audio_decode_header audio_header = {0};
+
+    st->codecpar.extradata = NULL;
+    st->codecpar.extradata_size = 0;
 
     if (ts->cur_codec_id == CODEC_ID_MP3) {
         ret = mpegaudio_decode_mp3_header(ts->pkt.data + ts->read_offset, &audio_header);
@@ -691,9 +985,21 @@ static int mpegts_set_audio_info(struct mpegts_stream_ctx *st, mpegts_pes_contex
         }
 
     } else if (ts->cur_codec_id == CODEC_ID_AAC) {
-        ret = mpegaudio_decode_aac_header(ts->pkt.data + ts->read_offset, &audio_header);
+        st->codecpar.extradata_size = AAC_SEQUENCE_HEADER_SIZE;
+        st->codecpar.extradata = mpp_alloc(st->codecpar.extradata_size);
+        if (!st->codecpar.extradata) {
+            st->codecpar.extradata_size = 0;
+            loge("mpp_alloc for aac extradata failed, size:%d", st->codecpar.extradata_size);
+            return PARSER_NOMEM;
+        }
+        memset(st->codecpar.extradata, 0, st->codecpar.extradata_size);
+        ret = mpegaudio_decode_aac_header(ts->pkt.data + ts->read_offset, &audio_header, 1,
+                                          st->codecpar.extradata);
         if (ret < 0) {
             loge("mpegaudio_decode_aac_header failed, ret:%d", ret);
+            mpp_free(st->codecpar.extradata);
+            st->codecpar.extradata_size = 0;
+            st->codecpar.extradata = NULL;
             return ret;
         }
     }
@@ -715,83 +1021,70 @@ static void reset_pes_packet_state(mpegts_pes_context *pes)
     pes->flags = 0;
 }
 
-static int new_pes_packet(mpegts_pes_context *pes, struct aic_parser_packet *pkt)
+static void gen_new_packet(mpegts_pes_context *pes, struct aic_parser_packet *pkt)
 {
     pkt->type = mpegts_get_pkt_codec_type(pes->stream_type, iso_types);
     pkt->size = pes->data_index;
+    pkt->data = pes->buffer;
     pkt->pts = pes->pts;
     pkt->dts = 0;
     pkt->flag = pes->flags;
     pkt->duration = 0;
+    pkt->pid = pes->pid;
+}
+
+static int new_pes_packet(mpegts_pes_context *pes, struct aic_parser_packet *pkt)
+{
+    gen_new_packet(pes, pkt);
     reset_pes_packet_state(pes);
     return 0;
 }
 
-int mpegts_skip_h264_nalu_aud(struct mpegts_stream_ctx *st, const uint8_t *buf)
-{
-    if (st->codecpar.codec_type != MPP_MEDIA_TYPE_VIDEO ||
-        st->codecpar.codec_id != CODEC_ID_H264) {
-        return 0;
-    }
-
-    int i = 0, j = 0;
-    int offset = 0;
-    int find_aud_off = 0;
-    const uint8_t *tmp_buf = buf;
-
-    for (i = 0; i < 16; i++) {
-        if (tmp_buf[i] == 0 && tmp_buf[i + 1] == 0 &&
-            tmp_buf[i + 2] == 1 && tmp_buf[i + 3] == 9) {
-            find_aud_off = i + 3;
-            break;
-        }
-    }
-    if (find_aud_off) {
-        for (j = find_aud_off; j < find_aud_off + 16; j++) {
-            if (tmp_buf[j] == 0 && tmp_buf[j + 1] == 0 &&
-                tmp_buf[j + 2] == 1) {
-                if (tmp_buf[j - 1] == 0) {
-                    offset = j - 1;
-                } else {
-                    offset = j;
-                }
-                break;
-            }
-        }
-        if (offset == 0)
-            offset = PES_H264_NAL_AUD_SIZE;
-    }
-    return offset;
-}
-
 static int mpegts_start_pes(mpegts_pes_context *pes)
 {
-    int ret = -1;
     struct mpegts_context *ts = pes->ts;
-    mpegts_pes_context *last_pes = ts->last_pes;
+    struct mpegts_stream_ctx *st = pes->st;
+    struct aic_mpegts_parser *s = ts->parser;
+    int ret = -1;
 
-    if (last_pes) {
-        if (last_pes->state == MPEGTS_PAYLOAD && last_pes->data_index > 0) {
-            memcpy(ts->pkt.data, ts->first_pkt, ts->first_pkt_size);
-            ts->cur_codec_id = mpegts_get_pkt_codec_id(last_pes->stream_type, iso_types);
-            ret = new_pes_packet(last_pes, &ts->pkt);
-            if (ret < 0)
-                return ret;
-            ts->stop_parse = 1;
+    if (pes->state == MPEGTS_PAYLOAD && pes->data_index > 0) {
+        ts->cur_codec_id = mpegts_get_pkt_codec_id(pes->stream_type, iso_types);
+        ret = new_pes_packet(pes, &ts->pkt);
+        if (ret < 0)
+            return ret;
+        ts->stop_parse = 1;
 
-            /*find the first audio then clear find flag*/
-            if (ts->find_first_audio && ts->pkt.type == MPP_MEDIA_TYPE_AUDIO) {
-                mpegts_set_audio_info(last_pes->st, last_pes);
-                ts->find_first_audio = 0;
+        if (MPP_MEDIA_TYPE_AUDIO == ts->pkt.type) {
+            if (ts->read_offset >= ts->pkt.size)
+                ts->stop_parse = 0;
+            if (0 == st->audio_info_set) {
+                ret = mpegts_set_audio_info(pes->st, pes);
+                if (0 == ret) {
+                    st->audio_info_set = 1;
+                    s->audio_track_init_cnt++;
+                    if (s->audio_track_init_cnt == s->nb_audio_track) {
+                        ts->find_first_audio = 0;
+                    }
+                }
             }
-        } else {
-            loge("last pes is null should be not happend!!!");
+        } else if (MPP_MEDIA_TYPE_VIDEO == ts->pkt.type) {
+            memcpy(ts->pkt.data, ts->first_video_ts.data, ts->first_video_ts.size);
+            mpegts_parse_video_config(st, pes, ts->first_video_ts.data,
+                                      ts->first_video_ts.size);
+            if (st->codecpar.codec_id == CODEC_ID_H264 && !ts->find_sps)
+                ts->stop_parse = 0;
+            if (mpegts_check_keyframe(ts->first_video_ts.data,
+                                      ts->first_video_ts.size,
+                                      st->codecpar.codec_id)) {
+                ts->pkt.flag |= PACKET_KEY;
+                logd("check keyframe, pts:%ld", ts->pkt.pts);
+            }
         }
+
+    } else {
+        reset_pes_packet_state(pes);
     }
-    reset_pes_packet_state(pes);
-    ts->read_offset = 0;
-    ts->no_need_peek = 0;
-    ts->last_pes = NULL;
+
     pes->state = MPEGTS_HEADER;
 
     return 0;
@@ -802,53 +1095,63 @@ static int mpegts_pes_header(mpegts_pes_context *pes)
     int code = 0;
     struct mpegts_context *ts = pes->ts;
 
-    if (pes->data_index == PES_START_SIZE) {
-        /* we got all the PES or section header. We can now
-            * decide */
-        if (pes->header[0] == 0x00 && pes->header[1] == 0x00 &&
-            pes->header[2] == 0x01) {
-            /* it must be an MPEG-2 PES stream */
-            code = pes->header[3] | 0x100;
-            logd("pid=%x pes_code=%#x\n", pes->pid, code);
-            pes->stream_id = pes->header[3];
+    if (pes->data_index != PES_START_SIZE)
+        return 0;
 
-            /* stream not present in PMT */
-            if (!pes->st) {
-                if (ts->skip_changes)
-                    goto skip;
-                if (ts->merge_pmt_versions)
-                    goto skip; /* wait for PMT to merge new stream */
+    /* we got all the PES or section header. We can now
+        * decide */
+    if (pes->header[0] == 0x00 && pes->header[1] == 0x00 && pes->header[2] == 0x01) {
+        /* it must be an MPEG-2 PES stream */
+        code = pes->header[3] | 0x100;
+        pes->stream_id = pes->header[3];
+        logd("pes=%p, pid=%x stream_id=%x\n", pes, pes->pid, pes->stream_id);
 
-                pes->st = mpegts_new_stream(ts->parser);
-                if (!pes->st)
-                    return PARSER_NOMEM;
-                pes->st->index = pes->pid;
-                mpegts_set_stream_info(pes->st, pes, 0, 0);
-            }
-            pes->buffer = ts->pkt.data;
-            memset(ts->first_pkt, 0, TS_PACKET_SIZE);
-            ts->first_pkt_size = 0;
-            ts->last_pes = pes;
-            pes->total_size = MAX_PES_PAYLOAD;
+        /* stream not present in PMT */
+        if (!pes->st) {
+            if (ts->skip_changes)
+                goto skip;
+            if (ts->merge_pmt_versions)
+                goto skip; /* wait for PMT to merge new stream */
 
-            if (code != 0x1bc && code != 0x1bf && /* program_stream_map, private_stream_2 */
-                code != 0x1f0 && code != 0x1f1 && /* ECM, EMM */
-                code != 0x1ff && code != 0x1f2 && /* program_stream_directory, DSMCC_stream */
-                code != 0x1f8) {                  /* ITU-T Rec. H.222.1 type E stream */
-                pes->state = MPEGTS_PESHEADER;
-            } else {
-                pes->pes_header_size = 6;
-                pes->state = MPEGTS_PAYLOAD;
-                pes->data_index = 0;
-            }
-        } else {
-            /* otherwise, it should be a table */
-            /* skip packet */
-        skip:
-            pes->state = MPEGTS_SKIP;
-            return 1;
+            pes->st = mpegts_new_stream(ts->parser);
+            if (!pes->st)
+                return PARSER_NOMEM;
+            pes->st->index = pes->pid;
+            mpegts_set_stream_info(pes->st, pes, 0, 0);
         }
+
+        if (IS_VIDEO_STREAM_ID(pes->stream_id)) {
+            pes->buffer = ts->video_buf.data;
+            pes->total_size = ts->video_buf.size;
+            memset(ts->first_video_ts.data, 0, TS_PACKET_SIZE);
+            ts->first_video_ts.size = 0;
+        } else if (IS_AUDIO_STREAM_ID(pes->stream_id)) {
+            ts->no_need_peek = 0;
+            pes->buffer = ts->audio_buf.data;
+            pes->total_size = ts->audio_buf.size;
+            memset(ts->first_audio_ts.data, 0, TS_PACKET_SIZE);
+            ts->first_audio_ts.size = 0;
+        }
+        logd("pid:%d, stream_id:%d, total_size:%d", pes->pid, pes->stream_id, pes->total_size);
+
+        if (code != 0x1bc && code != 0x1bf && /* program_stream_map, private_stream_2 */
+            code != 0x1f0 && code != 0x1f1 && /* ECM, EMM */
+            code != 0x1ff && code != 0x1f2 && /* program_stream_directory, DSMCC_stream */
+            code != 0x1f8) {                  /* ITU-T Rec. H.222.1 type E stream */
+            pes->state = MPEGTS_PESHEADER;
+        } else {
+            pes->pes_header_size = 6;
+            pes->state = MPEGTS_PAYLOAD;
+            pes->data_index = 0;
+        }
+    } else {
+        /* otherwise, it should be a table */
+        /* skip packet */
+    skip:
+        pes->state = MPEGTS_SKIP;
+        return 1;
     }
+
 
     return 0;
 }
@@ -895,13 +1198,139 @@ static void mpegts_pes_header_fill(mpegts_pes_context *pes)
     }
 }
 
+
+
+/* Detect if audio buffer contains at least one complete frame,
+ * and return its frame_size. Used to stop PES accumulation early. */
+static int audio_frame_complete(struct mpegts_pes_context *pes)
+{
+    int codec_id = mpegts_get_pkt_codec_id(pes->stream_type, iso_types);
+    struct mpegts_audio_decode_header hdr;
+    struct mpegts_context *ts = pes->ts;
+    int remain_size;
+    uint8_t *data;
+    int ret;
+
+    if (pes->data_index < 4 || !pes->buffer)
+        return 0;
+
+    data = (uint8_t *)pes->buffer + ts->read_offset;
+    remain_size = pes->data_index - ts->read_offset;
+    memset(&hdr, 0, sizeof(hdr));
+    if (codec_id == CODEC_ID_MP3) {
+        ret = mpegaudio_decode_mp3_header(data, &hdr);
+        if (ret == 0 && hdr.frame_size > 0 && remain_size >= hdr.frame_size) {
+            gen_new_packet(pes, &ts->pkt);
+            return 1;
+        }
+    } else if (codec_id == CODEC_ID_AAC) {
+        ret = mpegaudio_decode_aac_header(data, &hdr, 0, NULL);
+        if (ret == 0 && hdr.frame_size > 0 && remain_size >= hdr.frame_size) {
+            gen_new_packet(pes, &ts->pkt);
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
+static int mpegts_pes_payload(struct mpegts_pes_context *pes,
+                              const uint8_t *p, int size, int is_start)
+{
+    struct mpegts_context *ts = pes->ts;
+    int buf_size = size;
+    if (!pes->buffer)
+        return 0;
+    if (pes->data_index > 0 && pes->data_index + buf_size > pes->total_size) {
+        loge("frame size %d overange total size %d, then drop it",
+            pes->data_index + buf_size, pes->total_size);
+        ts->stop_parse = 1;
+        return -1;
+    } else if (pes->data_index == 0 && buf_size > pes->total_size) {
+        buf_size = pes->total_size;
+    }
+
+    ts->last_read_offset = 0;
+    if (is_start) {
+        if (buf_size < TS_PACKET_SIZE) {
+            if (IS_AUDIO_STREAM_ID(pes->stream_id)) {
+                ts->last_read_offset =
+                    ts->audio_pes_end_frame ? ts->last_read_offset : ts->read_offset;
+                ts->read_offset = 0;
+                if (ts->skip_audio_track) {
+                    gen_new_packet(pes, &ts->apkt);
+                    return 0;
+                }
+                memcpy(ts->first_audio_ts.data, p, buf_size);
+                memcpy((char *)pes->buffer, p, buf_size);
+                ts->first_audio_ts.size = buf_size;
+                gen_new_packet(pes, &ts->apkt);
+                ts->cur_audio_codec_id =
+                    mpegts_get_pkt_codec_id(pes->stream_type, iso_types);
+            } else if (IS_VIDEO_STREAM_ID(pes->stream_id)) {
+                if (ts->skip_video_track)
+                    return 0;
+                memcpy(ts->first_video_ts.data, p, buf_size);
+                ts->first_video_ts.size = buf_size;
+            } else {
+                loge("not video or audio stream, stream_id %d", pes->stream_id);
+                ts->stop_parse = 1;
+                return -1;
+            }
+        } else {
+            loge("first payload(%d) shoule be small than(%d)", buf_size, TS_PACKET_SIZE);
+            return -1;
+        }
+    } else {
+        if ((IS_AUDIO_STREAM_ID(pes->stream_id) && ts->skip_audio_track) ||
+            (IS_VIDEO_STREAM_ID(pes->stream_id) && ts->skip_video_track)) {
+            logd("stream_id %d, skip_video_track %d,  skip_audio_track %d", pes->stream_id,
+                ts->skip_video_track, ts->skip_audio_track);
+            return 0;
+        }
+        memcpy((char *)pes->buffer + pes->data_index, p, buf_size);
+    }
+    pes->data_index += buf_size;
+
+    /* emit complete packets with known packet size
+     * decreases demuxer delay for infrequent packets like subtitles from
+     * a couple of seconds to milliseconds for properly muxed files.
+     * total_size is the number of bytes following pes_packet_length
+     * in the pes header, i.e. not counting the first PES_START_SIZE bytes */
+    if (!ts->stop_parse && pes->total_size < MAX_PES_PAYLOAD &&
+        pes->pes_header_size + pes->data_index == pes->total_size + PES_START_SIZE) {
+        ts->stop_parse = 1;
+    }
+
+    /* For audio during normal playback, detect if have audio complete frame
+     * then stop parse to reduce audio get packet latency*/
+    if (!ts->find_first_audio && IS_AUDIO_STREAM_ID(pes->stream_id) && !ts->skip_audio_track) {
+        if (audio_frame_complete(pes)) {
+            /* Late audio (e.g. Miracast RTP): extract params and generate
+             * extradata now, before the first audio packet is returned. */
+            if (ts->audio_delay_parse && 0 == pes->st->audio_info_set) {
+                uint32_t saved = ts->read_offset;
+                ts->read_offset = 0;
+                ts->cur_codec_id = mpegts_get_pkt_codec_id(pes->stream_type, iso_types);
+                if (ts->cur_codec_id != CODEC_ID_NONE) {
+                    mpegts_set_audio_info(pes->st, pes);
+                    pes->st->audio_info_set = 1;
+                }
+                ts->read_offset = saved;
+            }
+            ts->stop_parse = 1;
+        }
+    }
+
+    return 0;
+}
+
 /* return non zero if a packet could be constructed */
 static int mpegts_push_data(mpegts_ts_filter *filter,
                             const uint8_t *buf, int buf_size, int is_start,
                             int64_t pos)
 {
     mpegts_pes_context *pes = filter->u.pes_filter.opaque;
-    struct mpegts_context *ts = pes->ts;
     const uint8_t *p;
     int ret = -1, len;
 
@@ -956,44 +1385,9 @@ static int mpegts_push_data(mpegts_ts_filter *filter,
             mpegts_pes_header_fill(pes);
             break;
         case MPEGTS_PAYLOAD:
-            if (pes->buffer) {
-                if (pes->data_index > 0 &&
-                    pes->data_index + buf_size > pes->total_size) {
-                    loge("frame size %d overange total size %d, then drop it",
-                         pes->data_index + buf_size, pes->total_size);
-                    ts->stop_parse = 1;
-                } else if (pes->data_index == 0 &&
-                           buf_size > pes->total_size) {
-                    // pes packet size is < ts size packet and pes data is padded with 0xff
-                    // not sure if this is legal in ts but see issue #2392
-                    buf_size = pes->total_size;
-                }
-                if (is_start) {
-                    if (buf_size < TS_PACKET_SIZE) {
-                        int offset = mpegts_skip_h264_nalu_aud(pes->st, p);
-                        logd("skip offset %d, buf_size %d", offset, buf_size);
-                        buf_size -= offset;
-                        memcpy(ts->first_pkt, p + offset, buf_size);
-                        ts->first_pkt_size = buf_size;
-                    } else {
-                        loge("first payload(%d) shoule be small than(%d)",
-                             buf_size, TS_PACKET_SIZE);
-                        return -1;
-                    }
-                } else {
-                    memcpy(pes->buffer + pes->data_index, p, buf_size);
-                }
-                pes->data_index += buf_size;
-                /* emit complete packets with known packet size
-                 * decreases demuxer delay for infrequent packets like subtitles from
-                 * a couple of seconds to milliseconds for properly muxed files.
-                 * total_size is the number of bytes following pes_packet_length
-                 * in the pes header, i.e. not counting the first PES_START_SIZE bytes */
-                if (!ts->stop_parse && pes->total_size < MAX_PES_PAYLOAD &&
-                    pes->pes_header_size + pes->data_index == pes->total_size + PES_START_SIZE) {
-                    ts->stop_parse = 1;
-                }
-            }
+            ret = mpegts_pes_payload(pes, p, buf_size, is_start);
+            if (ret < 0)
+                return ret;
             buf_size = 0;
             break;
         case MPEGTS_SKIP:
@@ -1163,6 +1557,9 @@ static void pmt_cb(mpegts_ts_filter *filter, const uint8_t *section, int section
 
     ts->skip_pmt = 1;
 
+    //PMT section is the end of header, next we can get pes stream
+    ts->stop_parse = 2;
+
     for (i = 0;; i++) {
         stream_type = get8(&p, p_end); /* get video and audio type*/
         if (stream_type < 0)
@@ -1174,6 +1571,7 @@ static void pmt_cb(mpegts_ts_filter *filter, const uint8_t *section, int section
         if (pid == ts->current_pid)
             return;
 
+        logi("pid:%d stream_type:%d i:%d", pid, stream_type, i);
         if (create_pmt_stream(ts, h, stream_type, i, pid, pcr_pid) == NULL) {
             return;
         }
@@ -1185,6 +1583,7 @@ static void pmt_cb(mpegts_ts_filter *filter, const uint8_t *section, int section
         desc_list_end = p + desc_list_len;
         if (desc_list_end > p_end)
             return;
+        p = desc_list_end;
     }
 }
 
@@ -1304,12 +1703,14 @@ static int handle_packet(struct mpegts_context *ts, const uint8_t *packet, int64
             expected_cc == cc;
 
     tss->last_cc = cc;
+    tss->packet_count++;
     if (!cc_ok) {
-        logd("Continuity check failed for pid %d expected %d got %d\n",
-             pid, expected_cc, cc);
-        if (tss->type == MPEGTS_PES) {
-            mpegts_pes_context *pc = tss->u.pes_filter.opaque;
-            pc->flags |= 0x2;
+        tss->cc_error_count++;
+        logd("CC fail pid %d expected %d got %d (err#%d)\n", pid, expected_cc, cc,
+             tss->cc_error_count);
+        if (tss->cc_error_count > 1 && tss->cc_error_count * 20 > tss->packet_count) {
+            logw("CC errors for pid %d: %d/%d packets, possible corruption", pid,
+                 tss->cc_error_count, tss->packet_count);
         }
     }
 
@@ -1414,8 +1815,14 @@ static int read_packet(struct aic_mpegts_parser *s, uint8_t *buf, int raw_packet
 
     for (;;) {
         len = aic_stream_read(pb, buf, TS_PACKET_SIZE);
-        if (len != TS_PACKET_SIZE)
+        if (len != TS_PACKET_SIZE) {
+            if (len == -EAGAIN) {
+                /* rtp stream timeout, return to upper layer
+                 * so message loop can process stop/quit signals */
+                return PARSER_NODATA;
+            }
             return len < 0 ? len : PARSER_EOS;
+        }
         /* check packet sync byte */
         if (buf[0] != 0x47) {
             /* find a new packet start */
@@ -1464,6 +1871,7 @@ static int handle_packets(struct mpegts_context *ts, int64_t nb_packets)
                 ts->pids[i]->last_pcr = -1;
             }
         }
+        ts->find_sps = 0;
     }
 
     ts->stop_parse = 0;
@@ -1494,6 +1902,57 @@ static int handle_packets(struct mpegts_context *ts, int64_t nb_packets)
     return ret;
 }
 
+void handle_audio_header(struct aic_mpegts_parser *s, struct mpegts_context *ts)
+{
+    struct mpegts_stream_ctx *st = NULL;
+    int i = 0;
+
+    if (!ts->has_audio)
+        return;
+
+    logd("nb_streams:%d", s->nb_streams);
+    for (i = 0; i < s->nb_streams; i++) {
+        st = s->streams[i];
+        if (!st) continue;
+
+        if (MPP_MEDIA_TYPE_AUDIO == st->codecpar.codec_type) {
+            s->audio_pid[s->nb_audio_track] = st->index;
+            st->codecpar.audio_track_id = s->nb_audio_track;
+            s->nb_audio_track++;
+        }
+    }
+
+    /* For live streams (RTP etc.), skip forward search for first audio packet*/
+    if (ts->audio_delay_parse)
+        return;
+
+    /* Save current pos, and then search the first audio pkt to get audio params*/
+    uint64_t pos = aic_stream_tell(s->stream);
+    ts->find_first_audio = 1;
+    handle_packets(ts, 0);
+    ts->find_first_audio = 0;
+    ts->find_sps = 0;
+    ts->read_offset = 0;
+    aic_stream_seek(s->stream, pos, SEEK_SET);
+
+    // Audio declared in PMT but no actual data found, disable audio
+    if (s->nb_audio_track > 0 && s->audio_track_init_cnt == 0) {
+        printf("Audio declared in PMT but no actual data found,"
+               "nb_audio_track %d, audio_track_init_cnt:%d.\n",
+               s->nb_audio_track, s->audio_track_init_cnt);
+        ts->has_audio = 0;
+        s->nb_audio_track = 0;
+
+        for (i = 0; i < s->nb_streams; i++) {
+            st = s->streams[i];
+            if (!st) continue;
+
+            if (MPP_MEDIA_TYPE_AUDIO == st->codecpar.codec_type)
+                st->codecpar.codec_type = MPP_MEDIA_TYPE_UNKNOWN;
+        }
+    }
+}
+
 int mpegts_read_header(struct aic_mpegts_parser *s)
 {
     struct mpegts_context *ts = NULL;
@@ -1507,16 +1966,35 @@ int mpegts_read_header(struct aic_mpegts_parser *s)
     ts->parser = s;
     ts->auto_guess = 1;
     ts->raw_packet_size = TS_PACKET_SIZE;
+    ts->resync_size = 2 * TS_PACKET_SIZE;
     ts->find_first_audio = 0;
-
+    ts->find_sps = 0;
+    ts->audio_delay_parse = s->audio_delay_parse;
     ts->pkt.size = 0;
-    ts->pkt.data = mpp_alloc(MAX_PES_PAYLOAD);
-    if (!ts->pkt.data) {
+    ts->skip_video_track = 0;
+    ts->skip_audio_track = 0;
+
+    /* malloc buf for video and audio stream*/
+    ts->video_buf.data = mpp_alloc(MAX_PES_PAYLOAD);
+    if (!ts->video_buf.data) {
         loge("malloc temp buffer size %d failed", MAX_PES_PAYLOAD);
         mpp_free(s->priv_data);
         s->priv_data = NULL;
         return PARSER_NOMEM;
     }
+    ts->video_buf.size = MAX_PES_PAYLOAD;
+    ts->video_buf.used = 0;
+
+    ts->audio_buf.data = mpp_alloc(MAX_AUDIO_PES_PAYLOAD);
+    if (!ts->audio_buf.data) {
+        loge("malloc audio temp buffer size %d failed", MAX_AUDIO_PES_PAYLOAD);
+        mpp_free(ts->video_buf.data);
+        mpp_free(s->priv_data);
+        s->priv_data = NULL;
+        return PARSER_NOMEM;
+    }
+    ts->audio_buf.size = MAX_AUDIO_PES_PAYLOAD;
+    ts->audio_buf.used = 0;
 
     /* Service Description Table: useless data, discard */
     mpegts_open_section_filter(ts, SDT_PID, sdt_cb, ts, 1);
@@ -1527,72 +2005,122 @@ int mpegts_read_header(struct aic_mpegts_parser *s)
     /* Read SDT、PAT and PMT get video and audio */
     handle_packets(ts, 3);
 
-    if (ts->has_audio) {
-        /* Save current pos, and then search the first audio pkt to get audio params*/
-        uint64_t pos = aic_stream_tell(s->stream);
-        ts->find_first_audio = 1;
-        handle_packets(ts, 0);
-        ts->find_first_audio = 0;
-        ts->last_pes = NULL;
-        aic_stream_seek(s->stream, pos, SEEK_SET);
-    }
+    handle_audio_header(s, ts);
 
     return PARSER_OK;
 }
 
 static int handle_audio_packets(struct mpegts_context *ts, struct aic_parser_packet *pkt)
 {
-    int ret = PARSER_OK;
     int new_read_offset = 0;
+    int cur_read_offset = 0;
+    int ret = PARSER_OK;
     struct mpegts_audio_decode_header audio_header = {0};
 
-    if (ts->cur_codec_id == CODEC_ID_MP3) {
-        ret = mpegaudio_decode_mp3_header(ts->pkt.data + ts->read_offset, &audio_header);
-        if (ret < 0)
-            return ret;
-        new_read_offset = ts->read_offset + audio_header.frame_size;
-        if (new_read_offset <= ts->pkt.size) {
-            ts->no_need_peek = (new_read_offset == ts->pkt.size) ? 0 : 1;
-            pkt->size = audio_header.frame_size;
-            pkt->pts += audio_header.frame_duration;
-        } else {
-            if (ts->read_offset < ts->pkt.size)
-                loge("Audio packet may wrong, read_offset:%d, pkt.size:%d, new frame_size:%d",
-                     ts->read_offset, ts->pkt.size, audio_header.frame_size);
+    if (ts->skip_audio_track) {
+        logd("skip_audio_track %d", ts->skip_audio_track);
+        ts->no_need_peek = 0;
+        return 0;
+    }
+
+    cur_read_offset = ts->last_read_offset > 0 ? ts->last_read_offset : ts->read_offset;
+    if (ts->cur_audio_codec_id == CODEC_ID_MP3) {
+        ret = mpegaudio_decode_mp3_header(ts->pkt.data + cur_read_offset, &audio_header);
+        if (ret < 0) {
+            loge("MP3 header decode failed at offset %d", cur_read_offset);
             ts->no_need_peek = 0;
-        }
-    } else if (ts->cur_codec_id == CODEC_ID_AAC) {
-        ret = mpegaudio_decode_aac_header(ts->pkt.data + ts->read_offset, &audio_header);
-        if (ret < 0)
             return ret;
-        new_read_offset = ts->read_offset + audio_header.frame_size;
-        if (new_read_offset <= ts->pkt.size) {
-            ts->no_need_peek = (new_read_offset == ts->pkt.size) ? 0 : 1;
-            ts->read_offset += audio_header.aac.header_offset;
-            pkt->size = audio_header.frame_size - audio_header.aac.header_offset;
-            pkt->pts += audio_header.frame_duration;
-        } else {
-            ts->no_need_peek = 0;
         }
+
+        new_read_offset = cur_read_offset + audio_header.frame_size;
+        ts->audio_pes_end_frame = 0;
+        if (new_read_offset > ts->pkt.size) {
+            logd("Audio packet may not full, read_offset:%d, pkt.size:%d, new frame_size:%d",
+                cur_read_offset, ts->pkt.size, audio_header.frame_size);
+            ts->no_need_peek = 0;
+            ts->audio_pes_end_frame = 1;
+            return PARSER_NODATA;
+        } else if (new_read_offset > ts->pkt.size - 4) {
+            ts->no_need_peek = 0;
+            ts->last_read_offset = 0;
+            ts->audio_pes_end_frame = 1;
+        }
+
+        pkt->size = audio_header.frame_size;
+        pkt->pts = ts->apkt.pts + audio_header.frame_duration;
+        ts->apkt.pts = pkt->pts;
+        pkt->stream_index = ts->audio_track_id;
+    } else if (ts->cur_audio_codec_id == CODEC_ID_AAC) {
+        ret = mpegaudio_decode_aac_header(ts->pkt.data + cur_read_offset, &audio_header, 0, NULL);
+        if (ret < 0) {
+            loge("AAC header decode failed at offset %d, frm_size:%d, pkt_size:%d",
+                cur_read_offset, audio_header.frame_size, ts->pkt.size);
+            ts->no_need_peek = 0;
+            return ret;
+        }
+
+        new_read_offset = cur_read_offset + audio_header.frame_size;
+        ts->audio_pes_end_frame = 0;
+        if (new_read_offset > ts->pkt.size) {
+            logd("Audio packet may not full, read_offset:%d, pkt.size:%d, new frame_size:%d",
+                cur_read_offset, ts->pkt.size, audio_header.frame_size);
+            ts->no_need_peek = 0;
+            ts->audio_pes_end_frame = 1;
+            return PARSER_NODATA;
+        } else if (new_read_offset > ts->pkt.size - 4) {
+            ts->no_need_peek = 0;
+            ts->last_read_offset = 0;
+            ts->audio_pes_end_frame = 1;
+        }
+
+        ts->read_offset += audio_header.aac.header_offset;
+        pkt->size = audio_header.frame_size - audio_header.aac.header_offset;
+        pkt->pts = ts->apkt.pts + audio_header.frame_duration;
+        ts->apkt.pts = pkt->pts;
+        pkt->stream_index = ts->audio_track_id;
+
+        //predict next audio frame if has enough size
+        if (new_read_offset + audio_header.frame_size / 2 > ts->pkt.size)
+            ts->no_need_peek = 0;
     } else {
         ts->no_need_peek = 0;
+        loge("Unsupported audio codec id %d", ts->cur_audio_codec_id);
+        return PARSER_NODATA;
     }
+
 
     return ret;
 }
 
 static int update_audio_packets(struct mpegts_context *ts, struct aic_parser_packet *pkt)
 {
-    if (ts->cur_codec_id != CODEC_ID_MP3 &&
-        ts->cur_codec_id != CODEC_ID_AAC) {
+    if (ts->cur_audio_codec_id != CODEC_ID_MP3 &&
+        ts->cur_audio_codec_id != CODEC_ID_AAC) {
         return PARSER_OK;
     }
 
-    if (ts->no_need_peek) {
-        ts->read_offset += pkt->size;
-    }
+    ts->read_offset += pkt->size;
 
     return PARSER_OK;
+}
+
+static int set_current_audio_track_id(struct aic_mpegts_parser *s, struct aic_parser_packet *pkt)
+{
+    struct mpegts_context *ts = s->priv_data;
+    int i = 0;
+
+    ts->audio_track_id = -1;
+
+    if (ts->pkt.type == MPP_MEDIA_TYPE_AUDIO) {
+        for (i = 0; i < s->nb_audio_track; i++) {
+            if (pkt->pid == s->audio_pid[i]) {
+                ts->audio_track_id = i;
+                break;
+            }
+        }
+    }
+
+    return 0;
 }
 
 int mpegts_peek_packet(struct aic_mpegts_parser *s, struct aic_parser_packet *pkt)
@@ -1609,26 +2137,31 @@ int mpegts_peek_packet(struct aic_mpegts_parser *s, struct aic_parser_packet *pk
         if (ret == PARSER_EOS) {
             pkt->size = 0;
             pkt->flag = PACKET_EOS;
+        } else if (ret == PARSER_NODATA) {
+            return PARSER_NODATA;
         } else {
             pkt->type = ts->pkt.type;
             pkt->pts = ts->pkt.pts;
             pkt->dts = ts->pkt.dts;
             pkt->flag = ts->pkt.flag;
             pkt->duration = ts->pkt.duration;
-            ts->read_offset = 0;
             pkt->size = ts->pkt.size;
+            pkt->pid = ts->pkt.pid;
             if (ts->pkt.type == MPP_MEDIA_TYPE_AUDIO) {
-                handle_audio_packets(ts, pkt);
+                ts->no_need_peek = 1;
+                set_current_audio_track_id(s, &ts->pkt);
+                ret = handle_audio_packets(ts, pkt);
             } else {
                 ts->no_need_peek = 0;
             }
         }
     } else {
+        set_current_audio_track_id(s, pkt);
         ret = handle_audio_packets(ts, pkt);
     }
 
-    logd("peek %d no_need_peek %d, packet: type=%d, size=%d, pts=%ld",
-         ret, ts->no_need_peek, pkt->type, pkt->size, pkt->pts);
+    logd("peek %d no_need_peek %d, packet: type=%d, size=%d, pts=%ld,offset:%d",
+        ret, ts->no_need_peek, pkt->type, pkt->size, pkt->pts, ts->read_offset);
     return ret;
 }
 
@@ -1639,10 +2172,13 @@ int mpegts_read_packet(struct aic_mpegts_parser *s, struct aic_parser_packet *pk
     }
     struct mpegts_context *ts = s->priv_data;
 
-    memcpy(pkt->data, ts->pkt.data + ts->read_offset, pkt->size);
-
-    if (ts->pkt.type == MPP_MEDIA_TYPE_AUDIO) {
+    if (pkt->type == MPP_MEDIA_TYPE_VIDEO) {
+        memcpy(pkt->data, ts->pkt.data, pkt->size);
+    } else if (pkt->type == MPP_MEDIA_TYPE_AUDIO) {
+        memcpy(pkt->data, ts->apkt.data + ts->read_offset, pkt->size);
         update_audio_packets(ts, pkt);
+    } else {
+        return PARSER_ERROR;
     }
 
     return PARSER_OK;
@@ -1670,17 +2206,51 @@ int mpegts_read_close(struct aic_mpegts_parser *s)
         if (!st) {
             continue;
         }
+
+        if (st->codecpar.extradata) {
+            mpp_free(st->codecpar.extradata);
+            st->codecpar.extradata = NULL;
+        }
+
         mpp_free(st);
         s->streams[i] = NULL;
     }
     if (!ts) {
         return PARSER_NOMEM;
     }
-    if (ts->pkt.data) {
-        mpp_free(ts->pkt.data);
-        ts->pkt.data = NULL;
+    if (ts->video_buf.data) {
+        mpp_free(ts->video_buf.data);
+        ts->video_buf.data = NULL;
+    }
+    if (ts->audio_buf.data) {
+        mpp_free(ts->audio_buf.data);
+        ts->audio_buf.data = NULL;
     }
     mpegts_free(ts);
     mpp_free(ts);
+    return PARSER_OK;
+}
+
+int mpegts_control(struct aic_mpegts_parser *s, enum parse_command cmd, void *params)
+{
+    struct mpegts_context *ts;
+    if (!s || !s->priv_data) {
+        return PARSER_NOMEM;
+    }
+    ts = s->priv_data;
+    switch (cmd) {
+        case PARSER_VIDEO_SKIP_PACKET:
+            ts->skip_video_track = 1;
+            break;
+
+        case PARSER_AUDIO_SKIP_PACKET:
+            ts->skip_audio_track = 1;
+            break;
+
+        default:
+            return PARSER_INVALIDPARAM;
+
+    }
+
     return PARSER_OK;
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2022 Artinchip Technology Co. Ltd
+ * Copyright (C) 2020-2026 ArtInChip Technology Co. Ltd
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -71,6 +71,13 @@ int mpp_decoder_get_packet(struct mpp_decoder* decoder, struct mpp_packet* packe
  * @packet: the packet filled by application
  */
 int mpp_decoder_put_packet(struct mpp_decoder* decoder, struct mpp_packet* packet);
+
+/**
+ * mpp_decoder_return_packet - return the packet to empty list (bypass decode)
+ * @decoder: mpp_decoder context
+ * @packet: the packet to be returned to empty pool
+ */
+int mpp_decoder_return_packet(struct mpp_decoder* decoder, struct mpp_packet* packet);
 
 /**
  * mpp_decoder_get_frame - get a display frame from decoder

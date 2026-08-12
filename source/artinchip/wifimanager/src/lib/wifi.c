@@ -112,7 +112,7 @@ static int get_process_state(const char *name)
 		return -1;
 	}
 
-	sprintf(cmd, "ps | grep %s | grep -v grep", name);
+	sprintf(cmd, "ps | grep '%s.*-iwlan0' | grep -v grep", name);
 	strea = popen(cmd, "r" );
 	if(!strea) return -1;
 	bytes = fread( buf, sizeof(char), sizeof(buf), strea);

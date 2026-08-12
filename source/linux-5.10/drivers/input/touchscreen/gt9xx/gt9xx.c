@@ -23,6 +23,8 @@
 #include <linux/input/mt.h>
 #include "gt9xx.h"
 
+#undef CONFIG_FB
+
 #define GOODIX_COORDS_ARR_SIZE	4
 #define PROP_NAME_SIZE		24
 #define I2C_MAX_TRANSFER_SIZE   255
@@ -1208,7 +1210,7 @@ static ssize_t gtp_productinfo_show(struct device *dev,
 {
 	struct goodix_ts_data *data = dev_get_drvdata(dev);
 	struct goodix_fw_info *fw_info = &data->fw_info;
-	
+
 	return scnprintf(buf, PAGE_SIZE, "GT%s_%x_%d\n",
 			 fw_info->pid, fw_info->version, fw_info->sensor_id);
 }
@@ -1337,7 +1339,7 @@ s32 gtp_get_fw_info(struct i2c_client *client, struct goodix_fw_info *fw_info)
 		dev_info(&client->dev, "IC Version: %c%c%c%c_%02X%02X\n",
 			 buf[2], buf[3], buf[4], buf[5], buf[7], buf[6]);
 	}
-	
+
 	/* current firmware version */
 	fw_info->version = (buf[7] << 8) | buf[6];
 

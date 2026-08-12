@@ -187,16 +187,20 @@ static void gpai_reg_enable(void __iomem *base, int offset, int bit, int enable)
 
 static void gpai_enable(void __iomem *regs, int enable)
 {
-	spin_lock(&user_lock);
+	unsigned long flags;
+
+	spin_lock_irqsave(&user_lock, flags);
 	gpai_reg_enable(regs, GPAI_MCR, GPAI_MCR_EN, enable);
-	spin_unlock(&user_lock);
+	spin_unlock_irqrestore(&user_lock, flags);
 }
 
 static void gpai_ch_enable(void __iomem *regs, u32 ch, int enable)
 {
-	spin_lock(&user_lock);
+	unsigned long flags;
+
+	spin_lock_irqsave(&user_lock, flags);
 	gpai_reg_enable(regs, GPAI_MCR, GPAI_MCR_CH_EN(ch), enable);
-	spin_unlock(&user_lock);
+	spin_unlock_irqrestore(&user_lock, flags);
 }
 
 static void gpai_int_enable(void __iomem *regs, u32 ch, u32 enable, u32 detail)
@@ -239,8 +243,9 @@ static void gpai_fifo_flush(struct aic_gpai_dev *gpai, u32 ch)
 static void gpai_single_mode(void __iomem *regs, u32 ch)
 {
 	u32 val = 0;
+	unsigned long flags;
 
-	spin_lock(&user_lock);
+	spin_lock_irqsave(&user_lock, flags);
 
 	val = readl(regs + GPAI_CHnCR(ch));
 	val |= GPAI_CHnCR_SBC_8_POINTS << GPAI_CHnCR_SBC_SHIFT
@@ -249,7 +254,7 @@ static void gpai_single_mode(void __iomem *regs, u32 ch)
 
 	gpai_int_enable(regs, ch, 1,
 			GPAI_CHnINT_DAT_RDY_IE | GPAI_CHnINT_FIFO_ERR_IE);
-	spin_unlock(&user_lock);
+	spin_unlock_irqrestore(&user_lock, flags);
 }
 
 /* Only in period mode, HLA and LLA are available */
@@ -259,8 +264,9 @@ static void gpai_period_mode(struct aic_gpai_dev *gpai, u32 ch)
 	u32 detail = GPAI_CHnINT_DAT_RDY_IE | GPAI_CHnINT_FIFO_ERR_IE;
 	void __iomem *regs = gpai->regs;
 	struct aic_gpai_ch *chan = &gpai->chan[ch];
+	unsigned long flags;
 
-	spin_lock(&user_lock);
+	spin_lock_irqsave(&user_lock, flags);
 	if (chan->hla_enable) {
 		detail |= GPAI_CHnINT_HLA_RM_IE | GPAI_CHnINT_HLA_VALID_IE;
 		val = ((chan->hla_rm_thd << GPAI_CHnLAT_HLLA_RM_THD_SHIFT)
@@ -289,7 +295,7 @@ static void gpai_period_mode(struct aic_gpai_dev *gpai, u32 ch)
 		| GPAI_CHnCR_PERIOD_SAMPLE_EN;
 	writel(val, regs + GPAI_CHnCR(ch));
 
-	spin_unlock(&user_lock);
+	spin_unlock_irqrestore(&user_lock, flags);
 }
 
 static int gpai_ch_init(struct aic_gpai_dev *gpai, u32 ch)
@@ -343,6 +349,7 @@ static int aic_gpai_read_raw(struct iio_dev *iodev,
 	struct device *dev = &gpai->pdev->dev;
 	struct aic_gpai_ch *gpai_ch = NULL;
 	u32 ch = chan->channel;
+	unsigned long flags;
 
 	if (unlikely(chan->channel < 0 || chan->channel >= AIC_GPAI_MAX_CH)) {
 		dev_err(dev, "Invalid channel No.%d", chan->channel);
@@ -364,9 +371,9 @@ static int aic_gpai_read_raw(struct iio_dev *iodev,
 		}
 #endif
 
-		spin_lock(&user_lock);
+		spin_lock_irqsave(&user_lock, flags);
 		reinit_completion(&gpai_ch->complete);
-		spin_unlock(&user_lock);
+		spin_unlock_irqrestore(&user_lock, flags);
 
 		gpai_ch_enable(gpai->regs, ch, 1);
 		gpai_single_mode(gpai->regs, ch);
@@ -411,9 +418,8 @@ static irqreturn_t aic_gpai_isr(int irq, void *dev_id)
 	u32 ch_flag = 0, ch_int = 0;
 	int i;
 	struct aic_gpai_ch *chan = NULL;
-	unsigned long flags;
 
-	spin_lock_irqsave(&user_lock, flags);
+	spin_lock(&user_lock);
 
 	ch_flag = readl(regs + GPAI_INTR);
 	for (i = 0; i < AIC_GPAI_MAX_CH; i++) {
@@ -460,9 +466,9 @@ static irqreturn_t aic_gpai_isr(int irq, void *dev_id)
 		if (ch_int & GPAI_CHnINT_FIFO_ERR_FLAG)
 			gpai_fifo_flush(gpai, i);
 	}
+	spin_unlock(&user_lock);
 	dev_dbg(dev, "IRQ flag %#x, detail %#x\n", ch_flag, ch_int);
 
-	spin_unlock_irqrestore(&user_lock, flags);
 	return IRQ_HANDLED;
 }
 

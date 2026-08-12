@@ -1,0 +1,5 @@
+menuconfig BR2_PACKAGE_TEST_VIN
+	bool "test-vin"
+	default n
+	select BR2_PACKAGE_V4L_UTILS
+	select BR2_PACKAGE_LIBDRM

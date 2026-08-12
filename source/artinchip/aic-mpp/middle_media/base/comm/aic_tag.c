@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2024 ArtInChip Technology Co. Ltd
+ * Copyright (C) 2020-2026 ArtInChip Technology Co. Ltd
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -107,6 +107,12 @@ const struct codec_tag aic_codec_bmp_tags[] = {
     { CODEC_ID_MJPEG,        MKTAG('M', 'T', 'S', 'J') },
     /* Paradigm Matrix M-JPEG Codec */
     { CODEC_ID_MJPEG,        MKTAG('Z', 'J', 'P', 'G') },
+    /* MPEG1VIDEO Codec */
+    { CODEC_ID_MPEG12,        MKTAG('M', 'P', 'G', '1') },
+    { CODEC_ID_MPEG12,        MKTAG('m', 'p', 'g', '1') },
+    /* MPEG1VIDEO Codec */
+    { CODEC_ID_MPEG12,        MKTAG('M', 'P', 'G', '2') },
+    { CODEC_ID_MPEG12,        MKTAG('m', 'p', 'g', '2') },
     { CODEC_ID_NONE,         0 }
 };
 

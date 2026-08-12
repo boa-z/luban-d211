@@ -20,13 +20,18 @@ set(MM_CLOCK
     src/mm_clock_component.c
 )
 
-set(MM_MUXER
-    src/mm_muxer_component.c
-)
-
-set(MM_VENC
-    src/mm_venc_component.c
-)
+if (RECORDER)
+    set(MM_MUXER
+        src/mm_muxer_component.c
+    )
+    set(MM_VENC
+        src/mm_venc_component.c
+    )
+    set(MM_VIN
+        src/mm_vin_component.c
+    )
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -DRECORDER")
+endif()
 
 add_library(mm_component SHARED
     ${MM_DEMUXER}
@@ -37,6 +42,7 @@ add_library(mm_component SHARED
     ${MM_CLOCK}
     ${MM_MUXER}
     ${MM_VENC}
+    ${MM_VIN}
     mm_core.c
 )
 

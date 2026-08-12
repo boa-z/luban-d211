@@ -1,5 +1,7 @@
 /*
-* Copyright (C) 2020-2024 Artinchip Technology Co. Ltd
+* Copyright (C) 2020-2025 ArtInChip Technology Co. Ltd
+*
+* SPDX-License-Identifier: Apache-2.0
 *
 *  author: <che.jiang@artinchip.com>
 *  Desc: aic_mkv_parser
@@ -46,9 +48,11 @@ s32 mkv_get_media_info(struct aic_parser *parser,
 {
     int i;
     int64_t duration = 0;
+    struct aic_av_audio_stream *audio_stream;
     struct aic_matroska_parser *c = (struct aic_matroska_parser *)parser;
 
     logi("================ media info =======================");
+    media->audio_track_count = 0;
     for (i = 0; i < c->nb_streams; i++) {
         struct matroska_stream_ctx *st = c->streams[i];
         if (st->codecpar.codec_type == MPP_MEDIA_TYPE_VIDEO) {
@@ -74,27 +78,32 @@ s32 mkv_get_media_info(struct aic_parser *parser,
             logi("video extra_data_size: %d", st->codecpar.extradata_size);
         } else if (st->codecpar.codec_type == MPP_MEDIA_TYPE_AUDIO) {
             media->has_audio = 1;
+            audio_stream = &media->audio_stream[media->audio_track_count];
             if (st->codecpar.codec_id == CODEC_ID_MP3)
-                media->audio_stream.codec_type = MPP_CODEC_AUDIO_DECODER_MP3;
+                audio_stream->codec_type = MPP_CODEC_AUDIO_DECODER_MP3;
             else if (st->codecpar.codec_id == CODEC_ID_AAC)
-                media->audio_stream.codec_type = MPP_CODEC_AUDIO_DECODER_AAC;
+                audio_stream->codec_type = MPP_CODEC_AUDIO_DECODER_AAC;
             else
-                media->audio_stream.codec_type = MPP_CODEC_AUDIO_DECODER_UNKOWN;
+                audio_stream->codec_type = MPP_CODEC_AUDIO_DECODER_UNKOWN;
 
-            media->audio_stream.bits_per_sample =
+            audio_stream->bits_per_sample =
                 st->codecpar.bits_per_coded_sample;
-            media->audio_stream.nb_channel = st->codecpar.channels;
-            media->audio_stream.sample_rate = st->codecpar.sample_rate;
+            audio_stream->nb_channel = st->codecpar.channels;
+            audio_stream->sample_rate = st->codecpar.sample_rate;
             if (st->codecpar.extradata_size > 0) {
-                media->audio_stream.extra_data_size =
+                audio_stream->extra_data_size =
                     st->codecpar.extradata_size;
-                media->audio_stream.extra_data = st->codecpar.extradata;
+                audio_stream->extra_data = st->codecpar.extradata;
             }
+            audio_stream->track_id = st->codecpar.audio_track_id;
+            media->audio_track_count++;
+
+            logi("track_id:%d", audio_stream->track_id);
             logi("audio bits_per_sample: %d",
                  st->codecpar.bits_per_coded_sample);
             logi("audio channels: %d", st->codecpar.channels);
             logi("audio sample_rate: %d", st->codecpar.sample_rate);
-            logi("audio extra_data_size: %d", st->codecpar.extradata_size);
+            logi("audio extra_data_size: %d\n", st->codecpar.extradata_size);
         } else {
             loge("unknown stream(%d) type: %d", i, st->codecpar.codec_type);
         }

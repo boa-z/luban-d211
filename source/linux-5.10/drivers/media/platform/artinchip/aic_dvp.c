@@ -2,7 +2,7 @@
 /*
  * The main part of ArtInChip DVP controller driver.
  *
- * Copyright (C) 2020-2022 ArtInChip Technology Co., Ltd.
+ * Copyright (C) 2020-2026 ArtInChip Technology Co., Ltd.
  * Authors:  Matteo <duanmt@artinchip.com>
  */
 
@@ -78,8 +78,34 @@ static ssize_t buflist_show(struct device *dev,
 }
 static DEVICE_ATTR_RO(buflist);
 
+static ssize_t version_show(struct device *dev,
+				 struct device_attribute *devattr,
+				 char *buf)
+{
+	const char *compatible;
+	const char *ver;
+
+	compatible = of_get_property(dev->of_node, "compatible", NULL);
+	if (!compatible) {
+		sprintf(buf, "unknown\n");
+		return strlen(buf);
+	}
+
+	/* compatible format: "artinchip,aic-dvp-vX.Y" */
+	ver = strrchr(compatible, '-');
+	if (!ver || *(ver + 1) == '\0' || *(ver + 2) == '\0') {
+		sprintf(buf, "unknown\n");
+		return strlen(buf);
+	}
+
+	sprintf(buf, "%s\n", ver + 2);
+	return strlen(buf);
+}
+static DEVICE_ATTR_RO(version);
+
 static struct attribute *aic_dvp_attr[] = {
 	&dev_attr_buflist.attr,
+	&dev_attr_version.attr,
 	NULL
 };
 
@@ -156,12 +182,14 @@ static const struct v4l2_async_notifier_operations aic_dvp_notify_ops = {
 	.complete	= aic_dvp_notify_complete,
 };
 
-static int aic_dvp_bustype2input(int bustype)
+static int aic_dvp_bustype2input(struct device *dev, int bustype)
 {
 	if (bustype == V4L2_MBUS_PARALLEL)
 		return DVP_IN_YUV422;
-	if (bustype == V4L2_MBUS_BT656)
+	if (bustype == V4L2_MBUS_BT656) {
+		dev_info(dev, "Input is BT656\n");
 		return DVP_IN_BT656;
+	}
 
 	pr_err("%s() - Invalid bustype %d\n", __func__, bustype);
 	return DVP_IN_YUV422;
@@ -187,13 +215,14 @@ static int aic_dvp_notifier_init(struct aic_dvp *dvp)
 		goto out;
 
 	dvp->cfg.field_active = 1;
-	fwnode_property_read_u32(ep, "aic,field-active",
-				 &dvp->cfg.field_active);
-	if (fwnode_property_read_bool(ep, "aic,interlaced"))
+	fwnode_property_read_u32(ep, "aic,field-active", &dvp->cfg.field_active);
+	if (fwnode_property_read_bool(ep, "aic,interlaced")) {
 		dvp->cfg.field = V4L2_FIELD_INTERLACED;
+		dev_info(dvp->dev, "Enable interlace mode\n");
+	}
 
 	dvp->bus = vep.bus.parallel;
-	dvp->cfg.input = aic_dvp_bustype2input(vep.bus_type);
+	dvp->cfg.input = aic_dvp_bustype2input(dvp->dev, vep.bus_type);
 
 	ret = v4l2_async_notifier_add_fwnode_remote_subdev(&dvp->notifier,
 							   ep, &dvp->asd);
@@ -307,16 +336,18 @@ static int aic_dvp_probe(struct platform_device *pdev)
 
 	dvp->vdev_pad.flags = MEDIA_PAD_FL_SINK | MEDIA_PAD_FL_MUST_CONNECT;
 	ret = media_entity_pads_init(&vdev->entity, 1, &dvp->vdev_pad);
-	if (ret < 0)
+	if (ret < 0) {
+		media_entity_cleanup(&subdev->entity);
 		return ret;
+	}
+
+	ret = aic_dvp_notifier_init(dvp);
+	if (ret)
+		goto err_clean_pad;
 
 	ret = aic_dvp_buf_register(dvp);
 	if (ret)
 		goto err_clean_pad;
-
-	ret = aic_dvp_notifier_init(dvp);
-	if (ret)
-		goto err_unregister_media;
 
 	ret = v4l2_async_notifier_register(&dvp->v4l2, &dvp->notifier);
 	if (ret) {

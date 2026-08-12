@@ -2,7 +2,7 @@
 /*
  * ArtInChip UART driver
  *
- * Copyright (C) 2020 ArtInChip Technology Co.,Ltd
+ * Copyright (C) 2020-2026 ArtInChip Technology Co.,Ltd
  * Author: Dehuang Wu <dehuang.wu@artinchip.com>
  */
 
@@ -46,7 +46,6 @@ static int aic_serial_probe(struct udevice *dev)
 	struct reset_ctl reset;
 	int ret;
 
-	pr_info("%s\n", __func__);
 	ret = clk_get_by_index(dev, 0, &clk);
 	if (ret < 0) {
 		dev_err(dev, "failed to get clk\n");
@@ -82,6 +81,7 @@ static int aic_serial_probe(struct udevice *dev)
 static const struct udevice_id aic_serial_ids[] = {
 	{ .compatible = "artinchip,aic-uart-v1.0" },
 	{ .compatible = "artinchip,aic-uart-v1.1" },
+	{ .compatible = "artinchip,aic-uart-v1.4" },
 	{ }
 };
 

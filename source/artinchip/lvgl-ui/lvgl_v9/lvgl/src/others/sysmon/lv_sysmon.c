@@ -67,6 +67,77 @@
  *   GLOBAL FUNCTIONS
  **********************/
 
+#if LV_GET_CPU_USAGE_FROM_STAT == 1
+#include <stdio.h>
+struct cpu_occupy
+{
+    unsigned long user;
+    unsigned long nice;
+    unsigned long system;
+    unsigned long idle;
+};
+
+static int cpu_cal_id = 0;
+static int first_cal_cpu = 1;
+static struct cpu_occupy cpu_stat[2];
+
+static int cpu_occupy_get(struct cpu_occupy *t)
+{
+    FILE *fd;
+    char buff[1024] = { 0 };
+    char name[64]={ 0 };
+
+    fd = fopen("/proc/stat","r");
+
+    if (!fd) {
+        return -1;
+    }
+
+    fgets(buff,sizeof(buff), fd);
+    sscanf(buff,"%s %lu %lu %lu %lu", name, &t->user, &t->nice, &t->system, &t->idle);
+    fclose(fd);
+
+    return 0;
+}
+
+static float cpu_occupy_cal(struct cpu_occupy *o, struct cpu_occupy *n)
+{
+    unsigned long od, nd;
+    unsigned long id, sd;
+    float cpu_use = 0;
+
+    od = (unsigned long)(o->user + o->nice + o->system + o->idle);
+    nd = (unsigned long)(n->user + n->nice + n->system + n->idle);
+    id = (unsigned long)(n->user - o->user);
+    sd = (unsigned long)(n->system - o->system);
+
+    if ((nd - od) != 0)
+         cpu_use = (float)((sd + id)*100) / (float)(nd - od);
+
+    return cpu_use;
+}
+
+static float lv_get_cpu_usage(void)
+{
+    int last_id;
+    float value;
+
+    /* cpu usage */
+    last_id = (cpu_cal_id == 1) ? 0 : 1;
+    if (first_cal_cpu) {
+        first_cal_cpu = 0;
+        cpu_occupy_get((struct cpu_occupy *)&cpu_stat[last_id]);
+    }
+
+    cpu_occupy_get((struct cpu_occupy *)&cpu_stat[cpu_cal_id]);
+    value = cpu_occupy_cal((struct cpu_occupy *)&cpu_stat[last_id],
+          (struct cpu_occupy *)&cpu_stat[cpu_cal_id]);
+
+    cpu_cal_id = last_id;
+    return value;
+}
+#endif
+
 void _lv_sysmon_builtin_init(void)
 {
 #if _USE_PERF_MONITOR
@@ -187,7 +258,12 @@ static void perf_update_timer_cb(lv_timer_t * t)
     info->calculated.fps = LV_MIN(info->calculated.fps,
                                   1000 / disp_refr_period);   /*Limit due to possible off-by-one error*/
 
+#if LV_GET_CPU_USAGE_FROM_STAT == 1
+    info->calculated.cpu = (int)lv_get_cpu_usage();
+#else
     info->calculated.cpu = 100 - LV_SYSMON_GET_IDLE();
+#endif
+
     info->calculated.refr_avg_time = info->measured.refr_cnt ? (info->measured.refr_elaps_sum / info->measured.refr_cnt) :
                                      0;
 

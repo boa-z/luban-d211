@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 /*
- * Copyright (c) 2020-2024 ArtInChip Inc.
+ * Copyright (c) 2020-2026 ArtInChip Inc.
  */
 #include <common.h>
 #include <mapmem.h>
@@ -265,10 +265,18 @@ static struct aic_periph_clk clk_periphs[] = {
 	AIC_CLK_PERIPH(CLK_I2C3,            CLK_APB1,       CLK_I2C3_REG),
 	AIC_CLK_PERIPH(CLK_CAN0,            CLK_APB1,       CLK_CAN0_REG),
 	AIC_CLK_PERIPH(CLK_CAN1,            CLK_APB1,       CLK_CAN1_REG),
+#endif
+#if defined(CONFIG_SPL_BUILD) && defined(CONFIG_SPL_THERMAL)
 	AIC_CLK_PERIPH(CLK_ADCIM,           CLK_OSC24M,     CLK_ADCIM_REG),
+#endif
+#if !defined(CONFIG_SPL_BUILD)
 	AIC_CLK_PERIPH(CLK_GPAI,            CLK_APB1,       CLK_GPAI_REG),
 	AIC_CLK_PERIPH(CLK_RTP,             CLK_APB1,       CLK_RTP_REG),
+#endif
+#if defined(CONFIG_SPL_BUILD) && defined(CONFIG_SPL_THERMAL)
 	AIC_CLK_PERIPH(CLK_TSEN,            CLK_APB1,       CLK_TSEN_REG),
+#endif
+#if !defined(CONFIG_SPL_BUILD)
 	AIC_CLK_PERIPH(CLK_CIR,             CLK_APB1,       CLK_CIR_REG),
 #endif
 };
@@ -545,7 +553,7 @@ static int aic_clk_probe(struct udevice *dev)
 #endif
 	aic_system_clock_init(dev);
 
-	dev_info(dev, "%s done\n", __func__);
+	dev_dbg(dev, "%s done\n", __func__);
 	return 0;
 }
 

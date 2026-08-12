@@ -1,13 +1,12 @@
 /*
- * Copyright (C) 2020-2023 ArtInChip Technology Co. Ltd
+ * Copyright (C) 2020-2026 ArtInChip Technology Co. Ltd
  *
  * SPDX-License-Identifier: Apache-2.0
  *
- *  author: <qi.xu@artinchip.com>
- *  Desc: jpeg encode
+ * Author: <qi.xu@artinchip.com>
+ * Desc: jpeg encoder
  */
 
-#include <stdio.h>
 #include <string.h>
 #include "ve.h"
 #include "ve_buffer.h"
@@ -16,49 +15,96 @@
 #include "jpeg_enc_ctx.h"
 #include "mpp_mem.h"
 #include "mpp_log.h"
+#include "mpp_encoder.h"
 
-static struct jpeg_ctx* jpeg_encoder_create()
+static void jpeg_encoder_destory(struct jpeg_ctx* impl)
 {
-	struct jpeg_ctx *impl = (struct jpeg_ctx*)mpp_alloc(sizeof(struct jpeg_ctx));
-	if(impl == NULL) {
-		return NULL;
+	if (impl->ve_fd > 0) {
+		ve_close_device();
+		impl->ve_fd = -1;
 	}
-	memset(impl, 0, sizeof(struct jpeg_ctx));
+	if (impl->alloc) {
+		ve_buffer_allocator_destroy(impl->alloc);
+		impl->alloc = NULL;
+	}
+	mpp_free(impl);
+}
+
+static int __mjpeg_encode_init(struct mpp_encoder *ctx, struct encode_config *config)
+{
+	if (!ctx || !config)
+		return -1;
+
+	struct enc_packet_manager_init_cfg pm_cfg = {0};
+	struct jpeg_ctx *impl = (struct jpeg_ctx *)ctx;
 
 	impl->ve_fd = ve_open_device();
 	if (impl->ve_fd < 0) {
 		loge("ve open failed");
-		return NULL;
+		return -1;
 	}
 
 	impl->regs_base = ve_get_reg_base();
 	impl->alloc = ve_buffer_allocator_create(VE_BUFFER_TYPE_DMA);
+	if (!impl->alloc) {
+		loge("ve_buffer_allocator_create failed");
+		ve_close_device();
+		impl->ve_fd = -1;
+		return -1;
+	}
+
+	pm_cfg.ve_buf_handle = impl->alloc;
+	pm_cfg.buffer_size = config->packet_buffer_size;
+	pm_cfg.packet_count = 4;
+	impl->encoder.pm = enc_pm_create(&pm_cfg);
+	if (!impl->encoder.pm) {
+		loge("pm create failed");
+		ve_buffer_allocator_destroy(impl->alloc);
+		ve_close_device();
+		impl->alloc = NULL;
+		impl->ve_fd = -1;
+		return -1;
+	}
 
 	mjpeg_build_huffman_codes(impl->huff_size_dc_luminance,
 		impl->huff_code_dc_luminance,
-		avpriv_mjpeg_bits_dc_luminance,
-		avpriv_mjpeg_val_dc);
+		bits_dc_luma,
+		val_dc);
 	mjpeg_build_huffman_codes(impl->huff_size_dc_chrominance,
 		impl->huff_code_dc_chrominance,
-		avpriv_mjpeg_bits_dc_chrominance,
-		avpriv_mjpeg_val_dc);
+		bits_dc_chroma,
+		val_dc);
 	mjpeg_build_huffman_codes(impl->huff_size_ac_luminance,
 		impl->huff_code_ac_luminance,
-		avpriv_mjpeg_bits_ac_luminance,
-		avpriv_mjpeg_val_ac_luminance);
+		bits_ac_luminance,
+		val_ac_luminance);
 	mjpeg_build_huffman_codes(impl->huff_size_ac_chrominance,
 		impl->huff_code_ac_chrominance,
-		avpriv_mjpeg_bits_ac_chrominance,
-		avpriv_mjpeg_val_ac_chrominance);
+		bits_ac_chroma,
+		val_ac_chroma);
 
-	return impl;
+	impl->quality = 85;
+	return 0;
 }
 
-void jpeg_encoder_destory(struct jpeg_ctx* impl)
+int __mjpeg_encode_destroy(struct mpp_encoder *ctx)
 {
-	ve_close_device();
-	ve_buffer_allocator_destroy(impl->alloc);
+	if (!ctx)
+		return -1;
+
+	struct jpeg_ctx *impl = (struct jpeg_ctx *)ctx;
+	if (impl->ve_fd > 0) {
+		ve_close_device();
+		impl->ve_fd = -1;
+	}
+	if (impl->alloc) {
+		ve_buffer_allocator_destroy(impl->alloc);
+		impl->alloc = NULL;
+	}
+
 	mpp_free(impl);
+
+	return 0;
 }
 
 /* table_class: 0 = DC coef, 1 = AC coefs */
@@ -99,14 +145,14 @@ static void jpeg_table_header(struct jpeg_ctx* s, struct put_bit_ctx *p)
 	put_bits(p, 4, 0); /* 8 bit precision */
 	put_bits(p, 4, 0); /* table 0 */
 	for (i = 0; i < 64; i++) {
-		j = zigzag_direct[i];
+		j = zigzag_dir[i];
 		put_bits(p, 8, s->luma_quant_table[j]);
 	}
 
 	put_bits(p, 4, 0); /* 8 bit precision */
 	put_bits(p, 4, 1); /* table 1 */
 	for (i = 0; i < 64; i++) {
-		j = zigzag_direct[i];
+		j = zigzag_dir[i];
 		put_bits(p, 8, s->chroma_quant_table[j]);
 	}
 
@@ -117,15 +163,15 @@ static void jpeg_table_header(struct jpeg_ctx* s, struct put_bit_ctx *p)
 	put_bits(p, 16, 0); /* patched later */
 	size = 2;
 
-	size += put_huffman_table(p, 0, 0, avpriv_mjpeg_bits_dc_luminance,
-		avpriv_mjpeg_val_dc);
-	size += put_huffman_table(p, 0, 1, avpriv_mjpeg_bits_dc_chrominance,
-		avpriv_mjpeg_val_dc);
+	size += put_huffman_table(p, 0, 0, bits_dc_luma,
+		val_dc);
+	size += put_huffman_table(p, 0, 1, bits_dc_chroma,
+		val_dc);
 
-	size += put_huffman_table(p, 1, 0, avpriv_mjpeg_bits_ac_luminance,
-		avpriv_mjpeg_val_ac_luminance);
-	size += put_huffman_table(p, 1, 1, avpriv_mjpeg_bits_ac_chrominance,
-		avpriv_mjpeg_val_ac_chrominance);
+	size += put_huffman_table(p, 1, 0, bits_ac_luminance,
+		val_ac_luminance);
+	size += put_huffman_table(p, 1, 1, bits_ac_chroma,
+		val_ac_chroma);
 
 	ptr[0] = (size >> 8) & 0xff;
 	ptr[1] = (size) & 0xff;
@@ -220,7 +266,9 @@ static void jpeg_init_hvcount(struct jpeg_ctx* s)
 
 static void set_quality(struct jpeg_ctx* s)
 {
+	int quality;
 	int i;
+
 	if (s->quality <= 0)
 		s->quality = 1;
 	if (s->quality > 100)
@@ -230,24 +278,195 @@ static void set_quality(struct jpeg_ctx* s)
 	// 2. quality = 50, produce "good" quality, std_quant_table
 	// 3. quality =100, produce "best" quality, the value of table are all 1
 	if (s->quality < 50) {
-		s->quality = 5000 / s->quality;
+		quality = 5000 / s->quality;
 	} else {
-		s->quality = 200 - s->quality * 2;
+		quality = 200 - s->quality * 2;
 	}
 
 	for (i=0; i<64; i++) {
-		s->luma_quant_table[i] = (std_luminance_quant_tbl[i] * s->quality + 50) / 100;
+		s->luma_quant_table[i] = (std_luma_quant_table[i] * quality + 50) / 100;
 		if (s->luma_quant_table[i] <= 0)
 			s->luma_quant_table[i] = 1;
 		if (s->luma_quant_table[i] > 255)
 			s->luma_quant_table[i] = 255;
 
-		s->chroma_quant_table[i] = (std_chrominance_quant_tbl[i] * s->quality + 50) / 100;
+		s->chroma_quant_table[i] = (std_chroma_quant_table[i] * quality + 50) / 100;
 		if (s->chroma_quant_table[i] <= 0)
 			s->chroma_quant_table[i] = 1;
 		if (s->chroma_quant_table[i] > 255)
 			s->chroma_quant_table[i] = 255;
 	}
+}
+
+int __mpp_encode_jpeg(struct mpp_encoder *ctx, struct mpp_frame* frame, struct enc_packet* packet)
+{
+	if (!ctx)
+		return -1;
+
+	struct jpeg_ctx *s = (struct jpeg_ctx *)ctx;
+
+	int ret = 0;
+	int i;
+	int comp = 3;
+
+	if (frame->buf.format == MPP_FMT_NV12) {
+		comp = 2;
+	} else if (frame->buf.format == MPP_FMT_YUV420P
+		|| frame->buf.format == MPP_FMT_YUV422P) {
+		comp = 3;
+	} else if (frame->buf.format == MPP_FMT_YUV400) {
+		comp = 1;
+	} else {
+		loge("unsupport format, %d", frame->buf.format);
+		return -1;
+	}
+
+	s->width = frame->buf.size.width;
+	s->height = frame->buf.size.height;
+	s->y_stride = frame->buf.stride[0];
+
+	set_quality(s);
+
+	s->stream_num = packet->size / 256;
+	s->bitstream_vir_addr = packet->data;
+	s->bitstream_phy_addr = packet->phy_base + packet->phy_offset;
+
+	s->cur_frame = frame;
+
+	init_put_bits(&s->pb, packet->data, packet->size);
+	for (i=0; i<comp; i++) {
+		if (frame->buf.buf_type == MPP_PHY_ADDR) {
+			s->phy_addr[i] = frame->buf.phy_addr[i];
+		} else {
+			ve_add_dma_buf(frame->buf.fd[i], &s->phy_addr[i]);
+		}
+	}
+
+	jpeg_init_hvcount(s);
+	jpeg_encode_pic_header(s);
+	// we should flush (s->header_offset + 64) bytes, because
+	// flush_put_bits will write some data of SOS
+	enc_packet_flush_cache(s->encoder.pm, packet->data, s->header_offset + 64, CACHE_CLEAN);
+
+	if (jpeg_hw_encode(s) < 0) {
+		loge("encode failed");
+		ret = -1;
+		goto out;
+	}
+
+	if (s->encode_data_len > packet->size) {
+		loge("buf len(%zu) is too small, we need (%d) bytes",
+			packet->size, s->encode_data_len + s->header_offset);
+		ret = -1;
+		goto out;
+	}
+	packet->len = s->encode_data_len;
+	packet->pts = frame->pts;
+	enc_packet_flush_cache(s->encoder.pm, packet->data, s->encode_data_len, CACHE_INVALID);
+
+out:
+	if (frame->buf.buf_type == MPP_DMA_BUF_FD) {
+		for (i=0; i<comp; i++) {
+			if (s->phy_addr[i])
+				ve_rm_dma_buf(frame->buf.fd[i], s->phy_addr[i]);
+		}
+	}
+	return ret;
+}
+
+
+int __mjpeg_encode_get_parameter(struct mpp_encoder *ctx, enum mpp_enc_cmd_type cmd, void *param)
+{
+	// TODO
+	return 0;
+}
+
+int __mjpeg_encode_set_parameter(struct mpp_encoder *ctx, enum mpp_enc_cmd_type cmd, void *param)
+{
+	struct jpeg_ctx *s = (struct jpeg_ctx *)ctx;
+	switch (cmd) {
+	case ENC_CMD_JPEG_QUALITY:
+		s->quality = *(int *)param;
+		break;
+	default:
+		logw("Unknown command: %d", cmd);
+		return -1;
+	}
+	return 0;
+}
+
+int __mjpeg_encode_reset(struct mpp_encoder *ctx)
+{
+	// TODO
+	return 0;
+}
+
+struct enc_ops mjpeg_encoder = {
+	.name           = "mjpeg",
+	.init           = __mjpeg_encode_init,
+	.destory        = __mjpeg_encode_destroy,
+	.encode         = __mpp_encode_jpeg,
+	.get_parameter  = __mjpeg_encode_get_parameter,
+	.set_parameter  = __mjpeg_encode_set_parameter,
+	.reset          = __mjpeg_encode_reset,
+};
+
+struct mpp_encoder* create_jpeg_encoder()
+{
+	struct jpeg_ctx *s = (struct jpeg_ctx*)mpp_alloc(sizeof(struct jpeg_ctx));
+	if(s == NULL) {
+		loge("malloc jpeg_ctx failed");
+		return NULL;
+	}
+	memset(s, 0, sizeof(struct jpeg_ctx));
+
+	s->encoder.ops = &mjpeg_encoder;
+
+	return &s->encoder;
+}
+
+// ------------------------------------------------------------------
+/* Helper functions for mpp_encode_jpeg (legacy API) */
+static struct jpeg_ctx* jpeg_encoder_create()
+{
+	struct jpeg_ctx *impl = (struct jpeg_ctx*)mpp_alloc(sizeof(struct jpeg_ctx));
+	if(impl == NULL) {
+		return NULL;
+	}
+	memset(impl, 0, sizeof(struct jpeg_ctx));
+
+	impl->ve_fd = ve_open_device();
+	if (impl->ve_fd < 0) {
+		loge("ve open failed");
+		mpp_free(impl);
+		return NULL;
+	}
+
+	impl->regs_base = ve_get_reg_base();
+	impl->alloc = ve_buffer_allocator_create(VE_BUFFER_TYPE_DMA);
+	if (!impl->alloc) {
+		ve_close_device();
+		mpp_free(impl);
+		return NULL;
+	}
+	mjpeg_build_huffman_codes(impl->huff_size_dc_luminance,
+		impl->huff_code_dc_luminance,
+		bits_dc_luma,
+		val_dc);
+	mjpeg_build_huffman_codes(impl->huff_size_dc_chrominance,
+		impl->huff_code_dc_chrominance,
+		bits_dc_chroma,
+		val_dc);
+	mjpeg_build_huffman_codes(impl->huff_size_ac_luminance,
+		impl->huff_code_ac_luminance,
+		bits_ac_luminance,
+		val_ac_luminance);
+	mjpeg_build_huffman_codes(impl->huff_size_ac_chrominance,
+		impl->huff_code_ac_chrominance,
+		bits_ac_chroma,
+		val_ac_chroma);
+
+	return impl;
 }
 
 int mpp_encode_jpeg(struct mpp_frame* frame, int quality, int dma_buf_fd, int buf_len, int *len)
@@ -256,6 +475,11 @@ int mpp_encode_jpeg(struct mpp_frame* frame, int quality, int dma_buf_fd, int bu
 	int i;
 	int comp = 3;
 	struct jpeg_ctx* s = jpeg_encoder_create();
+	if (!s) {
+		loge("failed to create jpeg encoder");
+		return -1;
+	}
+
 	s->width = frame->buf.size.width;
 	s->height = frame->buf.size.height;
 	s->quality = quality;
@@ -270,7 +494,8 @@ int mpp_encode_jpeg(struct mpp_frame* frame, int quality, int dma_buf_fd, int bu
 		comp = 1;
 	} else {
 		loge("unsupport format, %d", frame->buf.format);
-		return -1;
+		ret = -1;
+		goto out;
 	}
 
 	set_quality(s);

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 /*
- * Copyright (c) 2020 ArtInChip Inc.
+ * Copyright (c) 2020-2026 ArtInChip Inc.
  */
 
 #include <common.h>
@@ -27,7 +27,7 @@ static const struct pll_vco vco_arr[] = {
 #ifdef CONFIG_CLK_ARTINCHIP_CMU_V1_0
 	{360000000, 1584000000,  8},
 #endif
-#ifdef CONFIG_CLK_ARTINCHIP_CMU_V2_0
+#ifdef CONFIG_CLK_ARTINCHIP_CMU_V2_x
 	{360000000, 1584000000, 17},
 #endif
 	{768000000, 1560000000, 0},
@@ -55,57 +55,53 @@ static enum aic_clk_type aic_get_clk_info(struct aic_clk_tree *tree, u32 id,
 {
 	int i;
 
-#ifdef CONFIG_CLK_ARTINCHIP_CMU_V2_0
-	if (id >= tree->cross_zone_base) {
-		for (i = 0; i < tree->cross_zone_cnt; i++) {
-			if (id == tree->clk_cz[i].id) {
-				*index = i;
-				return AIC_CLK_CROSS_ZONE;
-			}
+#ifdef CONFIG_CLK_ARTINCHIP_CMU_V2_x
+	for (i = 0; i < tree->cross_zone_cnt; i++) {
+		if (id == tree->clk_cz[i].id) {
+			*index = i;
+			return AIC_CLK_CROSS_ZONE;
 		}
 	}
 #endif
-	if (id >= tree->clkout_base) {
-		for (i = 0; i < tree->clkout_cnt; i++) {
-			if (id == tree->clkout[i].id) {
-				*index = i;
-				return AIC_CLK_OUTPUT;
-			}
+	for (i = 0; i < tree->clkout_cnt; i++) {
+		if (id == tree->clkout[i].id) {
+			*index = i;
+			return AIC_CLK_OUTPUT;
 		}
-	} else if (id >= tree->disp_base) {
-		for (i = 0; i < tree->disp_cnt; i++) {
-			if (id == tree->disp[i].id) {
-				*index = i;
-				return AIC_CLK_DISP;
-			}
+	}
+
+	for (i = 0; i < tree->disp_cnt; i++) {
+		if (id == tree->disp[i].id) {
+			*index = i;
+			return AIC_CLK_DISP;
 		}
-	} else if (id >= tree->periph_base) {
-		for (i = 0; i < tree->periph_cnt; i++) {
-			if (id == tree->periph[i].id) {
-				*index = i;
-				return AIC_CLK_PERIPHERAL;
-			}
+	}
+
+	for (i = 0; i < tree->periph_cnt; i++) {
+		if (id == tree->periph[i].id) {
+			*index = i;
+			return AIC_CLK_PERIPHERAL;
 		}
-	} else if (id >= tree->system_base) {
-		for (i = 0; i < tree->system_cnt; i++) {
-			if (id == tree->system[i].id) {
-				*index = i;
-				return AIC_CLK_SYSTEM;
-			}
+	}
+
+	for (i = 0; i < tree->system_cnt; i++) {
+		if (id == tree->system[i].id) {
+			*index = i;
+			return AIC_CLK_SYSTEM;
 		}
-	} else if (id >= tree->pll_base) {
-		for (i = 0; i < tree->pll_cnt; i++) {
-			if (id == tree->plls[i].id) {
-				*index = i;
-				return AIC_CLK_PLL;
-			}
+	}
+
+	for (i = 0; i < tree->pll_cnt; i++) {
+		if (id == tree->plls[i].id) {
+			*index = i;
+			return AIC_CLK_PLL;
 		}
-	} else if (id >= tree->fixed_rate_base) {
-		for (i = 0; i < tree->fixed_rate_cnt; i++) {
-			if (id == tree->fixed_rate[i].id) {
-				*index = i;
-				return AIC_CLK_FIXED_RATE;
-			}
+	}
+
+	for (i = 0; i < tree->fixed_rate_cnt; i++) {
+		if (id == tree->fixed_rate[i].id) {
+			*index = i;
+			return AIC_CLK_FIXED_RATE;
 		}
 	}
 
@@ -133,11 +129,11 @@ static int pll_clk_enable(struct clk *clk, int index)
 	struct aic_clk_tree *tree = priv->tree;
 	struct aic_pll *pll = &tree->plls[index];
 
-	value = readl(priv->base + pll->gen_reg);
+	value = readl((uchar *)priv->base + pll->gen_reg);
 	/* Set ICP value to 8 */
 	value &= ~(0x1F << 24);
 	value |= (1UL << 31) | (8 << 24) | (1 << 20) | (1 << 18) | (1 << 16);
-	writel(value, priv->base + pll->gen_reg);
+	writel(value, (uchar *)priv->base + pll->gen_reg);
 
 	return 0;
 }
@@ -149,9 +145,9 @@ static int pll_clk_disable(struct clk *clk, int index)
 	struct aic_clk_tree *tree = priv->tree;
 	struct aic_pll *pll = &tree->plls[index];
 
-	value = readl(priv->base + pll->gen_reg);
+	value = readl((uchar *)priv->base + pll->gen_reg);
 	value &= ~(1 << 16);
-	writel(value, priv->base + pll->gen_reg);
+	writel(value, (uchar *)priv->base + pll->gen_reg);
 
 	return 0;
 }
@@ -165,7 +161,7 @@ static ulong pll_clk_get_rate(struct clk *clk, int index)
 	struct aic_clk_tree *tree = priv->tree;
 	struct aic_pll *pll = &tree->plls[index];
 
-	value = readl(priv->base + pll->gen_reg);
+	value = readl((uchar *)priv->base + pll->gen_reg);
 	if (!(value & (1 << 20)))
 		return 24000000;
 	div_p = (value & 0x01);
@@ -173,12 +169,12 @@ static ulong pll_clk_get_rate(struct clk *clk, int index)
 	div_n = (value >> 8) & 0xff;
 
 	if (pll->type == AIC_PLL_FRA)
-		fra_en = readl(priv->base + pll->frac_reg) & (1 << 20);
+		fra_en = readl((uchar *)priv->base + pll->frac_reg) & (1 << 20);
 
 	if (pll->type != AIC_PLL_FRA || !fra_en)
 		rate = 24000000 / (div_p + 1) * (div_n + 1) / (div_m + 1);
 	else {
-		fra_in = readl(priv->base + pll->frac_reg) & 0x1FFFF;
+		fra_in = readl((uchar *)priv->base + pll->frac_reg) & 0x1FFFF;
 		rate_int = 24000000 / (div_p + 1) * (div_n + 1) / (div_m + 1);
 		rate_fra = (u64)24000000 / (div_p + 1) * fra_in;
 		do_div(rate_fra, 0x1FFFF * (div_m + 1));
@@ -192,10 +188,10 @@ static void clk_pll_bypass(struct aic_pll *pll, void *base_addr, bool bypass)
 {
 	u32 val;
 
-	val = readl(base_addr + pll->gen_reg);
+	val = readl((uchar *)base_addr + pll->gen_reg);
 	val &= ~(1 << 20);
 	val |= (!bypass << 20);
-	writel(val, base_addr + pll->gen_reg);
+	writel(val, (uchar *)base_addr + pll->gen_reg);
 }
 
 static ulong pll_clk_round_rate(struct clk *clk, ulong rate, int index)
@@ -248,7 +244,7 @@ static ulong pll_clk_round_rate(struct clk *clk, ulong rate, int index)
 
 static ulong pll_clk_set_rate(struct clk *clk, ulong rate, int index)
 {
-	u32 reg_val, factor_p, factor_n, factor_m;
+	u32 reg_val, factor_p, factor_n, factor_m, sdm_en;
 	u64 val, fra_in = 0;
 	u8 fra_en, factor_m_en;
 	ulong vco_rate, pll_vco_min, pll_vco_max;
@@ -260,9 +256,9 @@ static ulong pll_clk_set_rate(struct clk *clk, ulong rate, int index)
 	struct aic_pll *pll = &tree->plls[index];
 
 	if (rate == 24000000) {
-		reg_val = readl(priv->base + pll->gen_reg);
+		reg_val = readl((uchar *)priv->base + pll->gen_reg);
 		reg_val &= ~(1 << 20);
-		writel(reg_val, priv->base + pll->gen_reg);
+		writel(reg_val, (uchar *)priv->base + pll->gen_reg);
 		return 0;
 	}
 
@@ -294,10 +290,10 @@ static ulong pll_clk_set_rate(struct clk *clk, ulong rate, int index)
 	factor_p = (vco_rate % 24000000) ? 1 : 0;
 	factor_n = vco_rate * (factor_p + 1) / 24000000  - 1;
 
-	reg_val = readl(priv->base + pll->gen_reg);
+	reg_val = readl((uchar *)priv->base + pll->gen_reg);
 	reg_val &= ~0xFFFF;
 	reg_val |= (factor_m_en << 19) | (factor_n << 8) | (factor_m << 4) | (factor_p << 0);
-	writel(reg_val, priv->base + pll->gen_reg);
+	writel(reg_val, (uchar *)priv->base + pll->gen_reg);
 
 	if (pll->type == AIC_PLL_FRA) {
 		val = rate % (24000000 * (factor_n + 1) /
@@ -309,7 +305,10 @@ static ulong pll_clk_set_rate(struct clk *clk, ulong rate, int index)
 			do_div(fra_in, 24000000);
 		}
 		/* Configure fractional division */
-		writel(fra_en << 20 | fra_in, priv->base + pll->frac_reg);
+		writel(fra_en << 20 | fra_in, (uchar *)priv->base + pll->frac_reg);
+		/* when using decimal divsion, do not configure spreading parameters */
+		sdm_en = (1UL << PLL_SDM_EN_BIT) | (2UL << PLL_SDM_MODE_BIT);
+		writel(sdm_en, (uchar *)priv->base + pll->sdm_reg);
 	}
 
 #ifdef CONFIG_CLK_ARTINCHIP_PLL_SDM
@@ -333,7 +332,7 @@ static ulong pll_clk_set_rate(struct clk *clk, ulong rate, int index)
 			  (3 << PLL_SDM_FREQ_BIT) |
 			  (sdm_amp << PLL_SDM_AMP_BIT);
 
-		writel(reg_val, priv->base + pll->sdm_reg);
+		writel(reg_val, (uchar *)priv->base + pll->sdm_reg);
 	}
 #endif
 	/* Switch PLL output */
@@ -365,7 +364,7 @@ static int system_clk_enable(struct clk *clk, int index)
 	if (system->type != AIC_CPU_CLK)
 		return 0;
 	/* enable system clk */
-	value = readl(priv->base + system->reg);
+	value = readl((uchar *)priv->base + system->reg);
 	if (cpu->mod_gate >= 0)
 		value |= 1 << cpu->mod_gate;
 	value = cpu_clk_write_enable(system, value);
@@ -374,7 +373,7 @@ static int system_clk_enable(struct clk *clk, int index)
 	if (cpu->rst_bit >= 0)
 		value |= 1 << cpu->rst_bit;
 	value = cpu_clk_write_enable(system, value);
-	writel(value, priv->base + system->reg);
+	writel(value, (uchar *)priv->base + system->reg);
 
 	return 0;
 }
@@ -390,7 +389,7 @@ static int system_clk_disable(struct clk *clk, int index)
 	if (system->type != AIC_CPU_CLK)
 		return 0;
 	/* disable cpu clk */
-	value = readl(priv->base + system->reg);
+	value = readl((uchar *)priv->base + system->reg);
 	if (cpu->mod_gate >= 0)
 		value &= ~(1 << cpu->mod_gate);
 	value = cpu_clk_write_enable(system, value);
@@ -399,7 +398,7 @@ static int system_clk_disable(struct clk *clk, int index)
 	if (cpu->rst_bit >= 0)
 		value &= ~(1 << cpu->rst_bit);
 	value = cpu_clk_write_enable(system, value);
-	writel(value, priv->base + system->reg);
+	writel(value, (uchar *)priv->base + system->reg);
 
 	return 0;
 }
@@ -411,7 +410,7 @@ static ulong system_clk_set_rate(struct clk *clk, ulong rate, int index)
 	struct aic_clk_tree *tree = priv->tree;
 	struct aic_sys_clk *system = &tree->system[index];
 
-	value = readl(priv->base + system->reg);
+	value = readl((uchar *)priv->base + system->reg);
 
 	parent = system->parent[(value >> system->mux_shift) &
 		system->mux_mask];
@@ -421,12 +420,12 @@ static ulong system_clk_set_rate(struct clk *clk, ulong rate, int index)
 		div = DIV_ROUND_CLOSEST(parent_rate, rate);
 		div -= div > 0 ? 1 : 0;
 		div = div > system->div_mask ? system->div_mask : div;
-		value = readl(priv->base + system->reg);
+		value = readl((uchar *)priv->base + system->reg);
 		value &= ~(system->div_mask << system->div_shift);
 		value |= div << system->div_shift;
 		if (system->type == AIC_CPU_CLK)
 			value = cpu_clk_write_enable(system, value);
-		writel(value, priv->base + system->reg);
+		writel(value, (uchar *)priv->base + system->reg);
 	}
 
 	return 0;
@@ -438,7 +437,7 @@ static ulong system_clk_get_rate(struct clk *clk, int index)
 	struct aic_clk_priv *priv = dev_get_priv(clk->dev);
 	struct aic_clk_tree *tree = priv->tree;
 	struct aic_sys_clk *system = &tree->system[index];
-	value = readl(priv->base + system->reg);
+	value = readl((uchar *)priv->base + system->reg);
 
 	if (!(value & (1 << 8)))
 		return 24000000;
@@ -448,7 +447,7 @@ static ulong system_clk_get_rate(struct clk *clk, int index)
 	parent_rate = artinchip_get_parent_rate(clk, parent);
 
 	if (system->div_shift >= 0) {
-		value = readl(priv->base + system->reg);
+		value = readl((uchar *)priv->base + system->reg);
 		value = (value >> system->div_shift) & system->div_mask;
 	}
 	value += 1;
@@ -464,14 +463,14 @@ static int system_clk_set_parent(struct clk *clk,
 	struct aic_clk_tree *tree = priv->tree;
 	struct aic_sys_clk *system = &tree->system[index];
 
-	value = readl((void *)((long)priv->base + system->reg));
+	value = readl((void *)((long)(uchar *)priv->base + system->reg));
 	value &= ~(system->mux_mask << system->mux_shift);
 	for (i = 0; i < system->parent_cnt; i++) {
 		if (system->parent[i] == parent->id) {
 			value |= (i << system->mux_shift);
 			if (system->type == AIC_CPU_CLK)
 				value = cpu_clk_write_enable(system, value);
-			writel(value, (void *)((long)priv->base + system->reg));
+			writel(value, (void *)((long)(uchar *)priv->base + system->reg));
 			return 0;
 		}
 	}
@@ -486,14 +485,14 @@ static int periph_clk_enable(struct clk *clk, int index)
 	struct aic_clk_tree *tree = priv->tree;
 	struct aic_periph_clk *periph = &tree->periph[index];
 
-	value = readl(priv->base + periph->reg);
+	value = readl((uchar *)priv->base + periph->reg);
 	if (periph->bus_gate >= 0)
 		value |= 1 << periph->bus_gate;
 	if (periph->mod_gate >= 0)
 		value |= 1 << periph->mod_gate;
-	writel(value, priv->base + periph->reg);
+	writel(value, (uchar *)priv->base + periph->reg);
 
-	value = readl(priv->base + periph->reg);
+	value = readl((uchar *)priv->base + periph->reg);
 	return 0;
 }
 
@@ -504,12 +503,12 @@ static int periph_clk_disable(struct clk *clk, int index)
 	struct aic_clk_tree *tree = priv->tree;
 	struct aic_periph_clk *periph = &tree->periph[index];
 
-	value = readl(priv->base + periph->reg);
+	value = readl((uchar *)priv->base + periph->reg);
 	if (periph->bus_gate >= 0)
 		value &= ~(1 << periph->bus_gate);
 	if (periph->mod_gate >= 0)
 		value &= ~(1 << periph->mod_gate);
-	writel(value, priv->base + periph->reg);
+	writel(value, (uchar *)priv->base + periph->reg);
 
 	return 0;
 }
@@ -523,7 +522,7 @@ static ulong periph_clk_get_rate(struct clk *clk, int index)
 
 	parent_rate = artinchip_get_parent_rate(clk, periph->parent);
 
-	value = readl(priv->base + periph->reg);
+	value = readl((uchar *)priv->base + periph->reg);
 	value = (value >> periph->div_shift) & periph->div_mask;
 
 	return parent_rate / (value + 1);
@@ -540,10 +539,10 @@ static ulong periph_clk_set_rate(struct clk *clk, ulong rate, int index)
 	div = DIV_ROUND_CLOSEST(parent_rate, rate);
 	if (div > 0)
 		div = div - 1;
-	value = readl(priv->base + periph->reg);
+	value = readl((uchar *)priv->base + periph->reg);
 	value &= ~(periph->div_mask << periph->div_shift);
 	value |= (div & periph->div_mask) << periph->div_shift;
-	writel(value, priv->base + periph->reg);
+	writel(value, (uchar *)priv->base + periph->reg);
 
 	return 0;
 }
@@ -556,7 +555,7 @@ static ulong disp_clk_get_rate(struct clk *clk, int index)
 	struct aic_disp_clk *disp = &tree->disp[index];
 
 	parent_rate = artinchip_get_parent_rate(clk, disp->parent);
-	reg_val = readl(priv->base + disp->reg);
+	reg_val = readl((uchar *)priv->base + disp->reg);
 
 	if (disp->divm_mask) {
 		/* for pixclk */
@@ -656,7 +655,7 @@ static ulong disp_clk_set_rate(struct clk *clk, ulong rate, int index)
 	struct aic_disp_clk *disp = &tree->disp[index];
 
 	parent_rate = artinchip_get_parent_rate(clk, disp->parent);
-	reg_val = readl(priv->base + disp->reg);
+	reg_val = readl((uchar *)priv->base + disp->reg);
 
 	if (disp->divm_mask) {
 		/* for pixclk */
@@ -692,7 +691,7 @@ static ulong disp_clk_set_rate(struct clk *clk, ulong rate, int index)
 		reg_val |= (divn << disp->divn_shift);
 	}
 
-	writel(reg_val, priv->base + disp->reg);
+	writel(reg_val, (uchar *)priv->base + disp->reg);
 	return 0;
 }
 
@@ -703,9 +702,9 @@ static int output_clk_enable(struct clk *clk, int index)
 	struct aic_clk_tree *tree = priv->tree;
 	struct aic_clk_out *clkout = &tree->clkout[index];
 
-	value = readl(priv->base + clkout->reg);
+	value = readl((uchar *)priv->base + clkout->reg);
 	value |= 1 << 16;
-	writel(value, priv->base + clkout->reg);
+	writel(value, (uchar *)priv->base + clkout->reg);
 
 	return 0;
 }
@@ -717,9 +716,9 @@ static int output_clk_disable(struct clk *clk, int index)
 	struct aic_clk_tree *tree = priv->tree;
 	struct aic_clk_out *clkout = &tree->clkout[index];
 
-	value = readl(priv->base + clkout->reg);
+	value = readl((uchar *)priv->base + clkout->reg);
 	value &= ~(1 << 16);
-	writel(value, priv->base + clkout->reg);
+	writel(value, (uchar *)priv->base + clkout->reg);
 
 	return 0;
 }
@@ -731,7 +730,7 @@ static ulong output_clk_get_rate(struct clk *clk, int index)
 	struct aic_clk_tree *tree = priv->tree;
 	struct aic_clk_out *clkout = &tree->clkout[index];
 
-	value = readl(priv->base + clkout->reg);
+	value = readl((uchar *)priv->base + clkout->reg);
 	div_n0 = (value >> clkout->div0_shift) & clkout->div0_mask;
 	parent = clkout->parent[(value >> clkout->mux_shift) &
 		clkout->mux_mask];
@@ -748,7 +747,7 @@ static ulong output_clk_set_rate(struct clk *clk, ulong rate, int index)
 	struct aic_clk_tree *tree = priv->tree;
 	struct aic_clk_out *clkout = &tree->clkout[index];
 
-	value = readl(priv->base + clkout->reg);
+	value = readl((uchar *)priv->base + clkout->reg);
 
 	parent = clkout->parent[(value >> clkout->mux_shift) &
 		clkout->mux_mask];
@@ -759,7 +758,7 @@ static ulong output_clk_set_rate(struct clk *clk, ulong rate, int index)
 
 	value &= ~(clkout->div0_mask << clkout->div0_shift);
 	value |= (div_n0 << clkout->div0_shift);
-	writel(value, priv->base + clkout->reg);
+	writel(value, (uchar *)priv->base + clkout->reg);
 
 	return 0;
 }
@@ -773,19 +772,19 @@ static int output_clk_set_parent(struct clk *clk,
 	struct aic_clk_tree *tree = priv->tree;
 	struct aic_clk_out *clkout = &tree->clkout[index];
 
-	value = readl(priv->base + clkout->reg);
+	value = readl((uchar *)priv->base + clkout->reg);
 	value &= ~(clkout->mux_mask << clkout->mux_shift);
 	for (i = 0; i < clkout->parent_cnt; i++) {
 		if (clkout->parent[i] == parent->id) {
 			value |= (i << clkout->mux_shift);
-			writel(value, priv->base + clkout->reg);
+			writel(value, (uchar *)priv->base + clkout->reg);
 			return 0;
 		}
 	}
 
 	return -EPERM;
 }
-#ifdef CONFIG_CLK_ARTINCHIP_CMU_V2_0
+#ifdef CONFIG_CLK_ARTINCHIP_CMU_V2_x
 static int corsszone_clk_enable(struct clk *clk, int index)
 {
 	u32 value;
@@ -868,7 +867,7 @@ static struct aic_clk_ops aic_clk_type_ops[] = {
 		.set_rate = output_clk_set_rate,
 		.set_parent = output_clk_set_parent,
 	},
-#ifdef CONFIG_CLK_ARTINCHIP_CMU_V2_0
+#ifdef CONFIG_CLK_ARTINCHIP_CMU_V2_x
 	/* ops handle for corsszone clocks */
 	{
 		.enable = corsszone_clk_enable,

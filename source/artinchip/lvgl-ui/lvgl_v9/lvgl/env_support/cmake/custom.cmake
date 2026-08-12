@@ -82,7 +82,7 @@ endif()
 if("${INC_INSTALL_DIR}" STREQUAL "")
   set(INC_INSTALL_DIR "include/lvgl")
 endif()
-
+set(BUILD_SHARED_LIBS OFF)
 if(BUILD_SHARED_LIBS)
   #Install headers
   install(

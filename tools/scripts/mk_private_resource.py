@@ -2,7 +2,7 @@
 # -*- coding:utf-8 -*-
 # SPDX-License-Identifier: Apache-2.0
 #
-# Copyright (C) 2021-2025 ArtInChip Technology Co., Ltd
+# Copyright (C) 2021-2026 ArtInChip Technology Co., Ltd
 # Dehuang Wu <dehuang.wu@artinchip.com>
 
 import os
@@ -28,6 +28,7 @@ DATA_SECT_TYPE_SYS_UPGMODE = int("0x41490004", 16)
 DATA_SECT_TYPE_PARTITION = int("0x41490005", 16)
 DATA_SECT_TYPE_PSRAM = int("0x41490006", 16)
 DATA_SECT_TYPE_SYS_REGCFG = int("0x41490007", 16)
+DATA_SECT_TYPE_SYS_BOOTPINS = int("0x41490008", 16)
 DATA_SECT_TYPE_END = int("0x4149FFFF", 16)
 
 
@@ -464,6 +465,32 @@ struct system_jtag_data {
 """
 
 
+"""
+struct private_system_bootpins {
+    u32 bootpin0_cfg_reg;
+    u32 bootpin1_cfg_reg;
+    u32 bootpin2_cfg_reg;
+    u32 bootpin3_cfg_reg;
+};
+"""
+
+
+def gen_system_bootpins_data(bootpins):
+    data = get_bytes_by_str(bootpins, "bootpin0_cfg_reg")
+    data += get_bytes_by_str(bootpins, "bootpin1_cfg_reg")
+    data += get_bytes_by_str(bootpins, "bootpin2_cfg_reg")
+    data += get_bytes_by_str(bootpins, "bootpin3_cfg_reg")
+    return data
+
+
+def gen_system_bootpins(bootpins):
+    data = bytes()
+    data_type = int_to_u32_bytes(DATA_SECT_TYPE_SYS_BOOTPINS)
+    data += gen_system_bootpins_data(bootpins)
+    data_len = int_to_u32_bytes(len(data))
+    return data_type + data_len + data
+
+
 def gen_bytes_of_part_str(parts):
     part_str = ""
     if "type" not in parts:
@@ -513,6 +540,8 @@ def gen_private_data(cfg):
                     data += gen_system_jtag(cfg[item][sysi])
                 if sysi == "regcfg":
                     data += gen_system_reg_cfg(cfg[item][sysi])
+                if sysi == "bootpins":
+                    data += gen_system_bootpins(cfg[item][sysi])
     data += gen_end_flag()
     return data
 

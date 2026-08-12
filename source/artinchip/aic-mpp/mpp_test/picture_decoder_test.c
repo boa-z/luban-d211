@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2022 ArtInChip Technology Co. Ltd
+ * Copyright (C) 2020-2026 ArtInChip Technology Co. Ltd
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -30,18 +30,15 @@
 #include <linux/dma-buf.h>
 #include <linux/dma-heap.h>
 
+#ifdef RENDER_DRM_BACKEND
+#include <xf86drm.h>
+#include <xf86drmMode.h>
+#include <drm_fourcc.h>
+#endif
+
 #include "mpp_ge.h"
 #include "mpp_decoder.h"
 #include "mpp_log.h"
-
-static int g_screen_w = 0;
-static int g_screen_h = 0;
-static int g_fb_len = 0;
-static int g_fb_stride = 0;
-static unsigned int g_fb_format = 0;
-static unsigned int g_fb_phy = 0;
-unsigned char *g_fb_buf = NULL;
-
 static void print_help(char* program)
 {
 	printf("Compile time: %s %s\n", __DATE__, __TIME__);
@@ -62,6 +59,415 @@ static int get_file_size(FILE* fp)
 	return len;
 }
 
+#ifdef RENDER_DRM_BACKEND
+static int get_format_planes(enum mpp_pixel_format format)
+{
+	switch (format) {
+		case MPP_FMT_ARGB_8888:
+		case MPP_FMT_RGBA_8888:
+		case MPP_FMT_RGB_888:
+		case MPP_FMT_YUV400:
+			return 1;
+		case MPP_FMT_YUV420P:
+		case MPP_FMT_YUV444P:
+		case MPP_FMT_YUV422P:
+			return 3;
+		default:
+			loge("no support picture format %d, default argb8888", format);
+			return 1;
+	}
+}
+
+static uint32_t conver_format(uint32_t format, bool mpp_to_drm)
+{
+	static const struct {
+		uint32_t drm_fmt;
+		enum mpp_pixel_format mpp_fmt;
+	} format_info[] = {
+		{ .drm_fmt = DRM_FORMAT_ARGB8888, .mpp_fmt = MPP_FMT_ARGB_8888, },
+		{ .drm_fmt = DRM_FORMAT_ABGR8888, .mpp_fmt = MPP_FMT_ABGR_8888, },
+		{ .drm_fmt = DRM_FORMAT_RGBA8888, .mpp_fmt = MPP_FMT_RGBA_8888, },
+		{ .drm_fmt = DRM_FORMAT_BGRA8888, .mpp_fmt = MPP_FMT_BGRA_8888, },
+		{ .drm_fmt = DRM_FORMAT_XRGB8888, .mpp_fmt = MPP_FMT_XRGB_8888, },
+		{ .drm_fmt = DRM_FORMAT_XBGR8888, .mpp_fmt = MPP_FMT_XBGR_8888, },
+		{ .drm_fmt = DRM_FORMAT_RGBX8888, .mpp_fmt = MPP_FMT_RGBX_8888, },
+		{ .drm_fmt = DRM_FORMAT_BGRX8888, .mpp_fmt = MPP_FMT_BGRX_8888, },
+		{ .drm_fmt = DRM_FORMAT_RGB888, .mpp_fmt = MPP_FMT_RGB_888, },
+		{ .drm_fmt = DRM_FORMAT_BGR888, .mpp_fmt = MPP_FMT_BGR_888, },
+		{ .drm_fmt = DRM_FORMAT_RGB565, .mpp_fmt = MPP_FMT_RGB_565, },
+		{ .drm_fmt = DRM_FORMAT_BGR565, .mpp_fmt = MPP_FMT_BGR_565, },
+		{ .drm_fmt = DRM_FORMAT_ARGB4444, .mpp_fmt = MPP_FMT_ARGB_4444, },
+		{ .drm_fmt = DRM_FORMAT_ABGR4444, .mpp_fmt = MPP_FMT_ABGR_4444, },
+		{ .drm_fmt = DRM_FORMAT_RGBA4444, .mpp_fmt = MPP_FMT_RGBA_4444, },
+		{ .drm_fmt = DRM_FORMAT_BGRA4444, .mpp_fmt = MPP_FMT_BGRA_4444, },
+		{ .drm_fmt = DRM_FORMAT_YUV422, .mpp_fmt = MPP_FMT_YUV422P, },
+		{ .drm_fmt = DRM_FORMAT_YUV420, .mpp_fmt = MPP_FMT_YUV420P, },
+		{ .drm_fmt = DRM_FORMAT_YUV444, .mpp_fmt = MPP_FMT_YUV444P, },
+		{ .drm_fmt = DRM_FORMAT_NV12, .mpp_fmt = MPP_FMT_NV12, },
+		{ .drm_fmt = DRM_FORMAT_NV21, .mpp_fmt = MPP_FMT_NV21, },
+		{ .drm_fmt = DRM_FORMAT_NV16, .mpp_fmt = MPP_FMT_NV16, },
+		{ .drm_fmt = DRM_FORMAT_NV61, .mpp_fmt = MPP_FMT_NV61, },
+		{ .drm_fmt = DRM_FORMAT_YUYV, .mpp_fmt = MPP_FMT_YUYV, },
+		{ .drm_fmt = DRM_FORMAT_YVYU, .mpp_fmt = MPP_FMT_YVYU, },
+		{ .drm_fmt = DRM_FORMAT_UYVY, .mpp_fmt = MPP_FMT_UYVY, },
+		{ .drm_fmt = DRM_FORMAT_VYUY, .mpp_fmt = MPP_FMT_VYUY, },
+	};
+
+	int i;
+
+	if (mpp_to_drm) {
+		for (i = 0; i < sizeof(format_info) / sizeof(format_info[0]); i++) {
+			if (format == format_info[i].mpp_fmt)
+				return format_info[i].drm_fmt;
+		}
+
+	} else {
+		for (i = 0; i < sizeof(format_info) / sizeof(format_info[0]); i++) {
+			if (format == format_info[i].drm_fmt)
+				return format_info[i].mpp_fmt;
+		}
+	}
+
+	loge("invalid drm format, use default ARGB8888 format\n");
+
+	return 0;
+}
+
+static int ge_bitblt_frame(struct mpp_frame *frame)
+{
+	enum mpp_pixel_format mpp_format;
+	drmModeFB2 *drmfb2 = NULL;
+	drmModeCrtc *crtc = NULL;
+	int fd, ret = 0;
+	uint32_t crtc_id = 0;
+	uint32_t buffer_id = 0;
+	int dst_fd = -1;
+
+	struct ge_bitblt blt = {0};
+
+	fd = drmOpen("artinchip", NULL);
+	if (fd < 0) {
+		loge("failed to open drm\n");
+		ret = -1;
+		goto cleanup;
+	}
+
+	drmModeRes *resources = drmModeGetResources(fd);
+	if (!resources) {
+		loge("failed to Get Resources");
+		drmClose(fd);
+		goto cleanup;
+	}
+
+	if (resources->count_crtcs <= 0) {
+		loge("no CRTCs available");
+		ret = -1;
+		goto cleanup_resources;
+	}
+
+	crtc_id = resources->crtcs[0];
+
+	crtc = drmModeGetCrtc(fd, crtc_id);
+	if (!crtc) {
+		loge("Failed to get CRTC %u: %s", crtc_id, strerror(errno));
+		ret = -1;
+		goto cleanup_resources;
+	}
+
+	buffer_id = crtc->buffer_id;
+
+	drmfb2 = drmModeGetFB2(fd, buffer_id);
+	if (!drmfb2) {
+		loge("Failed to get drmfb2 buffer id: %d, %s",
+					buffer_id, strerror(errno));
+		ret = -1;
+		goto cleanup_crtc;
+	}
+
+	ret = drmPrimeHandleToFD(fd, drmfb2->handles[0], 0, &dst_fd);
+	if (ret) {
+		loge("Failed to get drmPrimeHandleToFD: %d, %s",
+					drmfb2->handles[0], strerror(errno));
+		ret = -1;
+		goto cleanup_crtc;
+	}
+
+	memcpy(&blt.src_buf, &frame->buf, sizeof(struct mpp_frame));
+
+	struct mpp_ge *ge = mpp_ge_open();
+	if (!ge) {
+		loge("ge open fail");
+		return -1;
+		goto cleanup_crtc;
+	}
+
+	mpp_format = conver_format(drmfb2->pixel_format, false);
+
+	/* destination buffer */
+	blt.dst_buf.buf_type = MPP_DMA_BUF_FD;
+	blt.dst_buf.fd[0] = dst_fd;
+	blt.dst_buf.stride[0] = drmfb2->pitches[0];
+	blt.dst_buf.size.width = drmfb2->width;
+	blt.dst_buf.size.height = drmfb2->height;
+	blt.dst_buf.format = mpp_format;
+
+	blt.dst_buf.crop_en = 1;
+	blt.dst_buf.crop.x = 0;
+	blt.dst_buf.crop.y = 0;
+	blt.dst_buf.crop.width = frame->buf.size.width;
+	blt.dst_buf.crop.height = frame->buf.size.height;
+
+	blt.ctrl.alpha_en = 1;
+
+	ret = mpp_ge_bitblt(ge, &blt);
+	if (ret < 0) {
+		loge("ge bitblt fail");
+		goto cleanup_ge;
+	}
+
+	ret = mpp_ge_emit(ge);
+	if (ret < 0) {
+		loge("ge emit fail");
+		goto cleanup_ge;
+	}
+
+	ret = mpp_ge_sync(ge);
+	if (ret < 0) {
+		loge("ge sync fail");
+	}
+
+cleanup_ge:
+	if (ge)
+		mpp_ge_close(ge);
+
+cleanup_crtc:
+	if (crtc)
+		drmModeFreeCrtc(crtc);
+
+cleanup_resources:
+	if (resources)
+		drmModeFreeResources(resources);
+
+cleanup:
+	if (dst_fd >= 0)
+		close(dst_fd);
+	if (drmfb2)
+		drmModeFreeFB2(drmfb2);
+	if (fd >= 0)
+		drmClose(fd);
+
+	return ret;
+}
+
+static uint32_t get_property_id(int fd, drmModeObjectProperties *props,
+				const char *name)
+{
+	drmModePropertyPtr property;
+	uint32_t i, id = 0;
+
+	for (i = 0; i < props->count_props; i++) {
+		property = drmModeGetProperty(fd, props->props[i]);
+		if (!strcmp(property->name, name))
+			id = property->prop_id;
+		drmModeFreeProperty(property);
+
+		if (id)
+			break;
+	}
+
+	return id;
+}
+
+static uint32_t drm_export_buffer_id(int fd, struct mpp_frame *frame)
+{
+	struct mpp_buf *picture_buf = &frame->buf;
+	uint32_t handles[4] = {0};
+	uint32_t pitches[4] = {0};
+	uint32_t offsets[4] = {0};
+	uint32_t buf_id;
+	int dmabuf_num = 0;
+	int ret;
+
+	dmabuf_num = get_format_planes(picture_buf->format);
+
+	/* Convert DMA-BUF file descriptors to DRM handles */
+	for (int i = 0; i < dmabuf_num; i++) {
+		struct drm_prime_handle prime_handle = {0};
+		prime_handle.fd = picture_buf->fd[i];
+		prime_handle.flags = 0;
+
+		ret = drmIoctl(fd, DRM_IOCTL_PRIME_FD_TO_HANDLE, &prime_handle);
+		if (ret) {
+			loge("Failed to get DRM handle from DMA-BUF fd[%d]: %s\n",
+				i, strerror(errno));
+			return -1;
+		}
+
+		handles[i] = prime_handle.handle;
+		pitches[i] = picture_buf->stride[i];
+	}
+
+	uint32_t width = picture_buf->size.width;
+	uint32_t height = picture_buf->size.height;
+	uint32_t format = conver_format(picture_buf->format, true);
+
+	ret = drmModeAddFB2(fd, width, height, format,
+			    handles, pitches, offsets, &buf_id, 0);
+	if (ret < 0) {
+		loge("Failed to add DRM FB2: %s", strerror(errno));
+		return -1;
+	}
+
+	return buf_id;
+}
+
+static int drm_backend_render_direct(struct mpp_frame *frame)
+{
+	uint32_t crtc_id, plane_id, buffer_id;
+	uint32_t prop_crtc_id, prop_fb_id;
+	uint32_t prop_crtc_x, prop_crtc_y;
+	uint32_t prop_crtc_w, prop_crtc_h;
+	uint32_t prop_src_x, prop_src_y;
+	uint32_t prop_src_w, prop_src_h;
+	drmModeObjectProperties *props;
+	drmModePlaneRes *plane_res;
+	drmModeAtomicReq *req;
+	drmModeRes *res;
+	int fd, ret = 0;
+
+	fd = drmOpen("artinchip", NULL);
+	if (fd < 0) {
+		loge("failed to open drm");
+		return -1;
+	}
+
+	res = drmModeGetResources(fd);
+	if (res == 0) {
+		loge("Failed to get resources from card");
+		ret = -1;
+		goto close_fd;
+	}
+
+	/* Use the first available CRTC by default */
+	crtc_id = res->crtcs[0];
+
+	ret = drmSetClientCap(fd, DRM_CLIENT_CAP_ATOMIC, 1);
+	if (ret) {
+		loge("no atomic modesetting support: %s", strerror(errno));
+		ret = -1;
+		goto free_resources;
+	}
+
+	drmSetClientCap(fd, DRM_CLIENT_CAP_UNIVERSAL_PLANES, 1);
+
+	plane_res = drmModeGetPlaneResources(fd);
+	if (!plane_res) {
+		loge("drmModeGetPlaneResources failed: %s",
+			strerror(errno));
+		ret = -1;
+		goto free_resources;
+	}
+
+	/* Use the first available plane by default */
+	plane_id = plane_res->planes[0];
+
+	props = drmModeObjectGetProperties(fd, plane_id, DRM_MODE_OBJECT_PLANE);
+	if (!props) {
+		loge("No properties: %s.", strerror(errno));
+		ret = -1;
+		goto free_plane_res;
+	}
+
+	buffer_id = drm_export_buffer_id(fd, frame);
+	if (buffer_id < 0) {
+		loge("drm export buffer_id failed %s", strerror(errno));
+		ret = -1;
+		goto free_plane_res;
+	}
+
+	prop_crtc_id = get_property_id(fd, props, "CRTC_ID");
+	prop_fb_id = get_property_id(fd, props, "FB_ID");
+	prop_crtc_x = get_property_id(fd, props, "CRTC_X");
+	prop_crtc_y = get_property_id(fd, props, "CRTC_Y");
+	prop_crtc_w = get_property_id(fd, props, "CRTC_W");
+	prop_crtc_h = get_property_id(fd, props, "CRTC_H");
+	prop_src_x = get_property_id(fd, props, "SRC_X");
+	prop_src_y = get_property_id(fd, props, "SRC_Y");
+	prop_src_w = get_property_id(fd, props, "SRC_W");
+	prop_src_h = get_property_id(fd, props, "SRC_H");
+	drmModeFreeObjectProperties(props);
+
+	req = drmModeAtomicAlloc();
+	if (!req) {
+		loge("Failed to allocate atomic request");
+		ret = -1;
+		goto free_plane_res;
+	}
+
+	ret = 0;
+	ret |= drmModeAtomicAddProperty(req, plane_id, prop_crtc_id, crtc_id);
+	ret |= drmModeAtomicAddProperty(req, plane_id, prop_fb_id, buffer_id);
+	ret |= drmModeAtomicAddProperty(req, plane_id, prop_crtc_x, 0);
+	ret |= drmModeAtomicAddProperty(req, plane_id, prop_crtc_y, 0);
+	ret |= drmModeAtomicAddProperty(req, plane_id, prop_crtc_w, frame->buf.size.width);
+	ret |= drmModeAtomicAddProperty(req, plane_id, prop_crtc_h, frame->buf.size.height);
+	ret |= drmModeAtomicAddProperty(req, plane_id, prop_src_x, 0);
+	ret |= drmModeAtomicAddProperty(req, plane_id, prop_src_y, 0);
+	ret |= drmModeAtomicAddProperty(req, plane_id, prop_src_w, frame->buf.size.width << 16);
+	ret |= drmModeAtomicAddProperty(req, plane_id, prop_src_h, frame->buf.size.height << 16);
+	if (ret < 0) {
+		loge("failed to set atomic property");
+		ret = -1;
+		goto cleanup_atomic;
+	}
+
+	ret = drmModeAtomicCommit(fd, req, 0, NULL);
+	if (ret)
+		loge("Atomic Commit failed");
+
+cleanup_atomic:
+	if (req)
+		drmModeAtomicFree(req);
+
+	getchar();
+
+free_plane_res:
+	if (plane_res)
+		drmModeFreePlaneResources(plane_res);
+free_resources:
+	if (res)
+		drmModeFreeResources(res);
+close_fd:
+	close(fd);
+	return 0;
+}
+
+static int drm_backend_render_frame(struct mpp_frame *frame)
+{
+	int ret = 0;
+
+	if (frame->buf.format == MPP_FMT_ARGB_8888 || frame->buf.format == MPP_FMT_ABGR_8888 ||
+	    frame->buf.format == MPP_FMT_RGBA_8888 || frame->buf.format == MPP_FMT_BGRA_8888 ) {
+		// 1. if the pixels have alpha channel, we need enable pixel alpha blending in GE.
+		//     the data flow: VE -> GE -> DE.
+		logi("alpha channel, we need pixel alpha blending");
+		ret = ge_bitblt_frame(frame);
+	} else {
+		// the data flow: VE -> DE.
+		ret = drm_backend_render_direct(frame);
+		logi("no alpha channel, drm render direct");
+	}
+
+	return ret;
+}
+#else
+static int g_screen_w = 0;
+static int g_screen_h = 0;
+static int g_fb_len = 0;
+static int g_fb_stride = 0;
+static unsigned int g_fb_format = 0;
+static unsigned int g_fb_phy = 0;
+unsigned char *g_fb_buf = NULL;
 static int set_fb_layer_alpha(int fb0_fd, int val)
 {
 	int ret = 0;
@@ -193,7 +599,7 @@ static int fb_open(void)
 	return fb_fd;
 }
 
-static int render_frame(struct mpp_frame *frame)
+static int fbdev_backend_render_frame(struct mpp_frame *frame)
 {
 	int ret = 0;
 
@@ -212,7 +618,7 @@ static int render_frame(struct mpp_frame *frame)
 
 		struct mpp_ge *ge = mpp_ge_open();
 		if (!ge) {
-			loge("ge open fail\n");
+			loge("ge open fail");
 			return -1;
 		}
 
@@ -237,17 +643,17 @@ static int render_frame(struct mpp_frame *frame)
 
 		ret =  mpp_ge_bitblt(ge, &blt);
 		if (ret < 0) {
-			loge("ge bitblt fail\n");
+			loge("ge bitblt fail");
 		}
 
 		ret = mpp_ge_emit(ge);
 		if (ret < 0) {
-			loge("ge emit fail\n");
+			loge("ge emit fail");
 		}
 
 		ret = mpp_ge_sync(ge);
 		if (ret < 0) {
-			loge("ge sync fail\n");
+			loge("ge sync fail");
 		}
 
 		if (ge)
@@ -261,6 +667,16 @@ static int render_frame(struct mpp_frame *frame)
 	close(fb_fd);
 
 	return 0;
+}
+#endif
+
+static int render_frame(struct mpp_frame *frame)
+{
+#ifdef RENDER_DRM_BACKEND
+	return drm_backend_render_frame(frame);
+#else
+	return fbdev_backend_render_frame(frame);
+#endif
 }
 
 static int parse_rotation(char *str)

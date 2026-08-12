@@ -197,6 +197,7 @@ UBOOT_KCONFIG_OPTS = $(UBOOT_MAKE_OPTS) HOSTCC="$(HOSTCC_NOCCACHE)" HOSTLDFLAGS=
 UBOOT_CUSTOM_DTS_PATH = $(call qstrip,$(BR2_TARGET_UBOOT_CUSTOM_DTS_PATH))
 
 define UBOOT_PREPARE_DTS
+	$(Q)ln -sf $(TARGET_CHIP_DIR)/common/libfirmware_security.a $(UBOOT_SRCDIR)/drivers/aicupg/
 	$(Q)ln -sf $(TARGET_CHIP_DIR)/common/*.dtsi $(UBOOT_SRCDIR)/arch/$(KERNEL_ARCH)/dts/
 	$(Q)ln -sf $(TARGET_BOARD_DIR)/board.dts $(UBOOT_SRCDIR)/arch/$(KERNEL_ARCH)/dts/artinchip-board.dts
 	$(Q)ln -sf $(TARGET_BOARD_DIR)/image_cfg.json $(UBOOT_SRCDIR)/include/configs/image_cfg.json

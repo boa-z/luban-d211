@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * Copyright (C) 2021-2025 ArtInChip Technology Co., Ltd.
+ * Copyright (C) 2021-2026 ArtInChip Technology Co., Ltd.
  * Authors: Huahui Mai <huahui.mai@artinchip.com>
  */
 
@@ -11,6 +11,7 @@
 #include <clk.h>
 #include <reset.h>
 #include <linux/ioport.h>
+#include <mipi_display.h>
 
 #include "hw/dsi_reg.h"
 #include "hw/reg_util.h"
@@ -156,15 +157,15 @@ static int aic_dsi_enable(void)
 static int aic_dsi_pixclk2mclk(ulong pixclk)
 {
 	s32 ret = 0;
-	s32 div[DSI_MAX_LANE_NUM] = {24, 24, 18, 16};
+	const s32 div[DSI_MAX_LANE_NUM] = {24, 24, 18, 16};
 	struct aic_dsi_priv *priv = aic_dsi_request_drvdata();
 	struct panel_dsi *dsi = priv->dsi;
 
-	dev_dbg(priv->dev, "Current pix-clk is %ld\n", pixclk);
+	dev_dbg(priv->dev, "Current pix-clk is %lu\n", pixclk);
 	if (dsi->lane_num <= DSI_MAX_LANE_NUM)
 		priv->sclk_rate = pixclk * div[dsi->format] / dsi->lane_num;
 	else {
-		debug("Invalid lane number %d\n", dsi->lane_num);
+		debug("Invalid lane number %u\n", dsi->lane_num);
 		priv->sclk_rate = pixclk * 6; /* default RGB888 format 4 lane */
 		ret = -EINVAL;
 	}
@@ -195,10 +196,17 @@ static int aic_dsi_set_vm(struct fb_videomode *vm, int enable)
 static int aic_dsi_send_cmd(u32 dt, const u8 *data, u32 len)
 {
 	struct aic_dsi_priv *priv = aic_dsi_request_drvdata();
+	u32 val = 0;
 
 	dsi_cmd_wr(priv->regs, dt, priv->vc_num, data, len);
+
+	if (dt == MIPI_DSI_DCS_READ) {
+		aic_delay_ms(10);
+		val = readl(priv->regs + DSI_GEN_PD_CFG);
+	}
+
 	aic_dsi_release_drvdata();
-	return 0;
+	return val;
 }
 
 static int aic_dsi_attach_panel(struct aic_panel *panel)
@@ -217,11 +225,34 @@ static int aic_dsi_attach_panel(struct aic_panel *panel)
 	return 0;
 }
 
+static int aic_dsi_clk_disable(void)
+{
+	struct aic_dsi_priv *priv = aic_dsi_request_drvdata();
+	int ret;
+
+	ret = reset_assert(&priv->reset);
+	if (ret) {
+		pr_err("Couldn't deassert\n");
+		aic_dsi_release_drvdata();
+		return ret;
+	}
+
+	ret = clk_disable(&priv->mclk);
+	if (ret) {
+		pr_err("Couldn't deassert\n");
+		aic_dsi_release_drvdata();
+		return ret;
+	}
+
+	aic_dsi_release_drvdata();
+	return 0;
+}
 static void aic_dsi_register_funcs(struct aic_dsi_priv *priv)
 {
 	struct di_funcs *f = &priv->funcs;
 
 	f->clk_enable = aic_dsi_clk_enable;
+	f->clk_disable = aic_dsi_clk_disable;
 	f->enable = aic_dsi_enable;
 	f->attach_panel = aic_dsi_attach_panel;
 	f->pixclk2mclk = aic_dsi_pixclk2mclk;
@@ -271,6 +302,7 @@ static int aic_dsi_probe(struct udevice *dev)
 
 static const struct udevice_id aic_dsi_match_ids[] = {
 	{ .compatible = "artinchip,aic-mipi-dsi-v1.0" },
+	{ .compatible = "artinchip,aic-mipi-dsi-v1.2" },
 	{ /* sentinel*/ },
 };
 

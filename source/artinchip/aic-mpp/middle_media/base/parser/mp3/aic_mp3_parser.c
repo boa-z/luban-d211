@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2023 ArtInChip Technology Co. Ltd
+ * Copyright (C) 2020-2025 ArtInChip Technology Co. Ltd
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -38,10 +38,11 @@ s32 mp3_get_media_info(struct aic_parser *parser, struct aic_parser_av_media_inf
 	media->has_audio = 1;
 	media->file_size = mp3_parser->ctx.filesize;
 	media->duration = mp3_parser->duration;
-	media->audio_stream.codec_type = MPP_CODEC_AUDIO_DECODER_MP3;
-	media->audio_stream.bits_per_sample = mp3_parser->header.frame_size;
-	media->audio_stream.nb_channel = mp3_parser->header.nb_channels;
-	media->audio_stream.sample_rate = mp3_parser->header.sample_rate;
+	media->audio_stream[0].codec_type = MPP_CODEC_AUDIO_DECODER_MP3;
+	media->audio_stream[0].bits_per_sample = mp3_parser->header.frame_size;
+	media->audio_stream[0].nb_channel = mp3_parser->header.nb_channels;
+	media->audio_stream[0].sample_rate = mp3_parser->header.sample_rate;
+	media->audio_track_count = 1;
 	return 0;
 }
 

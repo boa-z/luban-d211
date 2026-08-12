@@ -13,10 +13,10 @@
 #include <asm/io.h>
 #include <linux/delay.h>
 
-#ifndef CONFIG_SPL_BUILD
-
-static struct udevice *efuse_dev;
 static u8 *g_fake_efuse;
+static struct udevice *efuse_dev;
+
+#ifndef CONFIG_SPL_BUILD
 
 static int do_efuse_list(struct cmd_tbl *cmdtp, int flag, int argc,
 			 char *const argv[])
@@ -57,7 +57,9 @@ static int do_efuse_list(struct cmd_tbl *cmdtp, int flag, int argc,
 	return ret;
 }
 
-static int efuse_read(struct udevice *dev, int offset, void *buf, int size)
+#endif // end of CONFIG_SPL_BUILD
+
+int efuse_read(struct udevice *dev, int offset, void *buf, int size)
 {
 	int ret = size;
 
@@ -68,7 +70,9 @@ static int efuse_read(struct udevice *dev, int offset, void *buf, int size)
 	return ret;
 }
 
-static int efuse_write(struct udevice *dev, int offset, void *buf, int size)
+#ifndef CONFIG_SPL_BUILD
+
+int efuse_write(struct udevice *dev, int offset, void *buf, int size)
 {
 	int ret = size;
 
@@ -233,7 +237,9 @@ static int get_bits_base(char *const bits, u32 *base, u32 *ofs, u32 *msk)
 	return -1;
 }
 
-static struct udevice *get_efuse_device(void)
+#endif // end of CONFIG_SPL_BUILD
+
+struct udevice *get_efuse_device(void)
 {
 	struct udevice *dev = NULL;
 	int ret;
@@ -256,6 +262,8 @@ static struct udevice *get_efuse_device(void)
 	efuse_dev = dev;
 	return efuse_dev;
 }
+
+#ifndef CONFIG_SPL_BUILD
 
 static int do_efuse_dump(struct cmd_tbl *cmdtp, int flag, int argc,
 			 char *const argv[])

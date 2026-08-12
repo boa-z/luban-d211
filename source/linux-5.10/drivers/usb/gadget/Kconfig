@@ -219,6 +219,9 @@ config USB_F_PRINTER
 config USB_F_TCM
 	tristate
 
+config USB_F_DISPLAY
+	tristate
+
 # this first set of drivers all depend on bulk-capable hardware.
 
 config USB_CONFIGFS
@@ -467,6 +470,19 @@ config USB_CONFIGFS_F_UVC
 	  The Webcam function acts as a composite USB Audio and Video Class
 	  device. It provides a userspace API to process UVC control requests
 	  and stream video data to the host.
+
+config USB_CONFIGFS_F_DISPLAY
+	bool "Display function"
+	depends on USB_CONFIGFS
+	select USB_F_DISPLAY
+	help
+	  The Display function provides support for USB display functionality,
+	  allowing the device to act as a USB display gadget. This enables
+	  the device to receive and process display data from a USB host,
+	  effectively turning it into a USB-connected display device.
+
+	  Select this option if you need to implement USB display functionality
+	  in your embedded system or device.
 
 config USB_CONFIGFS_F_PRINTER
 	bool "Printer function"

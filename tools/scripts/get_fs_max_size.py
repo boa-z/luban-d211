@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
 #
-# Copyright (C) 2023-2024 ArtInChip Technology Co., Ltd
+# Copyright (C) 2023-2026 ArtInChip Technology Co., Ltd
 # Authors: xuan.wen <xuan.wen@artinchip.com>
 #
 
@@ -38,34 +38,40 @@ rootfs_num = 0
 def load_fs_max_size(media_type, data, pt_name, pt_size):
     global userfs_num
     if media_type == "spi-nand":
-        if pt_name == "ubiroot:rootfs":
+        if pt_name == "ubiroot:rootfs" or pt_name == "ubiroot:rootfs_r":
             partstr = br2_target_rootfs_ubifs_max_size
             if partstr == data:
                 print('%#x'%pt_size)
+                sys.exit(0)
         else:
             partstr = br2_target_userfs_ubifs_max_size[userfs_num]
             if partstr == data:
                 print('%#x'%pt_size)
+                sys.exit(0)
             userfs_num += 1
     if media_type == "spi-nor":
-        if pt_name == "rootfs":
+        if pt_name == "rootfs" or pt_name == "rootfs_r":
             partstr = br2_target_rootfs_jffs2_padsize
             if partstr == data:
                 print('%#x'%pt_size)
+                sys.exit(0)
         else:
             partstr = br2_target_userfs_jffs2_padsize[userfs_num]
             if partstr == data:
                 print('%#x'%pt_size)
+                sys.exit(0)
             userfs_num += 1
     if media_type == "mmc":
-        if pt_name == "rootfs":
+        if pt_name == "rootfs" or pt_name == "rootfs_r":
             partstr = br2_target_rootfs_ext2_max_size
             if partstr == data:
                 print("{}".format(parse_num_to_text(pt_size)))
+                sys.exit(0)
         else:
             partstr = br2_target_userfs_ext4_max_size[userfs_num]
             if partstr == data:
                 print("{}".format(parse_num_to_text(pt_size)))
+                sys.exit(0)
             userfs_num += 1
 
 
@@ -183,7 +189,7 @@ def aic_auto_calculate_part_config(cfg, data):
                pt_off = parse_text_to_num(partitions[part]["offset"])
             if rootfs_num == 1:
                 load_fs_max_size(media_type, data, pt_name, pt_size)
-            if pt_name == "rootfs":
+            if pt_name == "rootfs" or pt_name == "rootfs_r":
                 load_fs_max_size(media_type, data, pt_name, pt_size)
                 rootfs_num = 1
             pt_off += pt_size
@@ -209,7 +215,7 @@ def aic_auto_calculate_part_config(cfg, data):
                pt_off = parse_text_to_num(partitions[part]["offset"])
             if rootfs_num == 1:
                 load_fs_max_size(media_type, data, pt_name, pt_size)
-            if pt_name == "rootfs":
+            if pt_name == "rootfs" or pt_name == "rootfs_r":
                 load_fs_max_size(media_type, data, pt_name, pt_size)
                 rootfs_num = 1
             pt_off += pt_size

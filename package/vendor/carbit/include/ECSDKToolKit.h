@@ -77,6 +77,30 @@ public:
 	* @param length Buffer length.
 	*/
 	virtual void		onPhoneControlCarRequest(const string& cmd) {};
+
+	/**
+	* @brief Callback
+	* @param data
+	*/
+	virtual void		onCarHardwarePermissionStateChanged(const ECHardwarePermissionData& data) {};
+
+	virtual void		onECFTPConnectStatus(const ECFileTransportConnectStatus status) {};
+
+	/**
+	 *
+	 * @param status @ECFTPTransportStatus
+	 * @param file
+	 * @param progress
+	 */
+	virtual void		onECFTPUploadFileStatus(const ECFTPTransportInfo& info) {};
+
+	/**
+	 *
+	 * @param status @ECFTPTransportStatus
+	 * @param file
+	 * @param progress
+	 */
+	virtual void		onECFTPDownLoadFileStatus(const ECFTPTransportInfo& info) {};
 };
 
 /**
@@ -308,6 +332,18 @@ public:
 	* @return ECSDK_OK on success, others on fail.
 	*/
 	virtual int32_t	      sendPhoneControlCarResult(const string& result) = 0;
+
+	/**
+	* @brief sendHardwareAuthState
+	* @param state 0:pass, 1:fail
+	* @return ECSDK_OK on success, others on fail.
+	*/
+	virtual int32_t     sendHardwareAuthState(int32_t state) = 0;
+
+	virtual int32_t     openFileTransport(uint32_t speed, const string& fileType, const string& savePath) = 0;
+	virtual int32_t     closeFileTransport() = 0;
+	virtual int32_t     startUploadFile(const string& filePath) = 0;
+	virtual int32_t     stopUploadFile() = 0;
 protected:
     ECSDKToolKit();
     virtual ~ECSDKToolKit();

@@ -29,6 +29,17 @@
     #include LV_DRAW_SW_ASM_CUSTOM_INCLUDE
 #endif
 
+#if LV_INVALIDATE_CACHE_BEFORE_GE2D == 0
+static inline void lv_invalid_clip_area(lv_draw_unit_t *draw_unit, lv_layer_t *layer)
+{
+    lv_area_t clipped_area;
+    lv_area_copy(&clipped_area, draw_unit->clip_area);
+    lv_area_move(&clipped_area, -layer->buf_area.x1, -layer->buf_area.y1);
+    lv_draw_buf_invalidate_cache(layer->draw_buf, &clipped_area);
+    return;
+}
+#endif
+
 /*********************
  *      DEFINES
  *********************/
@@ -363,6 +374,10 @@ static void execute_drawing(lv_draw_sw_unit_t * u)
     LV_PROFILER_BEGIN;
     /*Render the draw task*/
     lv_draw_task_t * t = u->task_act;
+#if LV_INVALIDATE_CACHE_BEFORE_GE2D == 0
+    lv_draw_unit_t *draw_unit = (lv_draw_unit_t *)u;
+#endif
+
     switch(t->type) {
         case LV_DRAW_TASK_TYPE_FILL:
             lv_draw_sw_fill((lv_draw_unit_t *)u, t->draw_dsc, &t->area);
@@ -450,6 +465,11 @@ static void execute_drawing(lv_draw_sw_unit_t * u)
         lv_draw_sw_label((lv_draw_unit_t *)u, &label_dsc, &txt_area);
     }
 #endif
+
+#if LV_INVALIDATE_CACHE_BEFORE_GE2D == 0
+    lv_invalid_clip_area(draw_unit, draw_unit->target_layer);
+#endif
+
     LV_PROFILER_END;
 }
 

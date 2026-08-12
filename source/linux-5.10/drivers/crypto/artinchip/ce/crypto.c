@@ -426,7 +426,7 @@ static int aic_crypto_remove(struct platform_device *pdev)
 
 	aic_crypto_skcipher_accelerator_exit(ce_dev);
 	aic_crypto_akcipher_accelerator_exit(ce_dev);
-	aic_crypto_skcipher_accelerator_exit(ce_dev);
+	aic_crypto_hash_accelerator_exit(ce_dev);
 
 	clk_disable_unprepare(ce_dev->clk);
 

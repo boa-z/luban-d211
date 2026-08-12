@@ -20,9 +20,9 @@ QUIET_MODE=$FALSE
 
 # Return value
 ERR_CANCEL=100
-ERR_UNSURPPORTED=110
-ERR_PKG_UNVAILABLE=111
-ERR_NET_UNVAILABLE=112
+ERR_UNSUPPORTED=110
+ERR_PKG_UNAVAILABLE=111
+ERR_NET_UNAVAILABLE=112
 
 COLOR_BEGIN="\033["
 COLOR_RED="${COLOR_BEGIN}41;37m"
@@ -65,19 +65,19 @@ input_an_answer()
 
 check_root()
 {
-	CUR_USER=`whoami`
-	if [ $CUR_USER = "root" ]; then
+	CUR_USER=$(whoami)
+	if [ "$CUR_USER" = "root" ]; then
 		pr_info "Current user is already root"
 		return
 	fi
-	sudo -l -U `whoami` | grep ALL
+	sudo -l -U "$(whoami)" | grep -q ALL
 	if [ $? -eq 0 ]; then
 		pr_info "Sudo is available"
 		return
 	fi
 
 	pr_warn $MY_NAME "must install package with 'sudo'. "
-	pr_warn "Your passward will be safe and always used locally."
+	pr_warn "Your password will be safe and always used locally."
 }
 
 check_os()
@@ -96,7 +96,7 @@ check_os()
 		fi
 	else
 		pr_err "Unknow system OS"
-		exit $ERR_UNSURPPORTED
+		exit $ERR_UNSUPPORTED
 	fi
 	pr_info "Current system is $OS_TYPE-$OS_VER"
 }
@@ -137,15 +137,15 @@ compile_install_gcc()
 	GCC_TAR=$GCC_NAME".tar.xz"
 	LIB_DIR=$1
 
-	cd $GCC_PKG_DIR
+	cd $GCC_PKG_DIR || exit $ERR_CANCEL
 
 	if [ ! -f $GCC_TAR ] && [ $INTERNET_IS_AVAILABLE -eq $TRUE ]; then
 		wget ftp://ftp.gnu.org/gnu/gcc/$GCC_NAME/$GCC_TAR || \
-				exit $ERR_PKG_UNVAILABLE
+				exit $ERR_PKG_UNAVAILABLE
 	fi
 	if [ ! -f $GCC_TAR ]; then
 		pr_err "The $GCC_TAR is unavailable!"
-		exit $ERR_PKG_UNVAILABLE
+		exit $ERR_PKG_UNAVAILABLE
 	fi
 
 	run_cmd "tar xJf $GCC_TAR"
@@ -155,24 +155,24 @@ compile_install_gcc()
 		run_cmd "./contrib/download_prerequisites"
 	else
 		MPFR=mpfr-2.4.2
-		tar xjf ../../mpfr/$MPFR.tar.bz2 || exit $ERR_PKG_UNVAILABLE
-		ln -sf $MPFR mpfr || exit $ERR_PKG_UNVAILABLE
+		tar xjf ../../mpfr/$MPFR.tar.bz2 || exit $ERR_PKG_UNAVAILABLE
+		ln -sf $MPFR mpfr || exit $ERR_PKG_UNAVAILABLE
 
 		GMP=gmp-4.3.2
-		tar xjf ../../gmp/$GMP.tar.bz2 || exit $ERR_PKG_UNVAILABLE
-		ln -sf $GMP gmp || exit $ERR_PKG_UNVAILABLE
+		tar xjf ../../gmp/$GMP.tar.bz2 || exit $ERR_PKG_UNAVAILABLE
+		ln -sf $GMP gmp || exit $ERR_PKG_UNAVAILABLE
 
 		MPC=mpc-0.8.1
-		tar xzf ../../mpc/$MPC.tar.gz || exit $ERR_PKG_UNVAILABLE
-		ln -sf $MPC mpc || exit $ERR_PKG_UNVAILABLE
+		tar xzf ../../mpc/$MPC.tar.gz || exit $ERR_PKG_UNAVAILABLE
+		ln -sf $MPC mpc || exit $ERR_PKG_UNAVAILABLE
 
 		ISL=isl-0.15
-		tar xjf ../../isl/$ISL.tar.bz2 || exit $ERR_PKG_UNVAILABLE
+		tar xjf ../../isl/$ISL.tar.bz2 || exit $ERR_PKG_UNAVAILABLE
 		# Fix trailing comma which errors with -pedantic for host GCC <= 4.3
 		sed -e 's/isl_stat_ok = 0,/isl_stat_ok = 0/' isl-0.15/include/isl/ctx.h\
 			> isl-0.15/include/isl/ctx.h.tem && \
 			mv isl-0.15/include/isl/ctx.h.tem isl-0.15/include/isl/ctx.h
-		ln -sf $ISL isl || exit $ERR_PKG_UNVAILABLE
+		ln -sf $ISL isl || exit $ERR_PKG_UNAVAILABLE
 	fi
 
 	run_cmd "mkdir build -p && cd build"
@@ -196,7 +196,7 @@ compile_install_gcc()
 		ln -sf /usr/bin/gcc /usr/bin/x86_64-linux-gnu-gcc
 	fi
 
-	cd $GCC_PKG_DIR
+	cd $GCC_PKG_DIR || exit $ERR_CANCEL
 	rm $GCC_NAME -rf
 }
 
@@ -236,7 +236,7 @@ check_gcc_ver()
 		compile_install_gcc $LIB_DIR
 	else
 		pkg_is_too_old "GCC-"$GCC_VER
-		exit $ERR_PKG_UNVAILABLE
+		exit $ERR_PKG_UNAVAILABLE
 	fi
 }
 
@@ -247,16 +247,16 @@ compile_install_make4()
 
 	if [ ! -f $TOPDIR/dl/make/$MAKE4_PKG_TAR ]; then
 		pr_warn $MAKE4_PKG_TAR does not exist!
-		exit $ERR_PKG_UNVAILABLE
+		exit $ERR_PKG_UNAVAILABLE
 	fi
-	cd $TOPDIR/dl/make
+	cd $TOPDIR/dl/make || exit $ERR_CANCEL
 
 	run_cmd "tar xjf $MAKE4_PKG_TAR"
-	cd $MAKE4_PKG
+	cd $MAKE4_PKG || exit $ERR_CANCEL
 	run_cmd "./configure --prefix=/usr/"
 	run_cmd "make && make install"
 
-	cd - > /dev/null
+	cd - > /dev/null || exit $ERR_CANCEL
 }
 
 # The version of GLIBCXX must >= 3.4.22
@@ -277,7 +277,7 @@ check_libstdc_ver()
 	CUR_VER=`strings $LIBCXX | grep ^GLIBCXX_ | grep "\." | tail -1`
 	pr_err "The GLIBCXX version must >= 3.4.22. Current: $CUR_VER"
 	pkg_is_too_old "GLIBCXX-"$CUR_VER
-	exit $ERR_PKG_UNVAILABLE
+	exit $ERR_PKG_UNAVAILABLE
 }
 
 # $1 - the command string
@@ -288,8 +288,28 @@ check_pkg_src()
 	if [ $? -ne 0 ]; then
 		pr_err "The software source is not accessable! Please check it"
 		pr_err "$MY_NAME must download package from a software source."
-		exit $ERR_NET_UNVAILABLE
+		exit $ERR_NET_UNAVAILABLE
 	fi
+}
+
+apt_install_tzone()
+{
+	OS_MAIN_VER=${OS_VER:0:2}
+	if [ $OS_MAIN_VER -lt 24 ]; then
+		return
+	fi
+
+	if [ -f /etc/localtime ] && [ -f /etc/timezone ]; then
+		pr_info "Timezone is already set to $(cat /etc/timezone)"
+		run_cmd "dpkg --configure -a"
+		return
+	fi
+
+	echo "Asia/Shanghai" > /etc/timezone
+	DEBIAN_FRONTEND=noninteractive apt install -y tzdata
+
+	pr_info "Set timezone to Asia/Shanghai ..."
+	run_cmd "dpkg --configure -a"
 }
 
 # $1 - package name
@@ -390,14 +410,16 @@ ubuntu_install()
 {
 	check_pkg_src "apt-get update"
 
-	NEED_CONFIRM=("build-essential" "gcc")
-	for i in ${NEED_CONFIRM[@]}
+	apt_install_tzone
+
+	NEED_CONFIRM=("build-essential" "gcc" "python3")
+	for i in "${NEED_CONFIRM[@]}"
 	do
 		apt_install_pkg $i ask
 	done
 
 	PKGS=("rsync" "bc" "cpio" "file" "patch" "bzip2" "bison" "flex" "libncurses-dev")
-	for i in ${PKGS[@]}
+	for i in "${PKGS[@]}"
 	do
 		apt_install_pkg $i
 	done
@@ -418,10 +440,11 @@ redhat_install()
 
 	yum_install_pkg gcc gcc ask
 	yum_install_pkg gcc-c++ g++ ask
+	yum_install_pkg python3 python3 ask
 
 	# The name of package is same as the command
 	PKGS=("make" "rsync" "bc" "file" "which" "perl" "patch" "zip" "bison" "autoconf" "flex" "ncurses-devel")
-	for i in ${PKGS[@]}
+	for i in "${PKGS[@]}"
 	do
 		yum_install_pkg $i
 	done
@@ -453,9 +476,9 @@ fi
 echo
 if [ $INSTALL_RESULT -ne $FALSE ]; then
 	pr_info "Congratulations! All the package is ready."
-	pr_info "Enjoy the "$SDK_NAME"OS!"
+	pr_info "Enjoy the ${SDK_NAME}OS!"
 	exit 0
 else
 	pr_warn "The install process is not complete. Please check it!"
-	exit $ERR_PKG_UNVAILABLE
+	exit $ERR_PKG_UNAVAILABLE
 fi

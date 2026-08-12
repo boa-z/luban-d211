@@ -79,18 +79,56 @@ int hw_sha(const unsigned char *pbuf, unsigned int buf_len,
 	return ret;
 }
 
+void hw_sha512(const unsigned char *pbuf, unsigned int buf_len,
+			unsigned char *pout, unsigned int chunk_size)
+{
+	if (hw_sha(pbuf, buf_len, pout, SHA_MODE_512))
+		printf("calc sha512 finish\n");
+}
+
+void hw_sha384(const unsigned char *pbuf, unsigned int buf_len,
+			unsigned char *pout, unsigned int chunk_size)
+{
+	if (hw_sha(pbuf, buf_len, pout, SHA_MODE_384))
+		printf("calc sha384 finish\n");
+}
+
 void hw_sha256(const unsigned char *pbuf, unsigned int buf_len,
 			unsigned char *pout, unsigned int chunk_size)
 {
 	if (hw_sha(pbuf, buf_len, pout, SHA_MODE_256))
-		printf("calc sha finish\n");
+		printf("calc sha256 finish\n");
 }
 
 void hw_sha1(const unsigned char *pbuf, unsigned int buf_len,
 			unsigned char *pout, unsigned int chunk_size)
 {
 	if (hw_sha(pbuf, buf_len, pout, SHA_MODE_1))
-		printf("calc sha finish\n");
+		printf("calc sha1 finish\n");
+}
+
+void hw_md5(const unsigned char *pbuf, unsigned int buf_len,
+			unsigned char *pout, unsigned int chunk_size)
+{
+	if (hw_sha(pbuf, buf_len, pout, MD5_MODE))
+		printf("calc md5 finish\n");
+}
+
+sha_mode_t get_sha_mode_by_name(const char *algo_name)
+{
+	if (!strncmp("md5", algo_name, 3)) {
+		return MD5_MODE;
+	} else if (!strncmp("sha1", algo_name, 4)) {
+		return SHA_MODE_1;
+	} else if (!strncmp("sha256", algo_name, 6)) {
+		return SHA_MODE_256;
+	} else if (!strncmp("sha384", algo_name, 6)) {
+		return SHA_MODE_384;
+	} else if (!strncmp("sha512", algo_name, 6)) {
+		return SHA_MODE_512;
+	}
+
+	return -1;
 }
 
 int hw_sha_init(struct hash_algo *algo, void **ctxp)
@@ -110,7 +148,7 @@ int hw_sha_init(struct hash_algo *algo, void **ctxp)
 	if (ret)
 		return ret;
 
-	ret = sha_start(dev, *ctxp, SHA_MODE_256);
+	ret = sha_start(dev, *ctxp, get_sha_mode_by_name(algo->name));
 	if (ret) {
 		printf("SHA start failed.\n");
 		return ret;

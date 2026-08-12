@@ -1624,6 +1624,34 @@ static int fill_ext_prop(struct usb_configuration *c, int interface, u8 *buf)
 }
 
 /*
+ * If the function dev is display need call process standard request
+ */
+static int handle_display_function(struct usb_composite_dev	*cdev,
+		      const struct usb_ctrlrequest *ctrl)
+{
+	struct usb_function	*f = NULL;
+
+	if (cdev->config) {
+		list_for_each_entry(f, &cdev->config->functions, list)
+			if (f->setup && f->name && strstr(f->name, "display")) {
+				f->setup(f, ctrl);
+				break;
+			}
+	} else {
+		struct usb_configuration *c;
+
+		list_for_each_entry(c, &cdev->configs, list)
+			list_for_each_entry(f, &c->functions, list)
+				if (f->setup && f->name && strstr(f->name, "display")) {
+					f->setup(f, ctrl);
+					break;
+				}
+	}
+
+	return 0;
+}
+
+/*
  * The setup() callback implements all the ep0 functionality that's
  * not handled lower down, in hardware or the hardware driver(like
  * device and endpoint feature flags, and their status).  It's all
@@ -1660,6 +1688,8 @@ composite_setup(struct usb_gadget *gadget, const struct usb_ctrlrequest *ctrl)
 	 */
 	if ((ctrl->bRequestType & USB_TYPE_MASK) != USB_TYPE_STANDARD)
 		goto unknown;
+
+	handle_display_function(cdev, ctrl);
 
 	switch (ctrl->bRequest) {
 

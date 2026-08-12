@@ -6,10 +6,93 @@
 /*********************
  *      INCLUDES
  *********************/
+#include <sys/ioctl.h>
+#include <linux/dma-buf.h>
+#include <video/mpp_types.h>
 #include "../misc/lv_types.h"
 #include "lv_draw_buf.h"
 #include "../stdlib/lv_string.h"
 #include "../core/lv_global.h"
+#include "../../src/display/lv_display_private.h"
+#include "../../../lv_drivers/fbdev/lv_mpp_dec/lv_mpp_dec.h"
+
+#ifndef LV_USE_DRAW_DMA_BUF
+#define LV_USE_DRAW_DMA_BUF  1
+#endif
+
+#if LV_USE_DRAW_DMA_BUF
+#ifndef LV_USE_DRAW_DMA_BUF_LOW_LIMIT
+#define LV_USE_DRAW_DMA_BUF_LOW_LIMIT (1024 * 48)
+#endif // LV_USE_DRAW_DMA_BUF_LOW_LIMIT
+#endif // LV_USE_DRAW_DMA_BUF
+
+#ifndef LV_USE_GE2D_FILL_CLEAR
+#define LV_USE_GE2D_FILL_CLEAR  1
+#endif
+
+#ifndef LV_GE2D_FILL_CLEAR_LIMIT
+#define LV_GE2D_FILL_CLEAR_LIMIT 100 * 100
+#endif
+
+#if LV_USE_DRAW_DMA_BUF
+
+extern mpp_decoder_data_t *lv_mpp_image_alloc(int width, int height, enum mpp_pixel_format fmt);
+void lv_mpp_image_free(mpp_decoder_data_t *image);
+
+static inline bool ge2d_supported_fmt(lv_color_format_t cf)
+{
+    bool supported = false;
+
+    switch(cf) {
+        case LV_COLOR_FORMAT_RGB565:
+        case LV_COLOR_FORMAT_RGB888:
+        case LV_COLOR_FORMAT_ARGB8888:
+        case LV_COLOR_FORMAT_XRGB8888:
+            supported = true;
+            break;
+        default:
+            break;
+    }
+
+    return supported;
+}
+
+enum mpp_pixel_format lv_cf_to_mpp_fmt(lv_color_format_t cf)
+{
+    enum mpp_pixel_format fmt = LV_COLOR_FORMAT_RGB565;
+
+    switch(cf) {
+        case LV_COLOR_FORMAT_RGB565:
+            fmt = MPP_FMT_RGB_565;
+            break;
+        case LV_COLOR_FORMAT_RGB888:
+            fmt = MPP_FMT_RGB_888;
+            break;
+        case LV_COLOR_FORMAT_ARGB8888:
+            fmt = MPP_FMT_ARGB_8888;
+            break;
+        case LV_COLOR_FORMAT_XRGB8888:
+            fmt = MPP_FMT_XRGB_8888;
+            break;
+        default:
+            LV_LOG_ERROR("unsupported format:%d", cf);
+            break;
+    }
+    return fmt;
+}
+
+#endif
+
+extern void lv_draw_ge2d_buf_clear(lv_draw_buf_t *draw_buf, const lv_area_t *a);
+
+static inline bool display_buf_check(uint8_t *buf)
+{
+    lv_display_t *disp = lv_display_get_default();
+    if (disp->_static_buf1.data == buf || disp->_static_buf2.data == buf)
+        return true;
+    else
+        return false;
+}
 
 /*********************
  *      DEFINES
@@ -88,9 +171,28 @@ void lv_draw_buf_invalidate_cache(const lv_draw_buf_t * draw_buf, const lv_area_
 
 void lv_draw_buf_clear(lv_draw_buf_t * draw_buf, const lv_area_t * a)
 {
+    int32_t width;
+    int32_t height;
+
     LV_ASSERT_NULL(draw_buf);
-    if(a && lv_area_get_width(a) < 0) return;
-    if(a && lv_area_get_height(a) < 0) return;
+
+    if (a) {
+        width = lv_area_get_width(a);
+        height = lv_area_get_height(a);
+    } else {
+        width = draw_buf->header.w;
+        height = draw_buf->header.h;
+    }
+
+    if (width < 0) return;
+    if (height < 0) return;
+
+#if LV_USE_GE2D_FILL_CLEAR
+    if (display_buf_check(draw_buf->data) &&
+        width * height >= LV_GE2D_FILL_CLEAR_LIMIT) {
+            return lv_draw_ge2d_buf_clear(draw_buf, a);
+    }
+#endif
 
     const lv_image_header_t * header = &draw_buf->header;
     uint32_t stride = header->stride;
@@ -202,14 +304,44 @@ lv_result_t lv_draw_buf_init(lv_draw_buf_t * draw_buf, uint32_t w, uint32_t h, l
 
 lv_draw_buf_t * lv_draw_buf_create(uint32_t w, uint32_t h, lv_color_format_t cf, uint32_t stride)
 {
-    lv_draw_buf_t * draw_buf = lv_malloc_zeroed(sizeof(lv_draw_buf_t));
+    lv_draw_buf_t * draw_buf;
+    void * buf = NULL;
+
+    uint32_t size = _calculate_draw_buf_size(w, h, cf, stride);
+
+#if LV_USE_DRAW_DMA_BUF
+    if (!ge2d_supported_fmt(cf)) {
+        goto normal_alloc;
+    }
+
+    if (size >= LV_USE_DRAW_DMA_BUF_LOW_LIMIT) {
+        enum mpp_pixel_format fmt = lv_cf_to_mpp_fmt(cf);
+        mpp_decoder_data_t *img_buf = lv_mpp_image_alloc(w, h, fmt);
+        img_buf->dec_buf.buf_type = MPP_PHY_ADDR;
+        if(img_buf == NULL) return NULL;
+
+        uint32_t stride = img_buf->dec_buf.stride[0];
+        void *data = (void *)img_buf->data[0];
+        lv_draw_buf_init(&img_buf->decoded, w, h, cf, stride, data, stride * h);
+
+        draw_buf = &img_buf->decoded;
+        draw_buf->header.flags = LV_IMAGE_FLAGS_USER8 | LV_IMAGE_FLAGS_ALLOCATED;
+
+        // get physical address
+        ioctl(img_buf->dec_buf.fd[0], DMA_BUF_IOCTL_GET_PHY_ADDR, &img_buf->dec_buf.phy_addr[0]);
+        return draw_buf;
+    } else {
+        goto normal_alloc;
+    }
+
+normal_alloc:
+#endif // LV_USE_DRAW_DMA_BUF
+    draw_buf = lv_malloc_zeroed(sizeof(lv_draw_buf_t));
     LV_ASSERT_MALLOC(draw_buf);
     if(draw_buf == NULL) return NULL;
     if(stride == 0) stride = lv_draw_buf_width_to_stride(w, cf);
 
-    uint32_t size = _calculate_draw_buf_size(w, h, cf, stride);
-
-    void * buf = draw_buf_malloc(size, cf);
+    buf = draw_buf_malloc(size, cf);
     /*Do not assert here as LVGL or the app might just want to try creating a draw_buf*/
     if(buf == NULL) {
         LV_LOG_WARN("No memory: %"LV_PRIu32"x%"LV_PRIu32", cf: %d, stride: %"LV_PRIu32", %"LV_PRIu32"Byte, ",
@@ -227,6 +359,7 @@ lv_draw_buf_t * lv_draw_buf_create(uint32_t w, uint32_t h, lv_color_format_t cf,
     draw_buf->data = lv_draw_buf_align(buf, cf);
     draw_buf->unaligned_data = buf;
     draw_buf->data_size = size;
+
     return draw_buf;
 }
 
@@ -277,8 +410,18 @@ void lv_draw_buf_destroy(lv_draw_buf_t * buf)
     if(buf == NULL) return;
 
     if(buf->header.flags & LV_IMAGE_FLAGS_ALLOCATED) {
+#if LV_USE_DRAW_DMA_BUF
+        if (buf->header.flags & LV_IMAGE_FLAGS_USER8) {
+            lv_mpp_image_free((mpp_decoder_data_t *)buf);
+        } else {
+            draw_buf_free(buf->unaligned_data);
+            lv_free(buf);
+        }
+#else
         draw_buf_free(buf->unaligned_data);
         lv_free(buf);
+#endif // LV_USE_DRAW_DMA_BUF
+
     }
     else {
         LV_LOG_ERROR("draw buffer is not allocated, ignored");

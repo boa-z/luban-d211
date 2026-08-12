@@ -234,6 +234,34 @@ static s32 aicfb_ioctl_get_fb_layer_cfg(struct aicfb_info *fbi,
 	return 0;
 }
 
+static s32 aicfb_ioctl_release_framebuffer(struct aicfb_info *fbi,
+	unsigned long arg)
+{
+	s32 ret = 0;
+	struct aicfb_layer_data layer = {0};
+
+	if (fbi->fb_start) {
+		layer.layer_id = 1;
+		ret = fbi->de->get_layer_config(&layer);
+		if (ret)
+			return ret;
+
+		layer.enable = 0;
+		ret = fbi->de->update_layer_config(&layer);
+		if (ret)
+			return ret;
+
+		dma_free_coherent(fbi->fb_dev,
+				  PAGE_ALIGN(fbi->fb_size),
+				  fbi->fb_start,
+				  fbi->fb_start_dma);
+
+		fbi->fb_start = NULL;
+	}
+
+	return ret;
+}
+
 #ifdef CONFIG_DMA_SHARED_BUFFER
 static s32 aicfb_ioctl_add_dmabuf(struct aicfb_info *fbi,
 	unsigned long arg)
@@ -409,6 +437,7 @@ struct aicfb_ioctl_cmd aicfb_ioctl_cmds[] = {
 {AICFB_GET_FB_LAYER_CONFIG, aicfb_ioctl_get_fb_layer_cfg, "Get FB layer cfg"},
 {AICFB_SET_DISP_PROP, aicfb_ioctl_set_display_prop, "Set display prop"},
 {AICFB_GET_DISP_PROP, aicfb_ioctl_get_display_prop, "Get display prop"},
+{AICFB_RELEASE_FRAMEBUFFER, aicfb_ioctl_release_framebuffer, "Release framebuffer"},
 #ifdef CONFIG_DMA_SHARED_BUFFER
 {AICFB_ADD_DMABUF, aicfb_ioctl_add_dmabuf, "Add dma-buf by given fd"},
 {AICFB_RM_DMABUF, aicfb_ioctl_remove_dmabuf, "Remove dma-buf by given fd"},

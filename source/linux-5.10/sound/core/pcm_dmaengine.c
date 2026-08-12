@@ -29,6 +29,10 @@ struct dmaengine_pcm_runtime_data {
 static inline struct dmaengine_pcm_runtime_data *substream_to_prtd(
 	const struct snd_pcm_substream *substream)
 {
+	if (!substream || !substream->runtime) {
+		return NULL;
+	}
+
 	return substream->runtime->private_data;
 }
 
@@ -131,7 +135,13 @@ EXPORT_SYMBOL_GPL(snd_dmaengine_pcm_set_config_from_dai_data);
 static void dmaengine_pcm_dma_complete(void *arg)
 {
 	struct snd_pcm_substream *substream = arg;
-	struct dmaengine_pcm_runtime_data *prtd = substream_to_prtd(substream);
+	struct dmaengine_pcm_runtime_data *prtd = NULL;
+
+	if (!substream || !substream->runtime) {
+		return;
+	}
+
+	prtd = substream_to_prtd(substream);
 
 	prtd->pos += snd_pcm_lib_period_bytes(substream);
 	if (prtd->pos >= snd_pcm_lib_buffer_bytes(substream))

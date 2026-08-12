@@ -193,6 +193,7 @@ static int aic_mbox_probe(struct udevice *dev)
 
 static const struct udevice_id aic_mbox_ids[] = {
 	{ .compatible = "artinchip,aic-mbox-char-v1.0", },
+	{ .compatible = "artinchip,aic-mbox-server-v1.0", },
 	{},
 };
 

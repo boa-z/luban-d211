@@ -1,27 +1,29 @@
 /*
- * Copyright (c) 2024-2025, ArtInChip Technology Co., Ltd
+ * Copyright (c) 2024-2026, ArtInChip Technology Co., Ltd
  *
  * SPDX-License-Identifier: Apache-2.0
  *
  * Authors:  haidong.pan <haidong.pan@artinchip.com>
  */
 
-#include "artinchip/sample_base.h"
+#ifndef _BATTERY_H
+#define _BATTERY_H
 
 #define GPAI_CHAN_NUM    8
 #define MAX_PATH_LEN     128
-#define ADC_CHAN		 7
+#define ADC_CHAN         7
 
-static const struct battery_level {
+struct battery_level {
     int adc_val;
     int level;
-} battery_levels[] = {
-    {2330, 100},
-    {2291, 75},
-    {2234, 50},
-    {2177, 25},
-    {0,    0}
 };
 
 int check_battery_level();
+int gpio_export(unsigned int gpio);
+int gpio_set_dir(unsigned int gpio, const char *dir);
+int gpio_get_value(unsigned int gpio, int *value);
+int gpio_set_value(unsigned int gpio, int value);
+int gpio_det_get(void);
+
+#endif
 

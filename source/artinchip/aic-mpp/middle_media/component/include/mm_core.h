@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2024 ArtInChip Technology Co. Ltd
+ * Copyright (C) 2020-2026 ArtInChip Technology Co. Ltd
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -16,7 +16,7 @@ extern "C" {
 
 #include <mm_component.h>
 
-#define MM_MAX_STRINGNAME_SIZE 128
+#define MM_MAX_STRINGNAME_SIZE 1024
 
 #define MM_COMPONENT_DEMUXER_NAME                 "MM.AIC.DEMUXER.ALL"
 #define MM_COMPONENT_VDEC_NAME                    "MM.AIC.VDEC.ALL"
@@ -26,6 +26,9 @@ extern "C" {
 #define MM_COMPONENT_CLOCK_NAME                   "MM.AIC.CLOCK.ALL"
 #define MM_COMPONENT_MUXER_NAME                   "MM.AIC.MUXER.ALL"
 #define MM_COMPONENT_VENC_NAME                    "MM.AIC.VENC.ALL"
+#define MM_COMPONENT_AENC_NAME                    "MM.AIC.AENC.ALL"
+#define MM_COMPONENT_VIN_NAME                     "MM.AIC.VIN.ALL"
+#define MM_COMPONENT_AIN_NAME                     "MM.AIC.AIN.ALL"
 
 #define MM_COMPONENT_DEMUXER_THREAD_PRIORITY      (23)
 #define MM_COMPONENT_VDEC_THREAD_PRIORITY         (22)
@@ -50,11 +53,20 @@ extern "C" {
 #define VIDEO_RENDER_PORT_IN_VIDEO_INDEX 0
 #define VIDEO_RENDER_PORT_IN_CLOCK_INDEX 1
 
+#define VIN_PORT_IN_INDEX  0
+#define VIN_PORT_OUT_INDEX 1
+
 #define ADEC_PORT_IN_INDEX  0
 #define ADEC_PORT_OUT_INDEX 1
 
+#define AENC_PORT_IN_INDEX  0
+#define AENC_PORT_OUT_INDEX 1
+
 #define AUDIO_RENDER_PORT_IN_AUDIO_INDEX 0
 #define AUDIO_RENDER_PORT_IN_CLOCK_INDEX 1
+
+#define AIN_PORT_IN_INDEX  0
+#define AIN_PORT_OUT_INDEX 1
 
 #define CLOCK_PORT_OUT_VIDEO 0
 #define CLOCK_PORT_OUT_AUDIO 1

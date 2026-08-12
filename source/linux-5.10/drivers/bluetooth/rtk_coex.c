@@ -662,10 +662,10 @@ static void rtk_notify_profileinfo_to_fw(void)
 	struct list_head *iter = NULL;
 	struct list_head *temp = NULL;
 	rtk_conn_prof *hci_conn = NULL;
-	uint8_t handle_number = 0;
-	uint32_t buffer_size = 0;
-	uint8_t *p_buf = NULL;
-	uint8_t *p = NULL;
+	u8 handle_number = 0;
+	u32 buffer_size = 0;
+	u8 *p_buf = NULL;
+	u8 *p = NULL;
 
 	head = &btrtl_coex.conn_hash;
 	list_for_each_safe(iter, temp, head) {
@@ -691,8 +691,10 @@ static void rtk_notify_profileinfo_to_fw(void)
 
 	RTKBT_DBG("%s: BufferSize %u", __func__, buffer_size);
 	RTKBT_DBG("%s: NumberOfHandles %u", __func__, handle_number);
+	if (!handle_number)
+		goto send_cmd;
 	head = &btrtl_coex.conn_hash;
-	list_for_each(iter, head) {
+	list_for_each_safe(iter, temp, head) {
 		hci_conn = list_entry(iter, rtk_conn_prof, list);
 		if (hci_conn && hci_conn->profile_bitmap) {
 			if(!profileinfo_cmd) {
@@ -716,6 +718,7 @@ static void rtk_notify_profileinfo_to_fw(void)
 			break;
 	}
 
+send_cmd:
 	if(!profileinfo_cmd) {
 		*p++ = btrtl_coex.profile_status;
 		btrtl_coex.profile_status = 0;
@@ -749,16 +752,20 @@ static void update_profile_state(rtk_conn_prof * phci_conn,
 			need_update = TRUE;
 			phci_conn->profile_status |= BIT(profile_index);
 
-			if(profile_index == profile_sink)
+			if (profile_index == profile_sink)
 				phci_conn->profile_status |= BIT(profile_a2dpsink);
+			else if (profile_index == profile_panrx)
+				phci_conn->profile_status |= BIT(profile_panrx);
 		}
 	} else {
 		if ((phci_conn->profile_status & BIT(profile_index)) > 0) {
 			need_update = TRUE;
 			phci_conn->profile_status &= ~(BIT(profile_index));
 
-			if(profile_index == profile_sink)
+			if (profile_index == profile_sink)
 				phci_conn->profile_status &= ~(BIT(profile_a2dpsink));
+			else if (profile_index == profile_panrx)
+				phci_conn->profile_status &= ~(BIT(profile_panrx));
 		}
 	}
 
@@ -789,6 +796,8 @@ static void update_profile_connection(rtk_conn_prof * phci_conn,
 
 			if (profile_index == profile_sink)
 				phci_conn->profile_bitmap |= BIT(profile_a2dpsink);
+			else if (profile_index == profile_panrx)
+				phci_conn->profile_bitmap |= BIT(profile_panrx);
 
 			rtk_check_setup_timer(phci_conn, profile_index);
 		}
@@ -817,6 +826,9 @@ static void update_profile_connection(rtk_conn_prof * phci_conn,
 			if (profile_index == profile_sink) {
 				phci_conn->profile_bitmap &= ~(BIT(profile_a2dpsink));
 				phci_conn->profile_status &= ~(BIT(profile_a2dpsink));
+			} else if (profile_index == profile_panrx) {
+				phci_conn->profile_bitmap &= ~(BIT(profile_panrx));
+				phci_conn->profile_status &= ~(BIT(profile_panrx));
 			}
 			rtk_check_del_timer(profile_index, phci_conn);
 			/* clear profile_hid_interval if need */
@@ -966,6 +978,9 @@ static uint8_t handle_l2cap_discon_req(uint16_t handle, uint16_t dcid,
 {
 	rtk_prof_info *prof_info = NULL;
 	rtk_conn_prof *phci_conn = NULL;
+	u8 index;
+	u8 flags;
+
 	RTKBT_DBG("%s: handle 0x%04x, dcid 0x%04x, scid 0x%04x, dir %u",
 			__func__, handle, dcid, scid, direction);
 
@@ -985,19 +1000,23 @@ static uint8_t handle_l2cap_discon_req(uint16_t handle, uint16_t dcid,
 		return 0;
 	}
 
-	phci_conn = find_connection_by_handle(&btrtl_coex, handle);
-	if (!phci_conn) {
-		mutex_unlock(&btrtl_coex.profile_mutex);
-		return 0;
-	}
-
-	update_profile_connection(phci_conn, prof_info->profile_index, FALSE);
-	if (prof_info->profile_index == profile_a2dp &&
-	    (phci_conn->profile_bitmap & BIT(profile_sink)))
-		update_profile_connection(phci_conn, profile_sink, FALSE);
+	index = prof_info->profile_index;
+	flags = prof_info->flags;
 
 	delete_profile_from_hash(prof_info);
 	mutex_unlock(&btrtl_coex.profile_mutex);
+
+	phci_conn = find_connection_by_handle(&btrtl_coex, handle);
+	if (!phci_conn)
+		return 0;
+
+	update_profile_connection(phci_conn, index, FALSE);
+	if (index == profile_a2dp &&
+	    (phci_conn->profile_bitmap & BIT(profile_sink)))
+		update_profile_connection(phci_conn, profile_sink, FALSE);
+	if (index == profile_pan && (flags & PAN_RX) &&
+	    (phci_conn->profile_bitmap & BIT(profile_panrx)))
+		update_profile_connection(phci_conn, profile_panrx, FALSE);
 
 	return 1;
 }
@@ -1080,6 +1099,26 @@ static void rtl_process_media_data(rtk_conn_prof *hci_conn, u8 *data, u16 len,
 	hci_conn->a2dp_packet_count++;
 }
 
+static void rtl_process_pan_data(rtk_conn_prof *hci_conn, rtk_prof_info *prof,
+				 u8 *data, u16 len, u8 out)
+{
+	if (!hci_conn || !prof || !data || !len) {
+		RTKBT_ERR("%s: invalid parameters", __func__);
+		return;
+	}
+
+	update_profile_state(hci_conn, profile_pan, TRUE);
+	if (!out && len > 256) {
+		if (!(hci_conn->profile_bitmap & BIT(profile_panrx))) {
+			prof->flags |= PAN_RX;
+			hci_conn->profile_bitmap |= BIT(profile_panrx);
+			update_profile_connection(hci_conn, profile_panrx,
+						  TRUE);
+		}
+		update_profile_state(hci_conn, profile_panrx, TRUE);
+	}
+}
+
 static void packets_count(u16 handle, u16 scid, u8 out, u8 *data, u16 len)
 {
 	rtk_prof_info *prof = NULL;
@@ -1139,11 +1178,21 @@ static void packets_count(u16 handle, u16 scid, u8 out, u8 *data, u16 len)
 			hci_conn->a2dp_packet_count++;
 		}
 	}
-	if (prof->profile_index == profile_pan)
+	if (prof->profile_index == profile_pan) {
+		if (out)
+			hci_conn->pantx_bytes += len;
+		else
+			hci_conn->panrx_bytes += len;
+		if (!(hci_conn->profile_status & BIT(profile_pan)))
+			rtl_process_pan_data(hci_conn, prof, data, len, out);
 		hci_conn->pan_packet_count++;
+	}
 
-	if (prof->profile_index == profile_pan)
-		hci_conn->pan_packet_count++;
+	if (prof->profile_index == profile_hogp)
+		hci_conn->hogp_packet_count++;
+
+	if (prof->profile_index == profile_voice)
+		hci_conn->voice_packet_count++;
 done:
 	clear_bit(RTL_COEX_PKT_COUNTING, &btrtl_coex.flags);
 	return;
@@ -1176,6 +1225,31 @@ static void count_a2dp_packet_timeout(struct work_struct *work)
 			   msecs_to_jiffies(1000));
 }
 
+/* This function requires the caller holds btrtl_coex.conn_mutex */
+static void update_pan_rx_state(rtk_conn_prof *conn)
+{
+	struct list_head *iter = NULL;
+	struct list_head *temp = NULL;
+	rtk_prof_info *prof = NULL;
+
+	mutex_lock(&btrtl_coex.profile_mutex);
+	list_for_each_safe(iter, temp, &btrtl_coex.profile_list) {
+		prof = list_entry(iter, rtk_prof_info, list);
+		/* This bit might be set during this loop. */
+		if (conn->profile_status & BIT(profile_panrx))
+			break;
+		if (prof->profile_index == profile_pan) {
+			if (!(conn->profile_bitmap & BIT(profile_panrx))) {
+				prof->flags |= PAN_RX;
+				update_profile_connection(conn, profile_panrx,
+							  TRUE);
+			}
+			update_profile_state(conn, profile_panrx, TRUE);
+		}
+	}
+	mutex_unlock(&btrtl_coex.profile_mutex);
+}
+
 static void count_pan_packet_timeout(struct work_struct *work)
 {
 	rtk_conn_prof *hci_conn = container_of(work, rtk_conn_prof,
@@ -1188,17 +1262,30 @@ static void count_pan_packet_timeout(struct work_struct *work)
 			RTKBT_DBG("%s: pan busy->idle!", __func__);
 			mutex_lock(&btrtl_coex.conn_mutex);
 			update_profile_state(hci_conn, profile_pan, FALSE);
+			if (hci_conn->profile_bitmap & BIT(profile_panrx))
+				update_profile_state(hci_conn, profile_panrx,
+						     FALSE);
 			mutex_unlock(&btrtl_coex.conn_mutex);
 		}
 	} else {
 		if (!is_profile_busy(hci_conn, profile_pan)) {
-			RTKBT_DBG("timeout_handler: pan idle->busy!");
+			RTKBT_DBG("%s: pan idle->busy!", __func__);
 			mutex_lock(&btrtl_coex.conn_mutex);
 			update_profile_state(hci_conn, profile_pan, TRUE);
 			mutex_unlock(&btrtl_coex.conn_mutex);
 		}
+
+		if (!(hci_conn->profile_status & BIT(profile_panrx))) {
+			mutex_lock(&btrtl_coex.conn_mutex);
+			/* TODO: Which margin is more reasonable ? */
+			if (hci_conn->panrx_bytes > hci_conn->pantx_bytes + 1024 * 3)
+				update_pan_rx_state(hci_conn);
+			mutex_unlock(&btrtl_coex.conn_mutex);
+		}
 	}
 	hci_conn->pan_packet_count = 0;
+	hci_conn->panrx_bytes = 0;
+	hci_conn->pantx_bytes = 0;
 	queue_delayed_work(btrtl_coex.fw_wq, &hci_conn->pan_count_work,
 			   msecs_to_jiffies(1000));
 }
@@ -1565,7 +1652,7 @@ static void rtk_notify_info_to_wifi(uint8_t reason, uint8_t length,
 	char *p = buf;
 	struct rtl_btinfo *report = (struct rtl_btinfo *)report_info;
 
-	if (length) {
+	if (length && report) {
 		RTKBT_DBG("bt info: cmd %2.2X", report->cmd);
 		RTKBT_DBG("bt info: len %2.2X", report->len);
 		RTKBT_DBG("bt info: data %2.2X %2.2X %2.2X %2.2X %2.2X %2.2X",
@@ -2106,12 +2193,10 @@ static void rtk_handle_cmd_complete_evt(u8 total_len, u8 * p)
 #endif
 	if (opcode == HCI_VENDOR_SET_PROFILE_REPORT_COMMAND) {
 		//0x01-unknown hci command
-		if ((*p++) == 0x01) {
-			//RTKBT_DBG("unknown hci command");
-			return;
-		} else {
+		if (*p != 0x01)
 			profileinfo_cmd = 1;
-		}
+		RTKBT_DBG("%s: status %02x, profile info cmd %u", __func__,
+			  *p, profileinfo_cmd);
 	}
 
 #if HCI_VERSION_CODE >= KERNEL_VERSION(6, 0, 0)
@@ -2549,6 +2634,10 @@ static void disconn_acl(u16 handle, struct rtl_hci_conn *conn)
 			    (conn->profile_bitmap & BIT(profile_sink)))
 				need_update |= disconn_profile(conn,
 							       profile_sink);
+			if ((prof_info->flags & PAN_RX) &&
+			    (conn->profile_bitmap & BIT(profile_panrx)))
+				need_update |= disconn_profile(conn,
+							       profile_panrx);
 			delete_profile_from_hash(prof_info);
 		}
 	}
@@ -3513,9 +3602,63 @@ static inline void rtl_free_frags(struct rtl_coex_struct *coex)
 static void check_profileinfo_cmd(void)
 {
 	//1 + 6 * handle_bumfer, handle_number = 0
-	uint8_t profileinfo_buf[] = {0x00};
-	rtk_vendor_cmd_to_fw(HCI_VENDOR_SET_PROFILE_REPORT_COMMAND, 1,
-				profileinfo_buf);
+	u16 opcode = HCI_VENDOR_SET_PROFILE_REPORT_COMMAND;
+	struct hci_dev *hdev;
+	struct sk_buff *skb;
+	int ret = 0;
+	u8 data[4];
+
+	if (!test_bit(RTL_COEX_RUNNING, &btrtl_coex.flags)) {
+		RTKBT_WARN("%s: coex has stopped.", __func__);
+		return;
+	}
+	hdev = btrtl_coex.hdev;
+	bt_dev_info(hdev, "%s", __func__);
+#if HCI_VERSION_CODE >= KERNEL_VERSION(4, 1, 0)
+	if (!hdev)
+		RTKBT_WARN("%s: No hdev", __func__);
+
+	data[0] = 0x00;
+	skb = hci_cmd_sync(hdev, opcode, 1, data, HCI_CMD_TIMEOUT);
+	if (IS_ERR(skb) || !skb) {
+		ret = PTR_ERR(skb);
+		bt_dev_info(hdev, "HCI set profile report cmd (%d)", ret);
+	} else {
+		kfree_skb(skb);
+	}
+#else
+	opcode = HCI_VENDOR_SET_PROFILE_REPORT_COMMAND;
+	put_unaligned_le16(opcode, data);
+	data[2] = 0x01;
+	data[3] = 0x00;
+	skb = bt_skb_alloc(sizeof(data), GFP_KERNEL);
+	if (!skb)
+		goto done;
+
+	skb_put_data(skb, data, sizeof(data));
+	hci_skb_pkt_type(skb) = HCI_COMMAND_PKT;
+
+	/*
+	 * Why not use kernel stack cmd sending function ?
+	 * Because there is a race condition between hci reset sync/req in
+	 * kernel and this cmd here.
+	 *
+	 * If this cmd is issued just a little bit earier than the hci reset
+	 * sync/req in kernel, the hdev->cmd_cnt might be never recovered and
+	 * subsequent commands will never be issued to the Controller.
+	 *
+	 * if sent successfully, the skb will be released by the lowlevel driver
+	 *
+	 * NOTE the Controller must support at least two cmd buffers.
+	 */
+	ret = hdev->send(hdev, skb);
+	if (ret < 0) {
+		bt_dev_err(hdev, "sending cmd %04xfailed (%d)", opcode, ret);
+		kfree_skb(skb);
+	}
+done:
+#endif
+	RTKBT_INFO("%s: Check profille info done", __func__);
 }
 
 static void rtl_cmd_work(struct work_struct *work)
@@ -3571,8 +3714,11 @@ void rtk_btcoex_open(struct hci_dev *hdev)
 #endif
 	rtkbt_coexmsg_send(invite_req, sizeof(invite_req));
 #endif
+	/* Make sure the hci_reset_sync() in kernel stack issued before this
+	 * work executed.
+	 */
 	queue_delayed_work(btrtl_coex.fw_wq, &btrtl_coex.cmd_work,
-			msecs_to_jiffies(10));
+			msecs_to_jiffies(100));
 	/* Just for test */
 	//ctl.polling_enable = 1;
 	//ctl.polling_time = 1;
@@ -3582,6 +3728,10 @@ void rtk_btcoex_open(struct hci_dev *hdev)
 
 void rtk_btcoex_close(void)
 {
+#if HCI_VERSION_CODE >= KERNEL_VERSION(4, 1, 0)
+	struct hci_dev *hdev = btrtl_coex.hdev;
+	int locked = 0;
+#endif
 
 	if (!test_and_clear_bit(RTL_COEX_RUNNING, &btrtl_coex.flags)) {
 		RTKBT_WARN("RTL COEX is already closed.");
@@ -3615,7 +3765,24 @@ void rtk_btcoex_close(void)
 #endif /* RTB_SOFTWARE_MAILBOX */
 
 	cancel_delayed_work_sync(&btrtl_coex.fw_work);
+
+#if HCI_VERSION_CODE >= KERNEL_VERSION(4, 1, 0)
+	locked = mutex_is_locked(&hdev->req_lock);
+	RTKBT_INFO("%s: req_lock state %d", __func__, locked);
+	/* Sometime the hci dev open sync timeout happens. In this situation,
+	 * the below delayed work canceling will wait for ever. Because the
+	 * req_lock has been locked before entering here and the hci_cmd_sync()
+	 * in check_profileinfo_cmd() is trying to require the req_lock but it
+	 * will never acquire it.
+	 */
+	if (locked)
+		mutex_unlock(&hdev->req_lock);
+#endif
 	cancel_delayed_work_sync(&btrtl_coex.cmd_work);
+#if HCI_VERSION_CODE >= KERNEL_VERSION(4, 1, 0)
+	if (locked)
+		mutex_lock(&hdev->req_lock);
+#endif
 
 	/* Process all the remaining pkts */
 	rtl_hci_work_func(&btrtl_coex.fw_work.work);

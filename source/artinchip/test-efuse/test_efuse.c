@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * Copyright (C) 2020-2025 ArtInChip Technology Co., Ltd.
+ * Copyright (C) 2020-2026 ArtInChip Technology Co., Ltd.
  * Authors:  Xiong Hao <hao.xiong@artinchip.com>
  */
 
 #include <unistd.h>
 #include <stdint.h>
+#include <stdbool.h>
 #include <fcntl.h>
 #include <asm/types.h>
 #include <stdint.h>
@@ -19,6 +20,7 @@
 /* Global macro and variables */
 
 #define EFUSE_DEV_PATH "/sys/bus/nvmem/devices/aic-efuse0/nvmem"
+#define COMPATIBLE_DEV_PATH "/sys/firmware/devicetree/base/compatible"
 
 struct efuse_info {
 	char *name;
@@ -26,7 +28,7 @@ struct efuse_info {
 	unsigned int len;
 };
 
-static struct efuse_info efuse_info_list[] = {
+static struct efuse_info d211_efuse_info_list[] = {
 	{ "disread",      0x00, 0x08 },
 	{ "diswrite",     0x08, 0x08 },
 	{ "chipid",       0x10, 0x10 },
@@ -47,11 +49,53 @@ static struct efuse_info efuse_info_list[] = {
 	{ "customer",     0xC0, 0x40 }
 };
 
+/* Open a device file to be needed. */
+static int is_compatible(char *type)
+{
+	char data[256] = {0};
+	int ret = false, fd = -1;
+
+	fd = open(COMPATIBLE_DEV_PATH, O_RDONLY);
+	if (fd < 0) {
+		printf("Failed to open %s errno: %d[%s]\n", COMPATIBLE_DEV_PATH, errno, strerror(errno));
+		return false;
+	}
+
+	ret = read(fd, data, sizeof(data));
+	if (ret < 0) {
+		printf("Failed to read %s file, ret: %d\n", COMPATIBLE_DEV_PATH, ret);
+		close(fd);
+		return false;
+	}
+
+	close(fd);
+
+	if (strstr(data, type) != NULL)
+		return true;
+
+	return false;
+}
+
+static int detect_chip_type(struct efuse_info **list, int *count)
+{
+	if (is_compatible("artinchip,d211")) {
+		*list = d211_efuse_info_list;
+		*count = sizeof(d211_efuse_info_list) / sizeof(d211_efuse_info_list[0]);
+	} else {
+		return -ENODEV;
+	}
+
+	return 0;
+}
+
 static struct efuse_info *get_efuse_info(char *name)
 {
+	struct efuse_info *efuse_info_list = NULL;
 	int i, cnt;
 
-	cnt = sizeof(efuse_info_list) / sizeof(efuse_info_list[0]);
+	if (detect_chip_type(&efuse_info_list, &cnt))
+		return NULL;
+
 	for (i = 0; i < cnt; i++) {
 		if (strcmp(name, efuse_info_list[i].name) == 0)
 			return &efuse_info_list[i];
@@ -91,12 +135,15 @@ void hexdump(const char *msg, const uint8_t* data, int len)
 
 static int usage(char *program)
 {
+	struct efuse_info *efuse_info_list = NULL;
 	int i, cnt;
 
 	printf("Compile time: %s %s\n", __DATE__, __TIME__);
 	printf("Usage: %s [options]\n", program);
 
-	cnt = sizeof(efuse_info_list) / sizeof(efuse_info_list[0]);
+	if (detect_chip_type(&efuse_info_list, &cnt))
+		return 0;
+
 	for (i = 0; i < cnt; i++)
 		printf("    %s show %s\t\tPrint %s infomation\n", program,
 		       efuse_info_list[i].name, efuse_info_list[i].name);
@@ -159,7 +206,7 @@ int main(int argc, char **argv)
 
 	info = get_efuse_info(argv[2]);
 	if (!info) {
-		fprintf(stderr, "not found %s info.\n", argv[1]);
+		fprintf(stderr, "not found %s info.\n", argv[2]);
 		return -EINVAL;
 	}
 

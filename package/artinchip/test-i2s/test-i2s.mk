@@ -1,0 +1,8 @@
+TEST_I2S_VERSION =
+TEST_I2S_ENABLE_TARBALL = NO
+TEST_I2S_ENABLE_PATCH = NO
+
+TEST_I2S_DEPENDENCIES += alsa-lib test-common
+
+TEST_I2S_CONF_OPTS += -DCMAKE_INSTALL_PREFIX=/usr/local
+$(eval $(cmake-package))

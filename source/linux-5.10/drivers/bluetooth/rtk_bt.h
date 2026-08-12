@@ -43,6 +43,7 @@
 
 #define CONFIG_BTCOEX			1
 #define CONFIG_BTUSB_WAKEUP_HOST	0
+#define CONFIG_BTRTL_WAKEUP_REASON	0
 
 #if CONFIG_BTCOEX
 #define BTCOEX
@@ -54,6 +55,10 @@
 #if CONFIG_BTUSB_WAKEUP_HOST
 #define BTUSB_WAKEUP_HOST
 #endif
+
+/* #define CONFIG_BTRTL_APCF	1 */
+
+/* #define CONFIG_BTRTL_LE_ADV_ENABLE_DEFER */
 
 #define URB_CANCELING_DELAY_MS	10	// Added by Realtek
 #if HCI_VERSION_CODE > KERNEL_VERSION(2, 6, 33)
@@ -92,6 +97,8 @@ int btusb_send_frame(struct hci_dev *hdev, struct sk_buff *skb);
 int btusb_send_frame(struct sk_buff *skb);
 #endif
 
+int rtlbt_download_patch(void);
+
 #define BTUSB_MAX_ISOC_FRAMES	10
 #define BTUSB_INTR_RUNNING		0
 #define BTUSB_BULK_RUNNING		1
@@ -99,6 +106,8 @@ int btusb_send_frame(struct sk_buff *skb);
 #define BTUSB_SUSPENDING		3
 #define BTUSB_DID_ISO_RESUME	4
 #define BTUSB_USE_ALT3_FOR_WBS	15
+#define BTUSB_BULK_MODE		16
+#define BTUSB_DETACHED		17
 
 struct btusb_data {
 	struct hci_dev *hdev;
@@ -151,4 +160,10 @@ struct btusb_data {
 	struct notifier_block pm_notifier;
 	struct notifier_block shutdown_notifier;
 	void *context;
+
+#if defined(CONFIG_BTRTL_APCF)
+	struct delayed_work apcf_work;
+#endif
+	atomic_t		sync_state;
+	struct mutex		dl_lock;
 };

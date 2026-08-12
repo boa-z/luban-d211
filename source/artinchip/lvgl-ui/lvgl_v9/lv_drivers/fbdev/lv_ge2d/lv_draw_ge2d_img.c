@@ -154,6 +154,7 @@ static inline void ge2d_sync(struct mpp_ge *ge2d_dev)
 void lv_draw_ge2d_img(lv_draw_unit_t *draw_unit, const lv_draw_image_dsc_t *draw_dsc,
                       const lv_area_t *coords)
 {
+    LV_PROFILER_BEGIN;
     if (lv_image_src_get_type(draw_dsc->src) == LV_IMAGE_SRC_FILE) {
         const char *ptr = lv_fs_get_ext(draw_dsc->src);
         if (!strcmp(ptr, "fake")) {
@@ -172,6 +173,7 @@ void lv_draw_ge2d_img(lv_draw_unit_t *draw_unit, const lv_draw_image_dsc_t *draw
 
             lv_area_t clipped_img_area;
             if(!_lv_area_intersect(&clipped_img_area, coords, draw_unit->clip_area)) {
+                LV_PROFILER_END;
                 return;
             }
 
@@ -180,6 +182,7 @@ void lv_draw_ge2d_img(lv_draw_unit_t *draw_unit, const lv_draw_image_dsc_t *draw
                                             draw_dsc->scale_y, &draw_dsc->pivot);
             lv_area_move(&clipped_img_area, coords->x1, coords->y1);
             lv_draw_ge2d_fill_with_blend(draw_unit, &fill_dsc, &clipped_img_area, alpha_en);
+            LV_PROFILER_END;
             return;
         }
     }
@@ -189,6 +192,7 @@ void lv_draw_ge2d_img(lv_draw_unit_t *draw_unit, const lv_draw_image_dsc_t *draw
     } else {
         _lv_draw_image_tiled_helper(draw_unit, draw_dsc, coords, ge2d_img_draw_core);
     }
+    LV_PROFILER_END;
 }
 
 static inline bool yuv_size_is_invalid(int32_t src_w, int32_t src_h, int32_t dst_w, int32_t dst_h)
@@ -255,18 +259,18 @@ void lv_draw_ge2d_blit(lv_draw_unit_t *draw_unit, const lv_draw_sw_blend_dsc_t *
         }
 
         struct mpp_buf *buf = (struct mpp_buf *)src_buf;
-        blt.src_buf.fd[0] = buf->fd[0];
-        blt.src_buf.fd[1] = buf->fd[1];
-        blt.src_buf.fd[2] = buf->fd[2];
+        blt.src_buf.phy_addr[0] = buf->phy_addr[0];
+        blt.src_buf.phy_addr[1] = buf->phy_addr[1];
+        blt.src_buf.phy_addr[2] = buf->phy_addr[2];
         blt.src_buf.stride[0] = buf->stride[0];
         blt.src_buf.stride[1] = buf->stride[1];
         blt.src_buf.flags = buf->flags;
     } else {
-        blt.src_buf.fd[0] = mpp_data->dec_buf.fd[0];;
+        blt.src_buf.phy_addr[0] = mpp_data->dec_buf.phy_addr[0];
         blt.src_buf.stride[0] = src_stride;
     }
 
-    blt.src_buf.buf_type = MPP_DMA_BUF_FD;
+    blt.src_buf.buf_type = MPP_PHY_ADDR;
     blt.src_buf.size.width = src_w;
     blt.src_buf.size.height = src_h;
     blt.src_buf.format = lv_fmt_to_mpp_fmt(src_color_format);;
@@ -298,10 +302,12 @@ void lv_draw_ge2d_blit(lv_draw_unit_t *draw_unit, const lv_draw_sw_blend_dsc_t *
 
     blt.dst_buf.buf_type = disp_buf_type();
     // set dst buf
-    if (blt.dst_buf.buf_type == MPP_PHY_ADDR)
+    if (blt.dst_buf.buf_type == MPP_PHY_ADDR) {
         blt.dst_buf.phy_addr[0] = disp_buf_phy_addr((uint8_t *)dst_buf);
-    else
-        blt.dst_buf.fd[0] = disp_buf_fd((uint8_t *)dst_buf);
+    } else {
+        blt.dst_buf.buf_type = MPP_PHY_ADDR;
+        blt.dst_buf.phy_addr[0] = disp_buf_draw_addr((uint8_t *)dst_buf);
+    }
 
     blt.dst_buf.stride[0] = dest_stride;
     blt.dst_buf.size.width = layer->draw_buf->header.w;
@@ -462,9 +468,9 @@ void lv_draw_ge2d_transform(lv_draw_unit_t *draw_unit, const lv_draw_sw_blend_ds
         }
 
         struct mpp_buf *buf = (struct mpp_buf  *)src_buf;
-        blt.src_buf.fd[0] = buf->fd[0];
-        blt.src_buf.fd[1] = buf->fd[1];
-        blt.src_buf.fd[2] = buf->fd[2];
+        blt.src_buf.phy_addr[0] = buf->phy_addr[0];
+        blt.src_buf.phy_addr[1] = buf->phy_addr[1];
+        blt.src_buf.phy_addr[2] = buf->phy_addr[2];
         blt.src_buf.stride[0] = buf->stride[0];
         blt.src_buf.stride[1] = buf->stride[1];
         blt.src_buf.flags = buf->flags;
@@ -473,11 +479,11 @@ void lv_draw_ge2d_transform(lv_draw_unit_t *draw_unit, const lv_draw_sw_blend_ds
             LV_LOG_TRACE("invalid src_w:%d, src_h:%d, dst_w:%d, dst_h:%d", src_w, src_h, dest_w, dest_h);
             return;
         }
-        blt.src_buf.fd[0] = mpp_data->dec_buf.fd[0];;
+        blt.src_buf.phy_addr[0] = mpp_data->dec_buf.phy_addr[0];
         blt.src_buf.stride[0] = src_stride;
     }
 
-    blt.src_buf.buf_type = MPP_DMA_BUF_FD;
+    blt.src_buf.buf_type = MPP_PHY_ADDR;
     blt.src_buf.size.width = src_w + src_x;
     blt.src_buf.size.height = src_h + src_y;
     blt.src_buf.format = lv_fmt_to_mpp_fmt(src_color_format);
@@ -489,10 +495,12 @@ void lv_draw_ge2d_transform(lv_draw_unit_t *draw_unit, const lv_draw_sw_blend_ds
 
     // set dst buf
     blt.dst_buf.buf_type = disp_buf_type();
-    if (blt.dst_buf.buf_type == MPP_PHY_ADDR)
+    if (blt.dst_buf.buf_type == MPP_PHY_ADDR) {
         blt.dst_buf.phy_addr[0] = disp_buf_phy_addr((uint8_t *)dst_buf);
-    else
-        blt.dst_buf.fd[0] = disp_buf_fd((uint8_t *)dst_buf);
+    } else {
+        blt.dst_buf.buf_type = MPP_PHY_ADDR;
+        blt.dst_buf.phy_addr[0] = disp_buf_draw_addr((uint8_t *)dst_buf);
+    }
 
     blt.dst_buf.stride[0] = dest_stride;
     blt.dst_buf.size.width = layer->draw_buf->header.w;
@@ -579,8 +587,8 @@ void lv_draw_ge2d_rotate_any_degree(lv_draw_unit_t *draw_unit, const lv_draw_sw_
     }
 
     // set src buf
-    rot.src_buf.buf_type = MPP_DMA_BUF_FD;
-    rot.src_buf.fd[0] = mpp_data->dec_buf.fd[0];
+    rot.src_buf.buf_type = MPP_PHY_ADDR;
+    rot.src_buf.phy_addr[0] = mpp_data->dec_buf.phy_addr[0];
     rot.src_buf.stride[0] = src_stride;
     rot.src_buf.size.width = src_w;
     rot.src_buf.size.height = src_h;
@@ -592,10 +600,12 @@ void lv_draw_ge2d_rotate_any_degree(lv_draw_unit_t *draw_unit, const lv_draw_sw_
 
     // set dst buf
     rot.dst_buf.buf_type = disp_buf_type();
-    if (rot.dst_buf.buf_type == MPP_PHY_ADDR)
+    if (rot.dst_buf.buf_type == MPP_PHY_ADDR) {
         rot.dst_buf.phy_addr[0] = disp_buf_phy_addr((uint8_t *)dst_buf);
-    else
-        rot.dst_buf.fd[0] = disp_buf_fd((uint8_t *)dst_buf);
+    } else {
+        rot.dst_buf.buf_type = MPP_PHY_ADDR;
+        rot.dst_buf.phy_addr[0] = disp_buf_draw_addr((uint8_t *)dst_buf);
+    }
 
     rot.dst_buf.stride[0] = dest_stride;
     rot.dst_buf.size.width = layer->draw_buf->header.w;

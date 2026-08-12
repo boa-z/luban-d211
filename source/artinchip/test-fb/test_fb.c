@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 /*
- * Copyright (C) 2020-2025 Artinchip Technology Co., Ltd.
+ * Copyright (C) 2020-2026 Artinchip Technology Co., Ltd.
  * Authors:  Matteo <duanmt@artinchip.com>
  */
 
@@ -15,7 +15,7 @@
 #define AICFB_LAYER_MAX_NUM	2
 #define FB_DEV "/dev/fb0"
 
-static const char sopts[] = "nscflLaAkKedC:i:w:h:m:v:bru";
+static const char sopts[] = "nscflLaAkKedD:C:i:w:h:m:v:bru";
 static const struct option lopts[] = {
 	{"get_layer_num",	no_argument, NULL, 'n'},
 	{"get_screen_size",	no_argument, NULL, 's'},
@@ -29,6 +29,7 @@ static const struct option lopts[] = {
 	{"set_ck_cfg",	  required_argument, NULL, 'K'},
 	{"enable",		no_argument, NULL, 'e'},
 	{"disable",		no_argument, NULL, 'd'},
+	{"device",		no_argument, NULL, 'D'},
 	{"crop_enable",   required_argument, NULL, 'C'},
 	{"id",		  required_argument, NULL, 'i'},
 	{"width",	  required_argument, NULL, 'w'},
@@ -58,6 +59,7 @@ void usage(char *program)
 	printf("\t -K, --set_ck_cfg\tneed other options: -e/d -v x \n");
 	printf("\t -e, --enable \n");
 	printf("\t -d, --disable \n");
+	printf("\t -D, --device\t\tgiven the FB device name, default is [%s]\n", FB_DEV);
 	printf("\t -C, --crop_en \n");
 	printf("\t -i, --id\t\tneed an integer argument of Layer ID [0, 1]\n");
 	printf("\t -w, --width\t\tneed an integer argument\n");
@@ -137,7 +139,7 @@ int device_open(char *_fname, int _flag)
 
 	fd = open(_fname, _flag);
 	if (fd < 0) {
-		ERR("Failed to open %s", _fname);
+		ERR("Failed to open %s\n", _fname);
 		exit(0);
 	}
 	return fd;
@@ -466,11 +468,18 @@ int show_color_block(int fd)
 		color = colors[blk_line];
 		step = steps[blk_line];
 		for (j = 0; j < width; j++) {
-			memcpy(&line1[j * pixel_size], &color, pixel_size);
+			if (pixel_size == 4) {
+				/* For 32-bit format, ensure alpha is 0xFF */
+				int full_color = (0xFF << 24) | color;
+
+				memcpy(&line1[j * pixel_size], &full_color, pixel_size);
+			} else {
+				memcpy(&line1[j * pixel_size], &color, pixel_size);
+			}
 
 			if (pixel_size == 2) {
-			if (j && (j % 4 == 0)) /* Enlarge the step range for RGB564 */
-				color -= step;
+				if (j && (j % 4 == 0)) /* Enlarge the step range for RGB565 */
+					color -= step;
 			} else {
 				color -= step;
 			}
@@ -487,21 +496,40 @@ int show_color_block(int fd)
 	}
 
 	/* Draw the location line */
+	if (pixel_size == 4) {
+		/* For 32-bit, ensure alpha is set to 0xFF for the location lines too */
+		for (i = 0; i < 100; i++) {
+			int full_color = (0xFF << 24) | colors[3];
+			memcpy(&fb_buf[width * pixel_size + pixel_size + i * pixel_size],
+				   &full_color, pixel_size);
+			memcpy(&fb_buf[width * (height - 2) * pixel_size - 101 * pixel_size + i * pixel_size],
+				   &full_color, pixel_size);
+		}
 
-	line1 = &fb_buf[width * pixel_size] + pixel_size;
-	line2 = &fb_buf[width * (height - 2) * pixel_size - 101 * pixel_size];
-	for (i = 0; i < 100; i++) {
-		memcpy(&line1[i * pixel_size], &colors[3], pixel_size);
-		memcpy(&line2[i * pixel_size], &colors[3], pixel_size);
-	}
+		for (i = 0; i < 100; i++) {
+			int full_color = (0xFF << 24) | colors[3];
+			memcpy(&fb_buf[width * pixel_size + pixel_size + i * width * pixel_size],
+				   &full_color, pixel_size);
+			memcpy(&fb_buf[width * (height - 101) * pixel_size - pixel_size + i * width * pixel_size],
+				   &full_color, pixel_size);
+		}
+	} else {
+		/* Original 16-bit handling for location lines */
+		line1 = &fb_buf[width * pixel_size] + pixel_size;
+		line2 = &fb_buf[width * (height - 2) * pixel_size - 101 * pixel_size];
+		for (i = 0; i < 100; i++) {
+			memcpy(&line1[i * pixel_size], &colors[3], pixel_size);
+			memcpy(&line2[i * pixel_size], &colors[3], pixel_size);
+		}
 
-	line1 = &fb_buf[width * pixel_size] + pixel_size;
-	line2 = &fb_buf[width * (height - 101) * pixel_size - pixel_size];
-	for (i = 0; i < 100; i++) {
-		memcpy(&line1[0], &colors[3], pixel_size);
-		line1 += width * pixel_size;
-		memcpy(&line2[0], &colors[3], pixel_size);
-		line2 += width * pixel_size;
+		line1 = &fb_buf[width * pixel_size] + pixel_size;
+		line2 = &fb_buf[width * (height - 101) * pixel_size - pixel_size];
+		for (i = 0; i < 100; i++) {
+			memcpy(&line1[0], &colors[3], pixel_size);
+			line1 += width * pixel_size;
+			memcpy(&line2[0], &colors[3], pixel_size);
+			line2 += width * pixel_size;
+		}
 	}
 
 	munmap(fb_buf, fix.smem_len);
@@ -510,29 +538,54 @@ int show_color_block(int fd)
 
 static int test_vsync_repeat(int fd)
 {
-	int ret, i = 0;
+#define VSYNC_STAT_FRAMES	100
+	unsigned long max_us = 0, min_us = ~0UL, sum_us = 0;
 	struct timeval start, end;
 	unsigned long time_us;
+	unsigned long avg_us;
+	int counted = 0;
+	int ret, i;
 
-	do {
+	printf("Wait VSync over %d frames ...\n", VSYNC_STAT_FRAMES);
+
+	for (i = 0; i < VSYNC_STAT_FRAMES; i++) {
 		gettimeofday(&start, NULL);
 		ret = ioctl(fd, AICFB_WAIT_FOR_VSYNC, NULL);
 		if (ret) {
-			ERR("ioctl WAIT_FOR_VSYNC timeout, DE not working\n");
+			ERR("ioctl WAIT_FOR_VSYNC timeout at frame %d, DE not working\n", i);
 			break;
 		}
 		gettimeofday(&end, NULL);
 
 		time_us = (end.tv_sec - start.tv_sec) * 1000000 +
 			  (end.tv_usec - start.tv_usec);
-		DBG("wait vsync time %ld us\n", time_us);
-	} while (i++ < 5);
+
+		if (time_us > max_us)
+			max_us = time_us;
+		if (time_us < min_us)
+			min_us = time_us;
+		sum_us += time_us;
+		counted++;
+	}
+
+	if (counted > 0) {
+		avg_us = sum_us / counted;
+		printf("\tMax: %.3f ms\n", max_us / 1000.0);
+		printf("\tMin: %.3f ms\n", min_us / 1000.0);
+		printf("\tAvg: %.3f ms\n", avg_us / 1000.0);
+		if (avg_us > 0)
+			printf("   est. FPS: %.1f\n",
+			       1000000.0 / avg_us);
+	} else {
+		printf("no valid vsync data collected\n");
+	}
 
 	return ret;
 }
 
 int main(int argc, char **argv)
 {
+	char fb_name[16] = FB_DEV;
 	int dev_fd = -1;
 	int ret = 0;
 	int c = 0;
@@ -544,12 +597,24 @@ int main(int argc, char **argv)
 	int value = 0;
 	int crop_enable = 0;
 
-	dev_fd = device_open(FB_DEV, O_RDWR);
+	while ((c = getopt_long(argc, argv, sopts, lopts, NULL)) != -1) {
+		switch (c) {
+		case 'D':
+			strncpy(fb_name, optarg, sizeof(fb_name));
+			printf("Select FB: %s\n", optarg);
+			break;
+		default:
+			break;
+		}
+	}
+
+	dev_fd = device_open(fb_name, O_RDWR);
 	if (dev_fd < 0) {
 		ERR("Failed to open %s, return %d\n", FB_DEV, dev_fd);
 		return -1;
 	}
 
+	optind = 0;
 	while ((c = getopt_long(argc, argv, sopts, lopts, NULL)) != -1) {
 		switch (c) {
 		case 'n':

@@ -137,8 +137,6 @@ EXPORT_SYMBOL_GPL(syscfg_usb_phy0_sw_host);
 
 #ifdef CONFIG_DEBUG_ON_FPGA_BOARD_ARTINCHIP
 
-static DEFINE_SPINLOCK(user_lock);
-
 static s32 syscfg_fpga_drp_wr(void __iomem *regs, u8 addr, u16 data)
 {
 	void __iomem *ctl_reg = regs + SYSCFG_MMCM2_CTL;
@@ -213,14 +211,12 @@ int syscfg_fpga_de_clk_sel_by_div(u8 sclk, u8 pixclk)
 	cntr = sclk / 2;
 	data = (1 << 12) | (cntr << 6) | cntr;
 
-	spin_lock(&user_lock);
 	if (cntr > 0) {
 		syscfg_fpga_drp_wr(syscfg->regs,
 					FPGA_MMCM_DADDR_CLKOUT2_CTL0, data);
 		if (syscfg_fpga_drp_rd(syscfg->regs, FPGA_MMCM_DADDR_CLKOUT2_CTL0)
 					!= data) {
 			dev_err(syscfg->dev, "Failed to set clkout2\n");
-			spin_unlock(&user_lock);
 			return -1;
 		}
 	} else {
@@ -237,7 +233,6 @@ int syscfg_fpga_de_clk_sel_by_div(u8 sclk, u8 pixclk)
 		if (syscfg_fpga_drp_rd(syscfg->regs, FPGA_MMCM_DADDR_CLKOUT3_CTL0)
 					!= data) {
 			dev_err(syscfg->dev, "Failed to set clkout3\n");
-			spin_unlock(&user_lock);
 			return -1;
 		}
 	} else {
@@ -245,7 +240,6 @@ int syscfg_fpga_de_clk_sel_by_div(u8 sclk, u8 pixclk)
 					FPGA_MMCM_DADDR_CLKOUT3_CTL1, 0x40);
 	}
 
-	spin_unlock(&user_lock);
 	return 0;
 }
 EXPORT_SYMBOL_GPL(syscfg_fpga_de_clk_sel_by_div);
@@ -266,9 +260,7 @@ EXPORT_SYMBOL_GPL(syscfg_fpga_de_clk_sel);
 
 void syscfg_fpga_lcd_io_set(u32 val)
 {
-	spin_lock(&user_lock);
 	writel(val, g_syscfg->regs + SYSCFG_LCD_IO_CFG);
-	spin_unlock(&user_lock);
 }
 EXPORT_SYMBOL_GPL(syscfg_fpga_lcd_io_set);
 

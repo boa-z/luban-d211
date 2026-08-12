@@ -1059,7 +1059,7 @@ static s32 nand_fwc_mtd_writer(struct fwc_info *fwc, u8 *buf, s32 len)
 	loff_t offs;
 	s32 ret, i;
 	s32 write_end_addr, calc_len;
-	u8 *buf_to_write, *buf_to_read, *rdbuf;
+	u8 *buf_to_write, *buf_to_read, *rdbuf = NULL;
 
 	priv = (struct aicupg_nand_priv *)fwc->priv;
 	if (!priv)

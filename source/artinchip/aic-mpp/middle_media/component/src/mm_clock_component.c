@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2023 ArtInChip Technology Co. Ltd
+ * Copyright (C) 2020-2026 ArtInChip Technology Co. Ltd
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -54,8 +54,15 @@ static s32
 mm_clock_index_config_time_position(mm_handle h_component,
                                     mm_time_config_timestamp *p_timestamp)
 {
-    mm_clock_data *p_clock_data =
-        (mm_clock_data *)(((mm_component *)h_component)->p_comp_private);
+    mm_clock_data *p_clock_data;
+
+    if (!h_component || !p_timestamp) {
+        loge("config time ppsition failed, comp %p, p_timestamp:%p!!!\n",
+            h_component, p_timestamp);
+        return MM_ERROR_NULL_POINTER;
+    }
+
+    p_clock_data = (mm_clock_data *)(((mm_component *)h_component)->p_comp_private);
     p_clock_data->clock_state.state =
         MM_TIME_CLOCK_STATE_WAITING_FOR_START_TIME;
     p_clock_data->clock_state.wait_mask |= (MM_CLOCK_PORT0 | MM_CLOCK_PORT1);
@@ -129,6 +136,13 @@ mm_clock_config_time_cur_audio_ref(mm_handle h_component,
     s64 cur_media_time;
     s64 diff_time;
     mm_clock_data *p_clock_data;
+
+    if (!h_component || !p_timestamp) {
+        loge("config audio ref failed, comp %p, p_timestamp:%p!!!\n",
+            h_component, p_timestamp);
+        return MM_ERROR_NULL_POINTER;
+    }
+
     p_clock_data =
         (mm_clock_data *)(((mm_component *)h_component)->p_comp_private);
     if (p_clock_data->clock_state.state != MM_TIME_CLOCK_STATE_RUNNING) {
@@ -151,6 +165,39 @@ mm_clock_config_time_cur_audio_ref(mm_handle h_component,
         p_clock_data->pause_time_durtion = 0;
     }
 
+    return MM_ERROR_NONE;
+}
+
+static s32 mm_clock_config_time_force_sync_audio_ref(mm_handle h_component)
+{
+    s32 error = MM_ERROR_NONE;
+    mm_clock_data *p_clock_data;
+    mm_bind_info *p_audio_bind;
+    mm_time_config_timestamp audio_time;
+
+    if (!h_component) {
+        loge("config sys time ref failed, comp is null!!!\n");
+        return MM_ERROR_NULL_POINTER;
+    }
+
+    p_clock_data = (mm_clock_data *)(((mm_component *)h_component)->p_comp_private);
+    if (p_clock_data->clock_state.state != MM_TIME_CLOCK_STATE_RUNNING) {
+        loge("clockState are not in MM_TIME_CLOCK_STATE_STOPPED,do not set!!!\n");
+        return MM_ERROR_INVALID_STATE;
+    }
+    p_audio_bind = &p_clock_data->out_port_bind[CLOCK_PORT_OUT_AUDIO];
+
+    error = mm_get_config(p_audio_bind->p_bind_comp,
+                          MM_INDEX_CONFIG_TIME_CUR_MEDIA_TIME,
+                          &audio_time);
+    if (error != MM_ERROR_NONE) {
+        loge("get audio media time failed\n");
+        return MM_ERROR_BAD_PARAMETER;
+    }
+
+    p_clock_data->ref_clock_time_base = audio_time.timestamp;
+    p_clock_data->wall_time_base = mm_clock_get_system_time();
+    p_clock_data->pause_time_durtion = 0;
     return MM_ERROR_NONE;
 }
 
@@ -180,18 +227,21 @@ mm_clock_config_time_clock_state(mm_handle h_component,
                                  mm_time_config_clock_state *p_clock_state)
 {
     mm_clock_data *p_clock_data;
+
+    if (!h_component || !p_clock_state) {
+        loge("config time clock state failed, comp %p, p_clock_state:%p!!!\n",
+            h_component, p_clock_state);
+        return MM_ERROR_NULL_POINTER;
+    }
+
     p_clock_data =
         (mm_clock_data *)(((mm_component *)h_component)->p_comp_private);
     if (p_clock_data->clock_state.state != MM_TIME_CLOCK_STATE_STOPPED) {
-        loge(
-            "clockState are not in MM_TIME_CLOCK_STATE_STOPPED,do not set!!!\n");
+        loge("clockState are not in MM_TIME_CLOCK_STATE_STOPPED,do not set!!!\n");
         return MM_ERROR_UNDEFINED;
     }
     memcpy(&p_clock_data->clock_state, p_clock_state,
            sizeof(mm_time_config_clock_state));
-    printf("[%s:%d]wait_mask:0x%x,clock_state:%d\n", __FUNCTION__, __LINE__,
-           p_clock_data->clock_state.wait_mask,
-           p_clock_data->clock_state.state);
     //p_clock_data->clock_state.state = MM_TIME_CLOCK_STATE_WAITING_FOR_START_TIME;
 
     return MM_ERROR_NONE;
@@ -204,6 +254,13 @@ mm_clock_config_time_client_start_time(mm_handle h_component,
     mm_clock_data *p_clock_data;
     //int i = 0;
     s64 mitimestamp;
+
+    if (!h_component || !p_timestamp) {
+        loge("config stat time failed, comp %p, p_timestamp:%p!!!\n",
+            h_component, p_timestamp);
+        return MM_ERROR_NULL_POINTER;
+    }
+
     p_clock_data =
         (mm_clock_data *)(((mm_component *)h_component)->p_comp_private);
     mm_bind_info *p_video_bind =
@@ -213,8 +270,7 @@ mm_clock_config_time_client_start_time(mm_handle h_component,
 
     if (p_clock_data->clock_state.state !=
         MM_TIME_CLOCK_STATE_WAITING_FOR_START_TIME) {
-        logw(
-            "clockState are not in MM_TIME_CLOCK_STATE_WAITING_FOR_START_TIME,do not set!!!\n");
+        logw("clockState are not in MM_TIME_CLOCK_STATE_WAITING_FOR_START_TIME,do not set!!!\n");
         return MM_ERROR_UNDEFINED;
     }
 
@@ -254,10 +310,6 @@ mm_clock_config_time_client_start_time(mm_handle h_component,
         p_clock_data->wall_time_base = mm_clock_get_system_time();
         p_clock_data->pause_time_durtion = 0;
         p_clock_data->clock_state.state = MM_TIME_CLOCK_STATE_RUNNING;
-        printf("[%s:%d]ref_clock_time_base:" FMT_d64 ",wall_time_base:" FMT_d64
-               "\n",
-               __FUNCTION__, __LINE__, p_clock_data->ref_clock_time_base,
-               p_clock_data->wall_time_base);
         mm_set_config(p_video_bind->p_bind_comp,
                       MM_INDEX_CONFIG_TIME_CLOCK_STATE,
                       &p_clock_data->clock_state);
@@ -294,14 +346,14 @@ static s32 mm_clock_set_config(mm_handle h_component, MM_INDEX_TYPE index,
 {
     s32 error = MM_ERROR_NONE;
 
-    if (p_config == NULL) {
-        loge("param error!!!\n");
-        return MM_ERROR_BAD_PARAMETER;
-    }
     switch (index) {
         case MM_INDEX_CONFIG_TIME_CUR_AUDIO_REFERENCE:
             error = mm_clock_config_time_cur_audio_ref(
                 h_component, (mm_time_config_timestamp *)p_config);
+            break;
+
+        case MM_INDEX_CONFIG_TIME_FORCE_SYNC_AUDIO_REFERENCE:
+            error = mm_clock_config_time_force_sync_audio_ref(h_component);
             break;
 
         case MM_INDEX_CONFIG_TIME_CLIENT_START_TIME:
@@ -461,10 +513,9 @@ static void mm_clock_state_change_to_invalid(mm_clock_data *p_clock_data)
 static void mm_clock_state_change_to_loaded(mm_clock_data *p_clock_data)
 {
     //int ret;
-    if (p_clock_data->state == MM_STATE_IDLE) {
-    } else if (p_clock_data->state == MM_STATE_EXECUTING) {
-    } else if (p_clock_data->state == MM_STATE_PAUSE) {
-    } else {
+    if ((p_clock_data->state != MM_STATE_IDLE) &&
+        (p_clock_data->state != MM_STATE_EXECUTING) &&
+        (p_clock_data->state != MM_STATE_PAUSE)) {
         mm_clock_event_notify(p_clock_data, MM_EVENT_ERROR,
                               MM_ERROR_INCORRECT_STATE_TRANSITION,
                               p_clock_data->state, NULL);
@@ -479,10 +530,9 @@ static void mm_clock_state_change_to_loaded(mm_clock_data *p_clock_data)
 static void mm_clock_state_change_to_idle(mm_clock_data *p_clock_data)
 {
     //int ret;
-    if (p_clock_data->state == MM_STATE_LOADED) {
-    } else if (p_clock_data->state == MM_STATE_PAUSE) {
-    } else if (p_clock_data->state == MM_STATE_EXECUTING) {
-    } else {
+    if ((p_clock_data->state != MM_STATE_LOADED) &&
+        (p_clock_data->state != MM_STATE_PAUSE) &&
+        (p_clock_data->state != MM_STATE_EXECUTING)) {
         mm_clock_event_notify(p_clock_data, MM_EVENT_ERROR,
                               MM_ERROR_INCORRECT_STATE_TRANSITION,
                               p_clock_data->state, NULL);
@@ -502,27 +552,8 @@ static void mm_clock_state_change_to_excuting(mm_clock_data *p_clock_data)
                               p_clock_data->state, NULL);
         loge("MM_ERROR_INCORRECT_STATE_TRANSITION\n");
         return;
-    } else if (p_clock_data->state == MM_STATE_IDLE) {
-    } else if (p_clock_data->state == MM_STATE_PAUSE) {
-        s64 cur_media_time;
-        p_clock_data->pause_time_durtion +=
-            (mm_clock_get_system_time() - p_clock_data->pause_time_point);
-        printf("[%s:%d]mm_clock_get_system_time:" FMT_d64
-               ",pause_time_point:" FMT_d64 ",pause_time_durtion:" FMT_d64
-               ",wall_time_base:" FMT_d64 ",ref_clock_time_base:" FMT_d64 "\n",
-               __FUNCTION__, __LINE__, mm_clock_get_system_time(),
-               p_clock_data->pause_time_point, p_clock_data->pause_time_durtion,
-               p_clock_data->wall_time_base, p_clock_data->ref_clock_time_base);
-
-        cur_media_time =
-            (mm_clock_get_system_time() - p_clock_data->wall_time_base -
-             p_clock_data->pause_time_durtion) +
-            p_clock_data->ref_clock_time_base;
-        printf("[%s:%d]p_clock_data->pause_time_durtion:" FMT_d64
-               ",cur_media_time:" FMT_d64 "\n",
-               __FUNCTION__, __LINE__, p_clock_data->pause_time_durtion,
-               cur_media_time);
-    } else {
+    } else if ((p_clock_data->state != MM_STATE_IDLE) &&
+               (p_clock_data->state != MM_STATE_PAUSE)) {
         mm_clock_event_notify(p_clock_data, MM_EVENT_ERROR,
                               MM_ERROR_INCORRECT_STATE_TRANSITION,
                               p_clock_data->state, NULL);
@@ -542,31 +573,9 @@ static void mm_clock_state_change_to_pause(mm_clock_data *p_clock_data)
                               p_clock_data->state, NULL);
         loge("MM_ERROR_INCORRECT_STATE_TRANSITION\n");
         return;
-
-    } else if (p_clock_data->state == MM_STATE_IDLE) {
     } else if (p_clock_data->state == MM_STATE_EXECUTING) {
-        s64 cur_media_time;
-        printf("[%s:%d]mm_clock_get_system_time:" FMT_d64
-               ",pause_time_point:" FMT_d64 ",pause_time_durtion:" FMT_d64
-               ",wall_time_base:" FMT_d64 ",ref_clock_time_base:" FMT_d64 "\n",
-               __FUNCTION__, __LINE__, mm_clock_get_system_time(),
-               p_clock_data->pause_time_point, p_clock_data->pause_time_durtion,
-               p_clock_data->wall_time_base, p_clock_data->ref_clock_time_base);
-        cur_media_time =
-            (mm_clock_get_system_time() - p_clock_data->wall_time_base -
-             p_clock_data->pause_time_durtion) +
-            p_clock_data->ref_clock_time_base;
-        printf("[%s:%d]mm_clock_get_system_time:" FMT_d64
-               ",pause_time_point:" FMT_d64 ",pause_time_durtion:" FMT_d64
-               ",wall_time_base:" FMT_d64 ",ref_clock_time_base:" FMT_d64
-               ",cur_media_time:" FMT_d64 "\n",
-               __FUNCTION__, __LINE__, mm_clock_get_system_time(),
-               p_clock_data->pause_time_point, p_clock_data->pause_time_durtion,
-               p_clock_data->wall_time_base, p_clock_data->ref_clock_time_base,
-               cur_media_time);
-
         p_clock_data->pause_time_point = mm_clock_get_system_time();
-    } else {
+    } else if (p_clock_data->state != MM_STATE_IDLE) {
         mm_clock_event_notify(p_clock_data, MM_EVENT_ERROR,
                               MM_ERROR_INCORRECT_STATE_TRANSITION,
                               p_clock_data->state, NULL);

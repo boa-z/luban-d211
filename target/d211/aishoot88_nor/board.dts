@@ -187,7 +187,7 @@
 		backlight = <&backlight>;
 		status = "okay";
 
-		//enable-gpios = <&gpio_c 6 GPIO_ACTIVE_HIGH>;
+		pwr-gpios = <&gpio_e 19 GPIO_ACTIVE_HIGH>;
 		reset-gpios = <&gpio_c 4 GPIO_ACTIVE_HIGH>;
 
 		port {
@@ -212,21 +212,27 @@
         keys: gpio-keys {
 	    status = "okay";
             compatible = "gpio-keys";
+	    autorepeat;
+	    rep-delay = <50>;
+	    rep-period = <50>;
             power {
                 wakeup-source;
                 gpios = <&gpio_e 5 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
                 label = "GPIO Power";
                 linux,code = <KEY_POWER>;
+                debounce-interval = <50>;
             };
-	    up {
+            up {
                 gpios = <&gpio_e 6 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
                 label = "GPIO Up";
                 linux,code = <KEY_UP>;
+                debounce-interval = <50>;
             };
-	    down {
+            down {
                 gpios = <&gpio_e 7 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
                 label = "GPIO Down";
                 linux,code = <KEY_DOWN>;
+                debounce-interval = <50>;
             };
         };
 
@@ -245,7 +251,7 @@
 };
 
 &cmu {
-	pll-int0 = <600000000>;
+	pll-int0 = <500000000>;
 	pll-int1 = <1200000000>;
 	pll-frac1 = <491520000>;
 	pll-frac2 = <840000000>;
@@ -318,8 +324,8 @@
 
 &uart4 {
 	pinctrl-names = "default";
-	pinctrl-0 = <&uart4_pins_a>;
-	status = "disabled";
+	pinctrl-0 = <&uart4_pins_c>;
+	status = "okay";
 };
 
 &uart5 {
@@ -327,7 +333,7 @@
 	pinctrl-0 = <&uart5_pins_a>;
 	linux,rs485-enabled-at-boot-time;
 	aic,rs485-compact-io-mode;
-	status = "okay";
+	status = "disabled";
 };
 
 &uart6 {
@@ -345,11 +351,7 @@
 &i2c0 {
 	pinctrl-names = "default";
 	pinctrl-0 = <&i2c0_pins_b>;
-	status = "disabled";
-	rtc@32 {
-		compatible = "epson,rx8010";
-		reg = <0x32>;
-	};
+	status = "okay";
 };
 
 &i2c1 {
@@ -634,9 +636,9 @@
 
 &codec {
 	pinctrl-names = "default";
-	pinctrl-0 = <&spk_pins_d>, <&dmic_pins_b>;
-	pa-gpios = <&gpio_a 7 GPIO_ACTIVE_LOW>;
-	status = "disabled";
+	pinctrl-0 = <&spk_pins_b>;
+	pa-gpios = <&gpio_e 14 GPIO_ACTIVE_HIGH>;
+	status = "okay";
 };
 
 /* The data flow:
@@ -647,7 +649,7 @@
 
 &fb0 {
 	artinchip,uboot-logo-on=<1>;
-	height-virtual = <2272>;
+	height-virtual = <1136>;
 	u-boot,dm-pre-reloc;
 	port {
 		u-boot,dm-pre-reloc;

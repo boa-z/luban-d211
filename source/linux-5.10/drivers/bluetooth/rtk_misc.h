@@ -79,16 +79,58 @@
 #define PRINT_CMD_EVENT			0
 #define PRINT_ACL_DATA			0
 
+#define CFG_TYPE_BT		0x01
+#define CFG_TYPE_APCF_FILTER	0x02
+#define CFG_TYPE_APCF_WAKEUP	0x04
+
+#define APCF_CONFIG_FILTER	"/opt/rtk_btapcf_filter"
+#define APCF_CONFIG_WAKEUP	"/opt/rtk_btapcf_wakeup"
+
+struct cfg_apcf_item {
+	struct list_head list;
+	u32 len;
+	u8 data[0];
+};
+
+#define DEVICE_STATE_OFFLINE	0
+#define DEVICE_STATE_ONLINE	1
+#define DEVICE_STATE_LOADING	2
+#define DEVICE_STATE_LOADED	3
+extern struct hci_dev __rcu *controller;
+
+typedef struct {
+	uint16_t prod_id;
+	uint16_t lmp_sub;
+	char *	 mp_patch_name;
+	char *	 patch_name;
+	char *	 config_name;
+	u8       chip_type;
+} patch_info;
+
+typedef struct {
+	struct list_head list_node;
+	struct usb_interface *intf;
+	struct usb_device *udev;
+	patch_info *patch_entry;
+	u32 opcode;
+	u8 fw_type;
+	u8 enh_dl_enabled;
+	u8 *cfg_buf;
+	u16 cfg_len;
+} dev_data;
+
 extern int patch_add(struct usb_interface *intf);
 extern void patch_remove(struct usb_interface *intf);
 extern int download_patch(struct usb_interface *intf);
 extern void print_event(struct sk_buff *skb);
 extern void print_command(struct sk_buff *skb);
 extern void print_acl(struct sk_buff *skb, int dataOut);
+extern void config_file_proc(const char *path, int type);
+extern void drain_apcf_cfg(struct list_head *head, int type);
+extern struct sk_buff *rtk_hci_cmd_sync(dev_data *dev_entry, u16 opcode,
+					u8 plen, u8 *param, u32 timeout);
 
-#if defined RTKBT_SWITCH_PATCH || defined RTKBT_TV_POWERON_WHITELIST
 int __rtk_send_hci_cmd(struct usb_device *udev, u8 *buf, u16 size);
-#endif
 
 #ifdef RTKBT_SWITCH_PATCH
 #define RTLBT_CLOSE	(1 << 0)

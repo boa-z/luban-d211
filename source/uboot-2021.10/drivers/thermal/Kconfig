@@ -8,6 +8,13 @@ config DM_THERMAL
 
 if DM_THERMAL
 
+config ARTINCHIP_THERMAL
+	tristate "ArtInChip thermal driver"
+	depends on ARCH_ARTINCHIP
+	select ARTINCHIP_ADCIM
+	help
+	  Enable ArtInChip thermal sensor driver.
+
 config IMX_THERMAL
 	bool "Temperature sensor driver for Freescale i.MX SoCs"
 	depends on MX6 || MX7

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 /*
- * Copyright (c) 2021, Artinchip Technology Co., Ltd
+ * Copyright (c) 2021-2026, ArtInChip Technology Co., Ltd
  */
 #include <linux/kernel.h>
 #include <linux/module.h>
@@ -28,6 +28,8 @@
 #include <linux/uaccess.h>
 
 #include "aic_udc.h"
+
+#define USB_PHY_INVALID_VALUE			0xFF
 
 static inline u32 aic_readl(struct aic_usb_gadget *gg, u32 offset);
 static inline void aic_writel(struct aic_usb_gadget *gg, u32 value,
@@ -57,11 +59,14 @@ static void aic_kill_ep_reqs(struct aic_usb_gadget *gg,
 			     struct aic_usb_ep *ep,
 			     int result);
 
+static int __aic_ep_enable(struct usb_ep *ep,
+			   const struct usb_endpoint_descriptor *desc);
 static int aic_ep_enable(struct usb_ep *ep,
 			 const struct usb_endpoint_descriptor *desc);
 static int aic_ep_disable(struct usb_ep *ep);
 static int aic_ep_disable_nolock(struct usb_ep *ep);
 static int aic_set_test_mode(struct aic_usb_gadget *gg, int testmode);
+static void aic_gg_set_usb_res(void __iomem *ctl_reg, u32 resis);
 
 #ifdef CONFIG_DEBUG_FS
 
@@ -458,6 +463,64 @@ static inline int aic_udc_debugfs_init(struct aic_usb_gadget *gg)
 static inline void aic_udc_debugfs_exit(struct aic_usb_gadget *gg)
 {  }
 #endif
+
+static ssize_t resistance_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	struct aic_usb_gadget *gg;
+
+	gg = dev_get_drvdata(dev);
+	if (!gg)
+		return -ENODEV;
+
+	if (!gg->params.usb_res_cfg.addr)
+		return sprintf(buf, "N/A\n");
+
+	return sprintf(buf, "0x%x\n", gg->params.usb_res_cfg.resis & 0xFF);
+}
+
+static ssize_t resistance_store(struct device *dev,
+				struct device_attribute *attr, const char *buf, size_t size)
+{
+	struct aic_usb_gadget *gg;
+	u32 val;
+	int ret;
+
+	gg = dev_get_drvdata(dev);
+	if (!gg)
+		return -ENODEV;
+
+	if (!gg->params.usb_res_cfg.addr)
+		return -ENODEV;
+
+	ret = kstrtouint(buf, 0, &val);
+	if (ret < 0) {
+		dev_err(dev, "Invalid resistance value\n");
+		return ret;
+	}
+
+	if (val > 0xFF) {
+		dev_err(dev, "Resistance value %u out of range (0~0xFF)\n", val);
+		return -EINVAL;
+	}
+
+	gg->params.usb_res_cfg.resis = val;
+	aic_gg_set_usb_res(gg->params.usb_res_cfg.addr, val);
+
+	return size;
+}
+
+DEVICE_ATTR_RW(resistance);
+
+static struct attribute *usbd_attrs[] = {
+	&dev_attr_resistance.attr,
+	NULL,
+};
+
+static struct attribute_group usbd_attr_group = {
+	.name = "usbd",
+	.attrs = usbd_attrs,
+};
+
 
 static inline struct aic_usb_req *our_req(struct usb_request *req)
 {
@@ -1123,6 +1186,57 @@ static int aic_gg_get_res_cfg(struct device_node *np, struct aic_usb_res_cfg *cf
 	return 0;
 }
 
+static void aic_gg_get_phy_tune(struct device_node *np, struct aic_usb_gadget *gg)
+{
+	u32 val;
+
+	if (of_property_read_u32(np, "aic,usbd-phy-txref", &val)) {
+		dev_dbg(gg->dev, "UDC did not get phy_txref parameter "
+				 "and will use the default value in register\n");
+		gg->params.phy_txref = USB_PHY_INVALID_VALUE;
+	} else if (val > 0xF) {
+		dev_warn(gg->dev, "phy_txref value %u out of range (0~0xF), using default\n", val);
+		gg->params.phy_txref = USB_PHY_INVALID_VALUE;
+	} else {
+		gg->params.phy_txref = val;
+	}
+
+	if (of_property_read_u32(np, "aic,usbd-phy-txpreempamp", &val)) {
+		dev_dbg(gg->dev, "UDC did not get phy_txpreempamp parameter "
+				 "and will use the default value in register\n");
+		gg->params.phy_txpreempamp = USB_PHY_INVALID_VALUE;
+	} else if (val > 3) {
+		dev_warn(gg->dev, "phy_txpreempamp value %u out of range (0~3), using default\n",
+			 val);
+		gg->params.phy_txpreempamp = USB_PHY_INVALID_VALUE;
+	} else {
+		gg->params.phy_txpreempamp = val;
+	}
+}
+
+static void aic_gg_set_phy_tune(struct aic_usb_gadget *gg)
+{
+	u32 reg_val;
+
+	if (gg->params.phy_txref == USB_PHY_INVALID_VALUE &&
+	    gg->params.phy_txpreempamp == USB_PHY_INVALID_VALUE)
+		return;
+
+	reg_val = aic_readl(gg, PHY_TUNE);
+
+	if (gg->params.phy_txref != USB_PHY_INVALID_VALUE) {
+		reg_val &= ~PHY_TUNE_TXREF_MASK;
+		reg_val |= gg->params.phy_txref << PHY_TUNE_TXREF_SHIFT;
+	}
+
+	if (gg->params.phy_txpreempamp != USB_PHY_INVALID_VALUE) {
+		reg_val &= ~PHY_TUNE_TXPREEMPAMP_MASK;
+		reg_val |= gg->params.phy_txpreempamp << PHY_TUNE_TXPREEMPAMP_SHIFT;
+	}
+
+	aic_writel(gg, reg_val, PHY_TUNE);
+}
+
 static int aic_core_hw_init1(struct aic_usb_gadget *gg, bool is_usb_reset)
 {
 	u32 reg = 0;
@@ -1286,7 +1400,7 @@ static int aic_core_init(struct aic_usb_gadget *gg,
 {
 	int ret = 0;
 
-	aic_gg_set_usb_res(gg->params.usb_res_cfg.addr, gg->params.usb_res_cfg.resis);
+	aic_gg_set_phy_tune(gg);
 
 	ret = aic_core_hw_init1(gg, is_usb_reset);
 	if (ret)
@@ -1396,6 +1510,8 @@ static int aic_ep0_enqueue_reply(struct aic_usb_gadget *gg,
 	ret = aic_ep_queue_request_nolock(&ep->ep, req, GFP_ATOMIC);
 	if (ret) {
 		dev_warn(gg->dev, "%s: cannot queue req\n", __func__);
+		aic_ep_free_request(&ep->ep, req);
+		gg->ep0_reply = NULL;
 		return ret;
 	}
 
@@ -2072,7 +2188,7 @@ static int aic_npinep_rewrite(struct aic_usb_gadget *gg, unsigned int idx)
 	if (idx == 0)
 		aic_inep0_open(gg);
 	else
-		aic_ep_enable(&gg->eps_in[idx]->ep, gg->eps_in[idx]->ep.desc);
+		__aic_ep_enable(&gg->eps_in[idx]->ep, gg->eps_in[idx]->ep.desc);
 
 	/* (3) rewrite current ep */
 	dev_dbg(gg->dev, "start req: ep%d, req:%p\n", idx, gg->eps_in[idx]->req);
@@ -2087,7 +2203,7 @@ static int aic_npinep_rewrite(struct aic_usb_gadget *gg, unsigned int idx)
 		if (i == 0)
 			aic_inep0_open(gg);
 		else
-			aic_ep_enable(&gg->eps_in[i]->ep, gg->eps_in[i]->ep.desc);
+			__aic_ep_enable(&gg->eps_in[i]->ep, gg->eps_in[i]->ep.desc);
 
 		aic_ep_start_req(gg, gg->eps_in[i], gg->eps_in[i]->req, true);
 	}
@@ -2955,7 +3071,7 @@ static int aic_ep_dequeue_request(struct usb_ep *ep, struct usb_request *req)
 	}
 
 	/* Dequeue already started request */
-	if (req == &a_ep->req->req)
+	if (a_ep->req && req == &a_ep->req->req)
 		aic_ep_stop_xfer(gg, a_ep);
 
 	aic_ep_complete_request(gg, a_ep, a_req, -ECONNRESET);
@@ -3000,7 +3116,7 @@ static int aic_ep_queue_request_nolock(struct usb_ep *ep,
 	if (ret) {
 		dev_err(gg->dev, "%s: failed to map buffer %p, %d bytes\n",
 			__func__, req->buf, req->length);
-		return ret;
+		goto err_unmap_unaligned;
 	}
 
 	/* enqueue */
@@ -3033,6 +3149,14 @@ static int aic_ep_queue_request_nolock(struct usb_ep *ep,
 			aic_ep_start_req(gg, a_ep, a_req, false);
 	}
 	return 0;
+
+err_unmap_unaligned:
+	if (a_req->saved_req_buf) {
+		kfree(a_req->req.buf);
+		a_req->req.buf = a_req->saved_req_buf;
+		a_req->saved_req_buf = NULL;
+	}
+	return ret;
 }
 
 static int aic_ep_queue_request(struct usb_ep *ep, struct usb_request *req,
@@ -3107,13 +3231,12 @@ static int aic_ep_disable(struct usb_ep *ep)
 	return ret;
 }
 
-static int aic_ep_enable(struct usb_ep *ep,
-			 const struct usb_endpoint_descriptor *desc)
+static int __aic_ep_enable(struct usb_ep *ep,
+			   const struct usb_endpoint_descriptor *desc)
 {
 	struct aic_usb_ep *a_ep = our_ep(ep);
 	struct aic_usb_gadget *gg = a_ep->parent;
 	unsigned int index = a_ep->index;
-	unsigned long flags;
 	u32 dir_in;
 	u32 mps;
 	u32 mc;
@@ -3140,8 +3263,6 @@ static int aic_ep_enable(struct usb_ep *ep,
 		dev_err(gg->dev, "%s: direction mismatch!\n", __func__);
 		return -EINVAL;
 	}
-
-	spin_lock_irqsave(&gg->lock, flags);
 
 	/* (0) read ep ctrl */
 	ctrl_addr = dir_in ? INEPCFG(index) : OUTEPCFG(index);
@@ -3228,8 +3349,7 @@ static int aic_ep_enable(struct usb_ep *ep,
 		if (!fifo_index) {
 			dev_err(gg->dev,
 				"%s: No suitable fifo found\n", __func__);
-			ret = -ENOMEM;
-			goto out;
+			return -ENOMEM;
 		}
 		ctrl &= ~(EPCTL_TXFNUM_LIMIT << EPCTL_TXFNUM_SHIFT);
 		ctrl |= EPCTL_TXFNUM(fifo_index);
@@ -3261,7 +3381,19 @@ static int aic_ep_enable(struct usb_ep *ep,
 	/* (7) enable the endpoint interrupt */
 	aic_ctrl_epint(gg, index, dir_in, 1);
 
-out:
+	return ret;
+}
+
+static int aic_ep_enable(struct usb_ep *ep,
+			 const struct usb_endpoint_descriptor *desc)
+{
+	struct aic_usb_ep *a_ep = our_ep(ep);
+	struct aic_usb_gadget *gg = a_ep->parent;
+	unsigned long flags;
+	int ret;
+
+	spin_lock_irqsave(&gg->lock, flags);
+	ret = __aic_ep_enable(ep, desc);
 	spin_unlock_irqrestore(&gg->lock, flags);
 
 	return ret;
@@ -3458,6 +3590,8 @@ static int aic_gg_udc_start(struct usb_gadget *gadget,
 	gg->gadget.dev.of_node = gg->dev->of_node;
 	gg->gadget.speed = USB_SPEED_UNKNOWN;
 
+	/* The calibration resistor value must be set before enabling the USB PHY */
+	aic_gg_set_usb_res(gg->params.usb_res_cfg.addr, gg->params.usb_res_cfg.resis);
 	ret = aic_low_hw_enable(gg);
 	if (ret) {
 		dev_err(gg->dev, "%s: aic_low_hw_enable %d\n", __func__, ret);
@@ -3619,7 +3753,7 @@ static int aic_gadget_core_init(struct aic_usb_gadget *gg)
 						     sizeof(struct aic_usb_ep),
 						     GFP_KERNEL);
 			if (!gg->eps_in[i])
-				return -ENOMEM;
+				goto err_free_ctrl_req;
 		}
 		/* Direction out or both */
 		if (!(ep_type & 1)) {
@@ -3627,7 +3761,7 @@ static int aic_gadget_core_init(struct aic_usb_gadget *gg)
 						     sizeof(struct aic_usb_ep),
 						     GFP_KERNEL);
 			if (!gg->eps_out[i])
-				return -ENOMEM;
+				goto err_free_ctrl_req;
 		}
 	}
 
@@ -3647,6 +3781,10 @@ static int aic_gadget_core_init(struct aic_usb_gadget *gg)
 	gg->gadget.ep0 = &gg->eps_out[0]->ep;
 
 	return 0;
+
+err_free_ctrl_req:
+	aic_ep_free_request(&gg->eps_out[0]->ep, gg->ctrl_req);
+	return -ENOMEM;
 }
 
 static int aic_param_init(struct aic_usb_gadget *gg)
@@ -3694,6 +3832,7 @@ static int aic_gadget_init(struct aic_usb_gadget *gg)
 static int aic_udc_remove(struct platform_device *dev)
 {
 	struct aic_usb_gadget *gg = platform_get_drvdata(dev);
+	int i;
 
 #ifdef CONFIG_USB_OTG
 	if (!IS_ERR_OR_NULL(gg->uphy))
@@ -3710,6 +3849,11 @@ static int aic_udc_remove(struct platform_device *dev)
 	reset_control_assert(gg->reset);
 	reset_control_assert(gg->reset_ecc);
 
+	for (i = 0; i < USB_MAX_CLKS_RSTS; i++) {
+		if (!IS_ERR_OR_NULL(gg->clks[i]))
+			clk_put(gg->clks[i]);
+	}
+
 	return 0;
 }
 
@@ -3722,10 +3866,9 @@ static void aic_udc_shutdown(struct platform_device *dev)
 
 static int aic_udc_probe(struct platform_device *dev)
 {
-	struct aic_usb_gadget *gg = NULL;
-	struct resource *res = NULL;
-	int i, err;
-	int ret = 0;
+	struct aic_usb_gadget *gg;
+	struct resource *res;
+	int i, ret;
 
 	if (of_property_read_bool(dev->dev.of_node, "aic,only-uboot-use")) {
 		dev_info(&dev->dev, "aic-udc only work in uboot.\n");
@@ -3737,6 +3880,7 @@ static int aic_udc_probe(struct platform_device *dev)
 		return -ENOMEM;
 
 	gg->dev = &dev->dev;
+	platform_set_drvdata(dev, gg);
 
 	if (!dev->dev.dma_mask)
 		dev->dev.dma_mask = &dev->dev.coherent_dma_mask;
@@ -3774,17 +3918,16 @@ static int aic_udc_probe(struct platform_device *dev)
 
 	/* regulator */
 	aic_gg_get_res_cfg(dev->dev.of_node, &gg->params.usb_res_cfg, "aic,usbd-ext-resistance");
+	aic_gg_get_phy_tune(dev->dev.of_node, gg);
 
 	/* clock */
 	for (i = 0; i < USB_MAX_CLKS_RSTS; i++) {
 		gg->clks[i] = of_clk_get(gg->dev->of_node, i);
 		if (IS_ERR(gg->clks[i])) {
+			ret = PTR_ERR(gg->clks[i]);
 			dev_err(gg->dev, "cannot get clock %d\n", i);
-			return PTR_ERR(gg->clks[i]);
-
-			err = PTR_ERR(gg->clks[i]);
-			if (err == -EPROBE_DEFER)
-				return err;
+			if (ret == -EPROBE_DEFER)
+				goto err_clk;
 			gg->clks[i] = NULL;
 			break;
 		}
@@ -3800,10 +3943,10 @@ static int aic_udc_probe(struct platform_device *dev)
 			gg->phy = NULL;
 			break;
 		case -EPROBE_DEFER:
-			return ret;
+			goto err_clk;
 		default:
 			dev_err(gg->dev, "error getting phy %d\n", ret);
-			return ret;
+			goto err_clk;
 		}
 	}
 
@@ -3819,11 +3962,11 @@ static int aic_udc_probe(struct platform_device *dev)
 				gg->uphy = NULL;
 				break;
 			case -EPROBE_DEFER:
-				return ret;
+				goto err_clk;
 			default:
 				dev_err(gg->dev, "error getting usb phy %d\n",
 					ret);
-				return ret;
+				goto err_clk;
 			}
 		}
 	}
@@ -3833,14 +3976,15 @@ static int aic_udc_probe(struct platform_device *dev)
 	ret = aic_gadget_init(gg);
 	if (ret) {
 		dev_err(&dev->dev, "udc init fail: %d\n", ret);
-		return ret;
+		goto err_clk;
 	}
 
 	/* interrupt */
 	res = platform_get_resource(dev, IORESOURCE_IRQ, 0);
 	if (!res) {
 		dev_err(&dev->dev, "No IRQ resource found!\n");
-		return -ENODEV;
+		ret = -ENODEV;
+		goto err_gadget;
 	}
 	gg->irq = res->start;
 	ret = devm_request_irq(gg->dev, gg->irq,
@@ -3848,7 +3992,7 @@ static int aic_udc_probe(struct platform_device *dev)
 			       dev_name(gg->dev), gg);
 	if (ret) {
 		dev_err(&dev->dev, "request irq%d fail: %d\n", gg->irq, ret);
-		return ret;
+		goto err_gadget;
 	}
 	dev_dbg(gg->dev, "registering interrupt handler for irq%d\n",
 		gg->irq);
@@ -3857,15 +4001,30 @@ static int aic_udc_probe(struct platform_device *dev)
 	ret = usb_add_gadget_udc(gg->dev, &gg->gadget);
 	if (ret) {
 		dev_err(&dev->dev, "udc add fail: %d\n", ret);
-		return ret;
+		goto err_gadget;
 	}
 
 	/* debugfs */
 	aic_udc_debugfs_init(gg);
-
-	platform_set_drvdata(dev, gg);
+	ret = sysfs_create_group(&dev->dev.kobj, &usbd_attr_group);
+	if (ret) {
+		dev_err(&dev->dev, "udc failed to create sysfs\n");
+		goto err_udc;
+	}
 
 	return 0;
+
+err_udc:
+	aic_udc_debugfs_exit(gg);
+	usb_del_gadget_udc(&gg->gadget);
+err_gadget:
+	aic_ep_free_request(&gg->eps_out[0]->ep, gg->ctrl_req);
+err_clk:
+	for (i = 0; i < USB_MAX_CLKS_RSTS; i++) {
+		if (!IS_ERR_OR_NULL(gg->clks[i]))
+			clk_put(gg->clks[i]);
+	}
+	return ret;
 }
 
 const struct of_device_id aic_udc_match_table[] = {
@@ -3906,4 +4065,4 @@ static struct platform_driver aic_udc_driver = {
 
 module_platform_driver(aic_udc_driver);
 MODULE_DESCRIPTION("USB Device Controller driver for aic");
-
+MODULE_LICENSE("GPL");

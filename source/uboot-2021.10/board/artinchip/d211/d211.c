@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (C) 2020 ArtInChip Technology Co.,Ltd
+ * Copyright (C) 2020-2026 ArtInChip Technology Co.,Ltd
  * Author: Dehuang Wu <dehuang.wu@artinchip.com>
  */
 
@@ -32,6 +32,10 @@
 #include <userid.h>
 #include <log_buf.h>
 
+#if defined(CONFIG_ARTINCHIP_THERMAL) && defined(CONFIG_SPL_THERMAL)
+#include <thermal.h>
+#endif
+
 #define usleep_range(a, b) udelay((b))
 
 #define RTC_CMU_REG               ((void *)0x18020908)
@@ -42,13 +46,18 @@
 #define RTC_WRITE_KEY_VALUE          (0xAC)
 
 #define RTC_BOOTINFO1_REG            (BASE_RTC + 0x100)
-#define BOOTINFO1_REASON_OFF         (4)
+#define BOOTINFO1_REASON_SHIFT         (4)
 #define BOOTINFO1_REASON_MSK         (0xF << 4)
 #define RTC_REBOOT_REASON_UPGRADE    (4)
 #define RTC_REBOOT_REASON_BL_UPGRADE (5)
 
 #define RTC_SYS_BAK_BASE             (BASE_RTC + 0x104)
 #define RTC_SYS_BAK_REG(id)          (RTC_SYS_BAK_BASE + (id) * 0x04)
+#define RTC_DDRINFO_REG		     RTC_SYS_BAK_REG(0)
+#define RTC_DDR_SIZE_OFS	     (0)
+#define RTC_DDR_SIZE_MSK	     (0x3F)
+#define RTC_DDR_TYPE_OFS	     (6)
+#define RTC_DDR_TYPE_MAK	     (0x3 << RTC_DDR_TYPE_OFS)
 
 
 #ifdef CONFIG_SPL_SPI_NAND_TINY
@@ -278,6 +287,37 @@ static int setup_dm_verity_part(void)
 }
 #endif
 
+int aic_disp_logo(const char *name, int boot_param)
+{
+	int ret = 0;
+
+	switch (boot_param) {
+	case BD_SDMC0:
+		ret = aic_mmc_load_logo(name, 0);
+		break;
+	case BD_SDMC1:
+		ret = aic_mmc_load_logo(name, 1);
+		break;
+	case BD_SPINAND:
+		ret = aic_spinand_load_logo(name);
+		break;
+	case BD_SPINOR:
+		ret = aic_spinor_load_logo(name);
+		break;
+	case BD_SDFAT32:
+		ret = aic_fat_load_logo(name);
+		break;
+	case BD_BOOTROM:
+		ret = aic_bootrom_load_logo(name);
+		break;
+	default:
+		pr_err("Do not support boot device id: %d\n", boot_param);
+		return -EINVAL;
+	}
+
+	return ret;
+}
+
 #ifdef CONFIG_VIDEO_ARTINCHIP
 static int board_prepare_logo(struct udevice *dev)
 {
@@ -341,6 +381,10 @@ static u64 efuse_get_ddr_size(void)
 	u32 val, mem;
 	u64 size = 0;
 
+#ifdef CONFIG_D211_MANUAL_DDR_SIZE
+	return CONFIG_D211_DDR_SIZE;
+#endif
+
 	writel(0x1100, EFUSE_CMU_REG);
 	val = readl(EFUSE_SHADOW_FEATURE_REG);
 
@@ -363,9 +407,24 @@ static u64 efuse_get_ddr_size(void)
 		size = 0x10000000;
 		break;
 	default:
-		pr_info("No DDR info\n");
+		pr_info("No DDR info in eFuse\n");
 	}
+
 	return size;
+}
+
+static void rtc_get_ddr_info(u8 *type, u64 *size)
+{
+	u32 val = 0;
+
+	val = readl(RTC_DDRINFO_REG);
+	if (type != NULL)
+		*type = (val & RTC_DDR_TYPE_MAK) >> RTC_DDR_TYPE_OFS;
+	if (size != NULL)
+		*size = ((val & RTC_DDR_SIZE_MSK) << 5) * 0x100000;
+	if (val)
+		pr_info("DDR%d %dMB\n", ((val & RTC_DDR_TYPE_MAK) >> RTC_DDR_TYPE_OFS),
+				(val & RTC_DDR_SIZE_MSK) << 5);
 }
 
 static u64 get_dram_size(void)
@@ -376,6 +435,9 @@ static u64 get_dram_size(void)
 	int len;
 
 	size = efuse_get_ddr_size();
+	if (size > 0)
+		return size;
+	rtc_get_ddr_info(NULL, &size);
 	if (size > 0)
 		return size;
 	offset = fdt_path_offset(gd->fdt_blob, "/memory");
@@ -415,6 +477,8 @@ void fdt_fix_mem_size(void *blob)
 	if (reg) {
 		start[0] = fdt64_to_cpu(reg[0]);
 		size[0] = efuse_get_ddr_size();
+		if (size[0] == 0)
+			rtc_get_ddr_info(NULL, &size[0]);
 		if (size[0]) {
 			fdt_fix_memory(blob, start, size, node);
 		}
@@ -583,11 +647,57 @@ static int fdt_fix_aic_logo_reserved_memory(void *blob)
 	return ret;
 }
 
+static int fdt_fix_panel_id(void *blob)
+{
+#ifdef CONFIG_VIDEO_ARTINCHIP
+	u32 panel_id, index = 6;
+	int nodeoffset, ret;
+	struct udevice *dev;
+	unsigned int *plat;
+	char buf[256];
+
+	ret = uclass_first_device(UCLASS_PANEL, &dev);
+	if (ret) {
+		pr_err("Failed to find aicfb udevice\n");
+		return -1;
+	}
+
+	plat = dev_get_plat(dev);
+	if (!plat)
+		return 0;
+
+	/* If dtb miss panel-id  */
+	ret = ofnode_read_u32(dev_ofnode(dev), "panel-id", &panel_id);
+	if (ret)
+		return 0;
+
+	ret = ofnode_get_path(dev_ofnode(dev), buf, 256);
+	if (ret) {
+		pr_err("Error: Cannot get panel node path\n");
+		return -EINVAL;
+	}
+
+	nodeoffset = fdt_path_offset(blob, buf);
+	if (nodeoffset < 0) {
+		pr_err("Error: Cannot find panel node in kernel FDT\n");
+		return -EINVAL;
+	}
+
+	index = *plat;
+	if (fdt_setprop_u32(blob, nodeoffset, "panel-id", index) < 0) {
+		printf("Error: Failed to set panel-id property\n");
+		return -EINVAL;
+	}
+#endif
+	return 0;
+}
+
 int ft_board_setup(void *blob, struct bd_info *bd)
 {
 	fdt_fix_mem_size(blob);
 	ft_board_setup_chosen_bootargs(blob);
 	fdt_fix_aic_logo_reserved_memory(blob);
+	fdt_fix_panel_id(blob);
 
 	return 0;
 }
@@ -892,6 +1002,62 @@ static int userid_lock_flag(enum boot_device bd)
 }
 #endif
 
+#if defined(CONFIG_ARTINCHIP_THERMAL) && defined(CONFIG_SPL_THERMAL)
+
+static struct udevice *aic_enable_adcim(void)
+{
+	struct udevice *dev = NULL;
+
+	if (uclass_first_device_err(UCLASS_MISC, &dev)) {
+		pr_err("Get UCLASS_MISC device failed.\n");
+		return NULL;
+	}
+
+	do {
+		if (device_is_compatible(dev, "artinchip,aic-adcim-v1.0"))
+			break;
+		uclass_next_device_err(&dev);
+	} while (dev);
+
+	return dev;
+}
+
+static void aic_force_remove(struct udevice *dev)
+{
+	const struct driver *drv = dev->driver;
+
+	if (drv && drv->remove)
+		drv->remove(dev);
+}
+
+static void aic_show_temperature(void)
+{
+	struct udevice *thermal_dev = NULL;
+	struct udevice *adcim_dev = NULL;
+	int temp = 0, ret;
+
+	adcim_dev = aic_enable_adcim();
+	if (!adcim_dev)
+		return;
+
+	ret = uclass_get_device(UCLASS_THERMAL, 0, &thermal_dev);
+	if (ret) {
+		printf("Couldn't get thermal device\n");
+		return;
+	}
+	ret = thermal_get_temp(thermal_dev, &temp);
+	if (ret) {
+		printf("Couldn't get temperature for tuning\n");
+		return;
+	}
+
+	printf("Current temperature: %d.%03d\n", temp / 1000, temp % 1000);
+
+	aic_force_remove(thermal_dev);
+	aic_force_remove(adcim_dev);
+}
+#endif
+
 #define START_UNKNOWN -1
 #define START_KERNEL   0
 #define START_UBOOT    1
@@ -913,6 +1079,10 @@ int spl_start_uboot(void)
 
 	if (start == START_UBOOT)
 		return start;
+
+#if defined(CONFIG_ARTINCHIP_THERMAL) && defined(CONFIG_SPL_THERMAL)
+	aic_show_temperature();
+#endif
 
 	/* UNKNOWN, START_KERNEL: still need to check */
 
@@ -1000,13 +1170,13 @@ out:
 
 ulong board_spl_fit_size_align(ulong size)
 {
+	// NOLINTNEXTLINE
 	size = ALIGN(size, 0x20);
 
 	return size;
 }
 
-/* Get the top of usable RAM */
-ulong board_get_usable_ram_top(ulong total_size)
+ulong board_get_opensbi_ram_top(ulong total_size)
 {
 	u64 dram_size;
 	phys_addr_t top;
@@ -1016,9 +1186,33 @@ ulong board_get_usable_ram_top(ulong total_size)
 
 	/* last region is for OpenSBI */
 	top = top - CONFIG_SPL_OPENSBI_SIZE;
+
 	return top;
 }
 
+ulong board_get_dtb_ram_top(ulong total_size)
+{
+	phys_addr_t top;
+
+	top = board_get_opensbi_ram_top(0);
+
+	/* last region is for Falcon */
+#ifdef CONFIG_SYS_SPL_WRITE_SIZE
+	top = top - CONFIG_SYS_SPL_WRITE_SIZE;
+#elif CONFIG_SYS_SPI_ARGS_SIZE
+	top = top - CONFIG_SYS_SPI_ARGS_SIZE;
+#elif CONFIG_SYS_MMCSD_RAW_MODE_ARGS_SECTORS
+	top = top - (CONFIG_SYS_MMCSD_RAW_MODE_ARGS_SECTORS * 512);
+#endif
+
+	return top;
+}
+
+/* Get the top of usable RAM */
+ulong board_get_usable_ram_top(ulong total_size)
+{
+	return board_get_dtb_ram_top(0);
+}
 
 int board_load_opensbi_to_ram_top(void)
 {
@@ -1045,7 +1239,7 @@ static int rtc_upg_flag_check(void)
 	u32 val;
 
 	val = readl((void *)RTC_BOOTINFO1_REG);
-	val = (val & BOOTINFO1_REASON_MSK) >> BOOTINFO1_REASON_OFF;
+	val = (val & BOOTINFO1_REASON_MSK) >> BOOTINFO1_REASON_SHIFT;
 
 	if ((val == RTC_REBOOT_REASON_UPGRADE) ||
 	    (val == RTC_REBOOT_REASON_BL_UPGRADE)) {
@@ -1091,7 +1285,7 @@ void do_brom_upg(char *upg_mode)
 
 	val = readl((void *)RTC_BOOTINFO1_REG);
 	val &= ~BOOTINFO1_REASON_MSK;
-	val |= (RTC_REBOOT_REASON_UPGRADE << BOOTINFO1_REASON_OFF);
+	val |= (RTC_REBOOT_REASON_UPGRADE << BOOTINFO1_REASON_SHIFT);
 
 	writel(val, (void *)RTC_BOOTINFO1_REG);
 

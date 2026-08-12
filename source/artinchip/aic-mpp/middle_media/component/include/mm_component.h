@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2024 ArtInChip Technology Co. Ltd
+ * Copyright (C) 2020-2026 ArtInChip Technology Co. Ltd
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -15,12 +15,14 @@ extern "C" {
 #endif /* __cplusplus */
 
 #include "mpp_dec_type.h"
+#include <time.h>
 #include <inttypes.h>
 #include <mm_index.h>
 
 #define MM_CLOCK_PORT0 0x00000001
 #define MM_CLOCK_PORT1 0x00000002
 #define MM_CLOCK_PORT2 0x00000004
+#define MM_MEDIA_PERF_PERIOD_TIME (3 * 1000 * 1000)
 
 typedef void *mm_handle;
 
@@ -50,39 +52,18 @@ typedef enum MM_STATE_TYPE {
 
     /**< component has received pause command */
     MM_STATE_PAUSE,
+
+    /**< component has received switch audio track command */
+    MM_STATE_SWITCH_TRACK,
+
+    MM_STATE_MAX
 } MM_STATE_TYPE;
 
-typedef enum MM_AUDIO_CODING_TYPE {
-    MM_AUDIO_CODING_UNUSED = 0, /* Placeholder value when coding is N/A  */
-    MM_AUDIO_CODING_AUTODETECT, /* auto detection of audio format */
-    MM_AUDIO_CODING_PCM,        /* Any variant of PCM coding */
-    MM_AUDIO_CODING_AAC,        /* Any variant of AAC encoded data */
-    MM_AUDIO_CODING_MP3,        /* Any variant of MP3 encoded data */
-    MM_AUDIO_CODING_MAX = 0x7FFFFFFF
-} MM_AUDIO_CODING_TYPE;
-
-typedef enum MM_VIDEO_CODING_TYPE {
-    MM_VIDEO_CODING_UNUSED,     /* Value when coding is N/A */
-    MM_VIDEO_CODING_AUTODETECT, /* Autodetection of coding type */
-    MM_VIDEO_CODING_MPEG2,      /* AKA: H.262 */
-    MM_VIDEO_CODING_H263,       /* H.263 */
-    MM_VIDEO_CODING_MPEG4,      /* MPEG-4 */
-    MM_VIDEO_CODING_AVC,        /* H.264/AVC */
-    MM_VIDEO_CODING_MJPEG,      /* Motion JPEG */
-    MM_VIDEO_CODING_MAX = 0x7FFFFFFF
-} MM_VIDEO_CODING_TYPE;
-
-typedef enum MM_COLOR_FORMAT_TYPE {
-    MM_COLOR_FORMAT_UNUSED,
-    MM_COLOR_FORMAT_YUV420P,
-    MM_COLOR_FORMAT_NV12,
-    MM_COLOR_FORMAT_NV21,
-    MM_COLOR_FORMAT_RGB565,
-    MM_COLOR_FORMAT_ARGB8888,
-    MM_COLOR_FORMAT_RGB888,
-    MM_COLOR_FORMAT_ARGB1555,
-    MM_COLOR_FORMAT_MAX = 0x7FFFFFFF
-} MM_COLOR_FORMAT_TYPE;
+typedef enum MM_BUFFER_DATA_TYPE {
+    MM_BUFFER_DATA_UNKNOWN,
+    MM_BUFFER_DATA_PACKET,
+    MM_BUFFER_DATA_FRAME,
+} MM_BUFFER_DATA_TYPE;
 
 typedef enum MM_TIME_CLOCK_STATE {
     MM_TIME_CLOCK_STATE_RUNNING, /* Clock running. */
@@ -116,22 +97,22 @@ typedef struct mm_audio_param_port_format {
     u32 index;      /* Indicates the enumeration index for the format from 0x0 to N-1 */
 
     /* Type of data expected for this port (e.g. PCM, AMR, MP3, etc) */
-    MM_AUDIO_CODING_TYPE encoding;
+    enum aic_audio_codec_type codec_type;
 } mm_audio_param_port_format;
 
-typedef struct ms_audio_port_def {
+typedef struct mm_audio_port_def {
     /* Type of data expected for this port (e.g. PCM, AMR, MP3, etc) */
-    MM_AUDIO_CODING_TYPE encoding;
+    enum aic_audio_codec_type codec_type;
     u32 channels;
     u32 bitrate;
     u32 sample_rate;
-} ms_audio_port_def;
+} mm_audio_port_def;
 
 typedef struct mm_video_param_port_format {
     u32 port_index;
     u32 index;
-    MM_VIDEO_CODING_TYPE compression_format;
-    MM_COLOR_FORMAT_TYPE color_format;
+    enum mpp_codec_type codec_type;
+    enum mpp_pixel_format pixel_format;
     u32 framerate;
 } mm_video_param_port_format;
 
@@ -140,30 +121,39 @@ typedef struct mm_image_param_qfactor {
     u32 q_factor;
 } mm_image_param_qfactor;
 
-typedef struct ms_video_port_def {
+typedef struct mm_video_port_def {
     u32 frame_width;
     u32 frame_height;
     s32 stride;
     u32 slice_height;
     u32 bitrate;
     u32 framerate;
-    MM_VIDEO_CODING_TYPE compression_format;
-    MM_COLOR_FORMAT_TYPE color_format;
-} ms_video_port_def;
+    enum mpp_codec_type codec_type;
+    enum mpp_pixel_format pixel_format;
+} mm_video_port_def;
 
 typedef struct mm_param_port_def {
     u32 port_index; /* Port number the structure applies to */
     u32 dir;        /* Direction (input or output) of this port */
     MM_BOOL enable; /* Ports default to enabled and are enabled/disabled */
     union {
-        ms_audio_port_def audio;
-        ms_video_port_def video;
+        mm_audio_port_def audio;
+        mm_video_port_def video;
     } format;
 } mm_param_port_def;
 
 typedef struct mm_param_skip_track {
     u32 port_index;
 } mm_param_skip_track;
+
+typedef struct mm_param_osd {
+    u32     port_index;
+    MM_BOOL enable;
+    s32     id;
+    s32     x;
+    s32     y;
+    char    *text;
+} mm_param_osd;
 
 typedef struct mm_param_screen_size {
     u32 port_index;
@@ -181,10 +171,15 @@ typedef struct mm_param_frame_end {
     MM_BOOL b_frame_end; /* 0-clear   1- set */
 } mm_param_frame_end;
 
+typedef struct mm_param_storage_handle {
+    u32 size;
+    void *handle;
+} mm_param_storage_handle;
+
 typedef struct mm_param_record_file_info {
     u32 port_index;
     s32 file_num;
-    s64 duration;
+    s32 duration;
     s32 muxer_type;
 } mm_param_record_file_info;
 
@@ -229,16 +224,34 @@ typedef struct mm_time_config_active_ref_clock {
     MM_TIME_REF_CLOCK_TYPE clock; /* Reference clock used to compute media time */
 } mm_time_config_active_ref_clock;
 
+typedef struct mm_frame
+{
+    struct mpp_frame mpp_frame;
+    void *vaddr[3];
+} mm_frame;
+
+typedef struct mm_packet
+{
+    struct mpp_packet mpp_packet;
+} mm_packet;
 
 typedef struct mm_buffer
 {
-    u8* p_buffer;
-    u32 buffer_size;
-    s64 time_stamp;
-    u32 flags;
+    union {
+         u8* data;
+         mm_frame frame;
+         mm_packet packet;
+    };
+    u32 size;
     u32 output_port_index;
     u32 input_port_index;
+    MM_BUFFER_DATA_TYPE type;
 } mm_buffer;
+
+typedef struct mm_codec_tbl {
+    int codec_type;
+    char type_str[32];
+} mm_codec_tbl;
 
 typedef struct mm_callback {
     /* The event_handler method is used to notify the application when an
@@ -289,6 +302,75 @@ typedef struct mm_component {
 
     s32 (*deinit)(mm_handle h_component);
 } mm_component;
+
+static char g_state_str[MM_STATE_MAX][16] =
+{
+    "Invalid", "Loaded", "Idle", "Executing", "Pause", "SwitchTrack"
+};
+
+static inline char* mm_component_sta_to_str(MM_STATE_TYPE state)
+{
+    if (state < MM_STATE_INVALID || state >= MM_STATE_MAX)
+        return "Unknown";
+
+    return g_state_str[state];
+}
+
+static struct mm_codec_tbl g_acodec_tbl[] =
+{
+    {MPP_CODEC_AUDIO_DECODER_MP3, "mp3 decoder"},
+    {MPP_CODEC_AUDIO_DECODER_AAC, "aac decoder"},
+    {MPP_CODEC_AUDIO_DECODER_APE, "ape decoder"},
+    {MPP_CODEC_AUDIO_DECODER_FLAC, "flac decoder"},
+    {MPP_CODEC_AUDIO_DECODER_OPUS, "opus decoder"},
+    {MPP_CODEC_AUDIO_DECODER_WMA, "wma decoder"},
+    {MPP_CODEC_AUDIO_DECODER_VORBIS, "vorbis decoder"},
+    {MPP_CODEC_AUDIO_DECODER_ALAC, "alac decoder"},
+
+    {MPP_CODEC_AUDIO_ENCODER_MP3, "mp3 encoder"},
+    {MPP_CODEC_AUDIO_ENCODER_AAC, "aac encoder"}
+};
+
+static struct mm_codec_tbl g_vcodec_tbl[] =
+{
+    {MPP_CODEC_VIDEO_DECODER_H264, "h264 decoder"},
+    {MPP_CODEC_VIDEO_DECODER_MJPEG, "mjpeg decoder"},
+    {MPP_CODEC_VIDEO_DECODER_MPEG12, "mpeg12 decoder"},
+    {MPP_CODEC_VIDEO_DECODER_MPEG4, "mpeg4 decoder"},
+    {MPP_CODEC_VIDEO_DECODER_MPEG4_311, "mpeg4_311 decoder"},
+
+    {MPP_CODEC_VIDEO_ENCODER_H264, "h264 encoder"},
+    {MPP_CODEC_VIDEO_ENCODER_MJPEG, "mjpeg encoder"}
+};
+
+static inline char* mm_vcodec_get_str(enum mpp_codec_type codec_type)
+{
+    s32 i = 0;
+    for (i = 0; i < sizeof(g_vcodec_tbl) / sizeof(g_vcodec_tbl[0]); i++) {
+        if (g_vcodec_tbl[i].codec_type == codec_type)
+            return g_vcodec_tbl[i].type_str;
+    }
+
+    return "unknown vcodec_type";
+}
+
+static inline char* mm_acodec_get_str(enum aic_audio_codec_type codec_type)
+{
+    s32 i = 0;
+    for (i = 0; i < sizeof(g_acodec_tbl) / sizeof(g_acodec_tbl[0]); i++) {
+        if (g_acodec_tbl[i].codec_type == codec_type)
+            return g_acodec_tbl[i].type_str;
+    }
+
+    return "unknown acodec_type";
+}
+
+static inline s64 mm_get_time_us(void)
+{
+    struct timespec time;
+    clock_gettime(CLOCK_REALTIME, &time);
+    return (time.tv_sec * 1000 * 1000 + time.tv_nsec / 1000);
+}
 
 #ifdef __cplusplus
 }

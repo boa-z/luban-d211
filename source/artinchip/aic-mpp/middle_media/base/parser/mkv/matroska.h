@@ -1,5 +1,7 @@
 /*
-* Copyright (C) 2020-2024 Artinchip Technology Co. Ltd
+* Copyright (C) 2020-2025 ArtInChip Technology Co. Ltd
+*
+* SPDX-License-Identifier: Apache-2.0
 *
 *  author: <che.jiang@artinchip.com>
 *  Desc: matroska.h
@@ -635,6 +637,8 @@ typedef struct matroska_track {
 
     uint32_t palette[256];
     int has_palette;
+
+    int audio_track_id;
 } matroska_track;
 
 struct matroska_demux_context {
@@ -684,6 +688,8 @@ struct matroska_demux_context {
     int bandwidth;
 
     int skip_track;
+
+    int nb_audio_track;
 };
 
 #define MATROSKA_MAX_TRACK_NUM 8

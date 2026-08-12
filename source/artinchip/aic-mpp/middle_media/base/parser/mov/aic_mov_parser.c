@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2023 ArtInChip Technology Co. Ltd
+ * Copyright (C) 2020-2026 ArtInChip Technology Co. Ltd
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -40,9 +40,11 @@ s32 mov_get_media_info(struct aic_parser *parser, struct aic_parser_av_media_inf
 {
 	int i;
 	int64_t duration = 0;
+	struct aic_av_audio_stream *audio_stream;
 	struct aic_mov_parser *c = (struct aic_mov_parser *)parser;
 
 	logi("================ media info =======================");
+	media->audio_track_count = 0;
 	for (i=0; i<c->nb_streams; i++) {
 		struct mov_stream_ctx *st = c->streams[i];
 		if (st->type == MPP_MEDIA_TYPE_VIDEO) {
@@ -51,6 +53,10 @@ s32 mov_get_media_info(struct aic_parser *parser, struct aic_parser_av_media_inf
 				media->video_stream.codec_type = MPP_CODEC_VIDEO_DECODER_H264;
 			else if (st->id == CODEC_ID_MJPEG)
 				media->video_stream.codec_type = MPP_CODEC_VIDEO_DECODER_MJPEG;
+			else if (st->id == CODEC_ID_MPEG12)
+				media->video_stream.codec_type = MPP_CODEC_VIDEO_DECODER_MPEG12;
+			else if (st->id == CODEC_ID_MPEG4)
+				media->video_stream.codec_type = MPP_CODEC_VIDEO_DECODER_MPEG4;
 			else
 				media->video_stream.codec_type = -1;
 
@@ -62,27 +68,33 @@ s32 mov_get_media_info(struct aic_parser *parser, struct aic_parser_av_media_inf
 			}
 			logi("video width: %d", st->width);
 			logi("video height: %d", st->height);
+			logi("video type: %d", media->video_stream.codec_type);
 			logi("video extra_data_size: %d", st->extra_data_size);
 		} else if (st->type == MPP_MEDIA_TYPE_AUDIO) {
 			media->has_audio = 1;
+			audio_stream = &media->audio_stream[media->audio_track_count];
 			if (st->id == CODEC_ID_MP3)
-				media->audio_stream.codec_type = MPP_CODEC_AUDIO_DECODER_MP3;
+				audio_stream->codec_type = MPP_CODEC_AUDIO_DECODER_MP3;
 			else if (st->id == CODEC_ID_AAC)
-				media->audio_stream.codec_type = MPP_CODEC_AUDIO_DECODER_AAC;
+				audio_stream->codec_type = MPP_CODEC_AUDIO_DECODER_AAC;
 			else
-				media->audio_stream.codec_type = MPP_CODEC_AUDIO_DECODER_UNKOWN;
+				audio_stream->codec_type = MPP_CODEC_AUDIO_DECODER_UNKOWN;
 
-			media->audio_stream.bits_per_sample = st->bits_per_sample;
-			media->audio_stream.nb_channel = st->channels;
-			media->audio_stream.sample_rate = st->sample_rate;
+			audio_stream->bits_per_sample = st->bits_per_sample;
+			audio_stream->nb_channel = st->channels;
+			audio_stream->sample_rate = st->sample_rate;
 			if (st->extra_data_size > 0) {
-				media->audio_stream.extra_data_size = st->extra_data_size;
-				media->audio_stream.extra_data = st->extra_data;
+				audio_stream->extra_data_size = st->extra_data_size;
+				audio_stream->extra_data = st->extra_data;
 			}
+			audio_stream->track_id = st->audio_track_id;
+			media->audio_track_count++;
+
+			logi("track_id:%d", audio_stream->track_id);
 			logi("audio bits_per_sample: %d", st->bits_per_sample);
 			logi("audio channels: %d", st->channels);
 			logi("audio sample_rate: %d", st->sample_rate);
-			logi("audio extra_data_size: %d", st->extra_data_size);
+			logi("audio extra_data_size: %d\n", st->extra_data_size);
 		}
 
 		if (st->duration > duration)
@@ -148,6 +160,10 @@ s32 aic_mov_parser_create(unsigned char *uri, struct aic_parser **parser)
 		goto exit;
 	}
 
+	if ((strncmp((const char *)uri, "http://", 7) == 0) ||
+		(strncmp((const char *)uri, "https://", 8) == 0)) {
+		mov_parser->is_network_stream = 1;
+	}
 	mov_parser->base.get_media_info = mov_get_media_info;
 	mov_parser->base.peek = mov_peek;
 	mov_parser->base.read = mov_read;

@@ -36,7 +36,9 @@ struct aic_ohci_platform_priv {
 };
 
 #define DRIVER_DESC "OHCI Artinchip driver"
-
+#ifndef CONFIG_USB_EHCI_HCD_AIC
+#define CONFIG_USB_OHCI_HCD_AIC
+#endif
 #define hcd_to_ohci_priv(h) \
 	((struct aic_ohci_platform_priv *)hcd_to_ohci(h)->priv)
 
@@ -347,12 +349,13 @@ static int aic_ohci_suspend(struct device *dev)
 	struct usb_ohci_pdata *pdata = dev->platform_data;
 	struct platform_device *pdev = to_platform_device(dev);
 	bool do_wakeup = device_may_wakeup(dev);
-	int ret;
+	int ret = 0;
 
-	ret = ohci_suspend(hcd, do_wakeup);
-	if (ret)
-		return ret;
-
+	if (hcd->self.root_hub != NULL) {
+		ret = ohci_suspend(hcd, do_wakeup);
+		if (ret)
+			return ret;
+	}
 	if (pdata->power_suspend)
 		pdata->power_suspend(pdev);
 
@@ -372,7 +375,9 @@ static int aic_ohci_resume(struct device *dev)
 			return err;
 	}
 
-	ohci_resume(hcd, false);
+	if (hcd->self.root_hub != NULL)
+		ohci_resume(hcd, false);
+
 	return 0;
 }
 

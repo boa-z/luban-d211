@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2023 ArtInChip Technology Co. Ltd
+ * Copyright (C) 2020-2026 ArtInChip Technology Co. Ltd
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -83,6 +83,7 @@ struct mov_stream_ctx {
 	unsigned int sample_count;
 	int *sample_sizes;       // stsz
 
+	int audio_track_id;
 	int nb_index_entries;
 	struct index_entry *index_entries;
 };
@@ -102,6 +103,8 @@ struct aic_mov_parser {
 	int movie_display_matrix[3][3]; ///< display matrix from mvhd
 
 	int nb_streams;
+	int nb_audio_track;
+	int is_network_stream;
 	struct mov_stream_ctx* streams[MAX_TRACK_NUM];
 
 	struct index_entry *cur_sample;

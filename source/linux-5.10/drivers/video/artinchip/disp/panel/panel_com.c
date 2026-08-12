@@ -144,21 +144,10 @@ int panel_default_disable(struct aic_panel *panel)
 
 int panel_default_get_video_mode(struct aic_panel *panel, struct videomode **vm)
 {
-	int switch_gpio;
 	struct panel_comp *p = to_panel_comp(panel);
 
-	p->gpio_switch = devm_gpiod_get(p->panel.dev, "switch", GPIOD_IN);
-	if (IS_ERR(p->gpio_switch))
-		dev_warn(panel->dev, "Faild to get switch io\r\n");
-
-	switch_gpio = gpiod_get_value(p->gpio_switch);
-
-	if (switch_gpio < 0)
-		switch_gpio = 0;
-
 	if (p->use_dt_timing)
-		videomode_from_timings(p->timings, panel->vm,
-				switch_gpio);
+		videomode_from_timings(p->timings, panel->vm, panel->id);
 
 	*vm = panel->vm;
 
@@ -179,6 +168,7 @@ int panel_register_callback(struct aic_panel *panel,
 
 int panel_parse_dts(struct panel_comp *p, struct device *dev)
 {
+	struct device_node *timings_np;
 	int ret;
 
 	p->supply = devm_regulator_get_optional(dev, "power");
@@ -189,14 +179,14 @@ int panel_parse_dts(struct panel_comp *p, struct device *dev)
 
 	p->enable_gpio = devm_gpiod_get_optional(dev, "enable", GPIOD_ASIS);
 	if (IS_ERR(p->enable_gpio)) {
-		dev_warn(dev, "failed to request enable_gpio: %ld\n",
+		dev_dbg(dev, "failed to request enable_gpio: %ld\n",
 			PTR_ERR(p->enable_gpio));
 		p->enable_gpio = NULL;
 	}
 
 	p->sleep_gpio = devm_gpiod_get(dev, "sleep", GPIOD_OUT_HIGH);
 	if (IS_ERR(p->sleep_gpio)) {
-		dev_warn(dev, "failed to request sleep_gpio: %ld\n",
+		dev_dbg(dev, "failed to request sleep_gpio: %ld\n",
 			PTR_ERR(p->sleep_gpio));
 		p->sleep_gpio = NULL;
 	}
@@ -205,11 +195,13 @@ int panel_parse_dts(struct panel_comp *p, struct device *dev)
 	if (IS_ERR(p->backlight))
 		return PTR_ERR(p->backlight);
 
-	p->timings = of_get_display_timings(dev->of_node);
-	if (p->timings)
-		p->use_dt_timing = true;
-	else
+	timings_np = of_get_child_by_name(dev->of_node, "display-timings");
+	if (!timings_np) {
 		p->use_dt_timing = false;
+	} else {
+		p->use_dt_timing = true;
+		p->timings = of_get_display_timings(dev->of_node);
+	}
 
 	ret = of_property_read_u32(dev->of_node, "disp-dither",
 					&p->panel.disp_dither);

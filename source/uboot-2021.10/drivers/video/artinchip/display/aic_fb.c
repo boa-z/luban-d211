@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0+
 /*
- * Copyright (c) 2021 ArtInChip Technology Co.,Ltd
+ * Copyright (C) 2020-2026 ArtInChip Technology Co.,Ltd
  * Huahui Mai <huahui.mai@artinchip.com>
  */
 
@@ -14,6 +14,7 @@
 #include <linux/fb.h>
 #include <asm/types.h>
 #include <cpu_func.h>
+#include <init.h>
 #include "aic_com.h"
 
 DECLARE_GLOBAL_DATA_PTR;
@@ -233,6 +234,45 @@ static void aicfb_enable_clk(struct aicfb_info *priv, u32 on)
 	de->pixclk_enable();
 }
 
+/* Tmplement this weak function in the panel driver file */
+__weak int panel_get_screen_id(struct aic_panel *p)
+{
+	return -1;
+}
+
+static void aicfb_get_panel_id(struct udevice *dev, struct aicfb_info *priv)
+{
+	struct aicfb_dt *dt = dev_get_plat(dev);
+	struct aicfb_format *f = dt->format;
+	struct aic_panel *p = priv->panel;
+	struct di_funcs *di = priv->di;
+	struct de_funcs *de = priv->de;
+	struct fb_videomode vm;
+
+	if (panel_get_screen_id(p) < 0)
+		return;
+
+	if (di->clk_disable)
+		di->clk_disable();
+
+	if (de->clk_disable)
+		de->clk_disable();
+
+	aic_delay_ms(1);
+	/*
+	 * overwrite the videomode and display interface parameters
+	 * based on the panel ID read back from screen.
+	 */
+	aicfb_get_panel_info(priv, &vm);
+	aicfb_video_mode_to_dt(dev, &vm);
+
+	dt->width = vm.xres;
+	dt->height = vm.yres;
+	dt->stride = ALIGN_8B(dt->width * f->bits_per_pixel / 8);
+
+	aicfb_enable_clk(priv, AICFB_ON);
+}
+
 static void aicfb_update_layer(struct udevice *dev)
 {
 	struct video_priv *uc_priv = dev_get_uclass_priv(dev);
@@ -280,8 +320,11 @@ static void aicfb_video_init(struct udevice *dev)
 	struct aicfb_info *priv = dev_get_priv(dev);
 	uc_priv->fb = (void *)priv->fb_start;
 	uc_priv->fb_size = dt->stride * dt->height;
-
+#ifdef CONFIG_SYS_WHITE_ON_BLACK
+	memset(uc_priv->fb, 0x00, uc_priv->fb_size);
+#else
 	memset(uc_priv->fb, 0xFF, uc_priv->fb_size);
+#endif
 	flush_dcache_range(priv->fb_start, priv->fb_start + uc_priv->fb_size);
 #endif
 }
@@ -303,7 +346,7 @@ static int aicfb_probe(struct udevice *dev)
 #else
 	int parent, node, ret;
 	struct fdt_resource reg_res;
-	void *blob = (void *)CONFIG_SYS_SPL_ARGS_ADDR;
+	void *blob = (void *)(uintptr_t)board_get_dtb_ram_top(0);
 
 	parent = fdt_path_offset(blob, "/reserved-memory");
 	if (parent < 0) {
@@ -345,7 +388,7 @@ static int aicfb_probe(struct udevice *dev)
 	aicfb_register_panel_callback(priv);
 
 	aicfb_enable_clk(priv, AICFB_ON);
-
+	aicfb_get_panel_id(dev, priv);
 	aicfb_video_init(dev);
 
 	return 0;

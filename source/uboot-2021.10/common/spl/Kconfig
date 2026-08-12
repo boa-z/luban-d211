@@ -763,6 +763,11 @@ config SPL_SPI_NAND_TINY
 	bool "Support tiny SPI NAND flash"
 	select SPL_MTD_SPI_NAND
 
+config SPL_SPI_NAND_LOGO_OFFSET
+	hex "SPI NAND logo partition offset"
+	depends on SPL_SPI_NAND_TINY
+	default 0x340000
+
 config SPL_UBI
 	bool "Support UBI"
 	help

@@ -1,0 +1,7 @@
+# These are the architectures supported by ALAC
+config BR2_PACKAGE_ALAC
+	bool "alac"
+	help
+	  alac
+
+

@@ -241,7 +241,7 @@
 
 		aicudc: udc@10200000 {
 			compatible = "artinchip,aic-udc-v1.0";
-			reg = <0x0 0x10200000 0x0 0x1000>;
+			reg = <0x0 0x10200000 0x0 0x8100>;
 			interrupts-extended = <&plic0 34 IRQ_TYPE_LEVEL_HIGH>;
 			clocks = <&cmu CLK_USBD>, <&cmu CLK_USB_PHY0>;
 			clock-names = "udc_clk";
@@ -493,6 +493,7 @@
 			interrupts-extended = <&plic0 50 IRQ_TYPE_LEVEL_HIGH>;
 			clocks = <&cmu CLK_RTC>;
 			resets = <&rst RESET_RTC>;
+			start-year = <2020>;
 			status = "disabled";
 		};
 

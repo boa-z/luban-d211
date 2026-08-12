@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 /*
- * Copyright (C) 2020-2021 Artinchip Technology Co., Ltd.
+ * Copyright (C) 2020-2025 ArtInChip Technology Co., Ltd.
  * Authors:  Wu Dehuang <dehuang.wu@artinchip.com>
  */
 
@@ -138,9 +138,9 @@ out:
 static int aic_priv_enc(int flen, const unsigned char *from, unsigned char *to,
 		     struct ak_options *opts, char *cipher_name)
 {
+	size_t pagesize = (size_t)sysconf(_SC_PAGESIZE);
 	struct kcapi_handle *handle = NULL;
 	unsigned char *buf = NULL;
-	size_t pagesize = (size_t)sysconf(_SC_PAGESIZE);
 	int ret = 0, maxsize = 0;
 
 	if (posix_memalign((void **)&buf, pagesize, 2 * pagesize)) {
@@ -182,9 +182,9 @@ out:
 static int aic_pub_dec(int flen, const unsigned char *from, unsigned char *to,
 		struct ak_options *opts, char *cipher_name)
 {
+	size_t pagesize = (size_t)sysconf(_SC_PAGESIZE);
 	struct kcapi_handle *handle = NULL;
 	unsigned char *buf = NULL;
-	size_t pagesize = (size_t)sysconf(_SC_PAGESIZE);
 	int ret = 0, maxsize = 0;
 
 	if (posix_memalign((void **)&buf, pagesize, 2 * pagesize)) {
@@ -228,6 +228,51 @@ out:
 	return ret;
 }
 
+
+static int aic_priv_dec(int flen, const unsigned char *from, unsigned char *to,
+		struct ak_options *opts, char *cipher_name)
+{
+	size_t pagesize = (size_t)sysconf(_SC_PAGESIZE);
+	struct kcapi_handle *handle = NULL;
+	unsigned char *buf = NULL;
+	int ret = 0, maxsize = 0;
+
+	if (posix_memalign((void **)&buf, pagesize, 2 * pagesize)) {
+		printf("Failed to allocate buf.\n");
+		ret = -ENOMEM;
+		goto out;
+	}
+
+	if (kcapi_akcipher_init(&handle, cipher_name, 0)) {
+		printf("Allocation of %s cipher failed\n", cipher_name);
+		ret = -1;
+		goto out;
+	}
+
+	maxsize = kcapi_akcipher_setkey(handle, opts->esk_buf, opts->esk_len);
+	if (maxsize < flen) {
+		printf("Asymmetric cipher set private key failed\n");
+		ret = -EFAULT;
+		goto out;
+	}
+
+	ret = kcapi_akcipher_decrypt(handle, from, maxsize, buf, maxsize, 0);
+	if (ret < 0) {
+		printf("aic pub dec failed ret %d.\n", ret);
+		goto out;
+	}
+
+	ret = rsa_padding_check_pkcs1_type_2(to, maxsize, buf, maxsize, maxsize);
+
+out:
+	if (handle)
+		kcapi_akcipher_destroy(handle);
+	if (buf)
+		free(buf);
+
+	return ret;
+}
+
 int aic_rsa_priv_enc(int flen, unsigned char *from, unsigned char *to,
 			struct ak_options *opts)
 {
@@ -244,4 +289,10 @@ int aic_hwp_rsa_priv_enc(int flen, unsigned char *from, unsigned char *to,
 			struct ak_options *opts, char *algo)
 {
 	return aic_priv_enc(flen, from, to, opts, algo);
+}
+
+int aic_hwp_rsa_priv_dec(int flen, unsigned char *from, unsigned char *to,
+			struct ak_options *opts, char *algo)
+{
+	return aic_priv_dec(flen, from, to, opts, algo);
 }

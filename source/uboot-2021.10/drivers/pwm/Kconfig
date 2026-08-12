@@ -15,6 +15,12 @@ config PWM_ARTINCHIP
 	help
 	  PWM controller driver for ArtInChip SoC.
 
+config PWM_ARTINCHIP_XPWM
+	bool "Enable support for ArtInChip XPWM"
+	depends on DM_PWM
+	help
+	  XPWM controller driver for ArtInChip SoC.
+
 config PWM_CROS_EC
 	bool "Enable support for the Chrome OS EC PWM"
 	depends on DM_PWM

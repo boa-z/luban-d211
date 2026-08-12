@@ -399,7 +399,12 @@ struct fb_ops aicfb_ops = {
 	.fb_mmap = aic_fb_mmap,
 };
 
-static void aicfb_fb_info_setup(struct fb_info *info, struct aicfb_data *fdt)
+static inline bool is_fbi_rotate(struct aicfb_info *fbi)
+{
+	return fbi->fb_rotate == 90 || fbi->fb_rotate == 270;
+}
+
+static void aicfb_fb_info_setup(struct fb_info *info, struct aicfb_data *fdt, struct videomode *vm)
 {
 	struct aicfb_info *fbi = (struct aicfb_info *)info->par;
 	struct aicfb_dt *dt = &fdt->dt_lists[0];
@@ -431,12 +436,12 @@ static void aicfb_fb_info_setup(struct fb_info *info, struct aicfb_data *fdt)
 	fbi->fb_rotate = dt->rotation;
 	fbi->disp_buf_num = dt->disp_buf_num;
 
-	if (fbi->fb_rotate == 90 || fbi->fb_rotate == 270) {
-		fbi->screen_size.width = dt->height;
-		fbi->screen_size.height = dt->width;
+	if (dt->width != vm->hactive || dt->height != vm->vactive) {
+		fbi->screen_size.width = is_fbi_rotate(fbi) ? vm->vactive : vm->hactive;
+		fbi->screen_size.height = is_fbi_rotate(fbi) ? vm->hactive : vm->vactive;
 	} else {
-		fbi->screen_size.width = dt->width;
-		fbi->screen_size.height = dt->height;
+		fbi->screen_size.width = is_fbi_rotate(fbi) ? dt->height : dt->width;
+		fbi->screen_size.height = is_fbi_rotate(fbi) ? dt->width : dt->height;
 	}
 }
 
@@ -627,17 +632,25 @@ static int aicfb_parse_dt_by_fb_id(struct platform_device *pdev, u32 id)
 
 	/* get de device node */
 	dt->de_np = of_get_remote_by_port(np);
-
 	if (!dt->de_np) {
 		dev_err(&pdev->dev, "Can't get de%u device node\n", id);
 		goto err_de;
 	}
 
-	/* get encoder device node */
-	dt->di_np =	of_get_remote_by_port_id(dt->de_np, AICFB_PORT_OUT);
+	if (!of_device_is_available(dt->de_np)) {
+		dev_err(&pdev->dev, "Display Engine device node is not available\n");
+		goto err_de;
+	}
 
+	/* get encoder device node */
+	dt->di_np = of_get_remote_by_port_id(dt->de_np, AICFB_PORT_OUT);
 	if (!dt->di_np) {
 		dev_err(&pdev->dev, "Can't get encoder%u device node\n", id);
+		goto err_en;
+	}
+
+	if (!of_device_is_available(dt->di_np)) {
+		dev_err(&pdev->dev, "Display interface device node is not available\n");
 		goto err_en;
 	}
 
@@ -645,6 +658,11 @@ static int aicfb_parse_dt_by_fb_id(struct platform_device *pdev, u32 id)
 	dt->panel_np = of_get_remote_by_port_id(dt->di_np, AICFB_PORT_OUT);
 	if (!dt->panel_np) {
 		dev_err(&pdev->dev, "Can't get panel%u device node\n", id);
+		goto err_panel;
+	}
+
+	if (!of_device_is_available(dt->panel_np)) {
+		dev_err(&pdev->dev, "Panel device node is not available\n");
 		goto err_panel;
 	}
 
@@ -1121,7 +1139,7 @@ static int aicfb_bind(struct device *dev)
 	dev_info(dev, "%d allocated for %s, %#llx/%#llx\n",
 		fb_size, fbi->name, (u64)fbi->fb_start, fbi->fb_start_dma);
 
-	aicfb_fb_info_setup(fbd->info[0], fbd);
+	aicfb_fb_info_setup(fbd->info[0], fbd, vm);
 
 	ret = fb_alloc_cmap(&fbd->info[0]->cmap, 256, 0);
 	if (ret < 0) {
@@ -1167,6 +1185,8 @@ static int aicfb_bind(struct device *dev)
 	}
 	dev_info(dev, "loaded to /dev/fb%d <%s>.\n",
 		fbd->info[0]->node, fbd->info[0]->fix.id);
+
+	fbi->fb_dev = dev;
 
 	ret = sysfs_create_group(&dev->kobj, &aic_fb_attr_group);
 	if (ret) {

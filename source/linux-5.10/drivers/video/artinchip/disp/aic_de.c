@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * Copyright (C) 2020-2024 ArtInChip Technology Co., Ltd.
+ * Copyright (C) 2020-2026 ArtInChip Technology Co., Ltd.
  * Authors:  Ning Fang <ning.fang@artinchip.com>
  */
 
@@ -18,6 +18,7 @@
 #include <linux/of_graph.h>
 #include <linux/wait.h>
 #include <linux/slab.h>
+#include <linux/iopoll.h>
 #include <dt-bindings/display/artinchip,aic-disp.h>
 
 #ifdef CONFIG_DMA_SHARED_BUFFER
@@ -32,6 +33,9 @@
 #define MAX_RECT_NUM 4
 #define RECT_NUM_SHIFT 2
 #define CONFIG_NUM   (MAX_LAYER_NUM * MAX_RECT_NUM)
+
+#define DE_DELAY_US	1000
+#define DE_TIMEOUT_US	10000
 
 struct aic_de_dither {
 	unsigned int enable;
@@ -67,6 +71,7 @@ struct aic_de_comp {
 	int vsync_flag;
 	u32 scaler_active;
 	u32 accum_line;
+	u32 layer_mask;
 	wait_queue_head_t vsync_wait;
 	spinlock_t slock;
 	const struct aic_de_configs *config;
@@ -430,6 +435,7 @@ static int aic_de_timing_enable(u32 flags)
 			      comp->dither.blue_bitdepth,
 			      comp->dither.enable);
 
+	de_ui_bg_blending_enable(comp->regs, 0);
 	de_ui_alpha_blending_enable(comp->regs, comp->alpha[1].value,
 				    comp->alpha[1].mode,
 				    comp->alpha[1].enable);
@@ -797,6 +803,7 @@ static int config_ui_layer_rect(struct aic_de_comp *comp,
 	if (is_all_rect_win_disabled(comp, layer_data->layer_id)) {
 		de_set_ui_layer_format(comp->regs, format);
 		de_ui_layer_enable(comp->regs, 1);
+		comp->layer_mask |= BIT(AICFB_LAYER_TYPE_UI);
 	}
 
 	de_ui_layer_set_rect(comp->regs, in_w, in_h, x_offset, y_offset,
@@ -853,16 +860,6 @@ static int config_video_layer(struct aic_de_comp *comp,
 	u32 scaler_w = layer_data->scale_size.width;
 	u32 scaler_h = layer_data->scale_size.height;
 	int color_space = MPP_BUF_COLOR_SPACE_GET(layer_data->buf.flags);
-
-	if (!scaler_w) {
-		scaler_w = in_w;
-		layer_data->scale_size.width = in_w;
-	}
-
-	if (!scaler_h) {
-		scaler_h = in_h;
-		layer_data->scale_size.height = in_h;
-	}
 
 	switch (layer_data->buf.buf_type) {
 #ifdef CONFIG_DMA_SHARED_BUFFER
@@ -1246,6 +1243,16 @@ static int config_video_layer(struct aic_de_comp *comp,
 				       tile_p1_x_offset, tile_p1_y_offset);
 
 	if (scaler_en) {
+		if (!scaler_w) {
+			scaler_w = in_w;
+			layer_data->scale_size.width = in_w;
+		}
+
+		if (!scaler_h) {
+			scaler_h = in_h;
+			layer_data->scale_size.height = in_h;
+		}
+
 		if (need_update_csc(comp, color_space)) {
 			struct aicfb_disp_prop *disp_prop = &comp->disp_prop;
 
@@ -1278,8 +1285,10 @@ static inline int ui_rect_disable(struct aic_de_comp *comp,
 				  u32 layer_id, u32 rect_id)
 {
 	de_ui_layer_rect_enable(comp->regs, rect_id, 0);
-	if (is_all_rect_win_disabled(comp, layer_id))
+	if (is_all_rect_win_disabled(comp, layer_id)) {
 		de_ui_layer_enable(comp->regs, 0);
+		comp->layer_mask &= ~BIT(AICFB_LAYER_TYPE_UI);
+	}
 	return 0;
 }
 
@@ -1307,6 +1316,7 @@ static int update_one_layer_config(struct aic_de_comp *comp,
 					layer_data->rect_id);
 		} else {
 			de_video_layer_enable(comp->regs, 0);
+			comp->layer_mask &= ~BIT(AICFB_LAYER_TYPE_VIDEO);
 		}
 		return 0;
 	}
@@ -1330,6 +1340,7 @@ static int update_one_layer_config(struct aic_de_comp *comp,
 		if (!is_valid_video_size(comp, layer_data)) {
 			comp->layers[index].enable = 0;
 			de_video_layer_enable(comp->regs, 0);
+			comp->layer_mask &= ~BIT(AICFB_LAYER_TYPE_VIDEO);
 			return -EINVAL;
 		}
 
@@ -1337,37 +1348,44 @@ static int update_one_layer_config(struct aic_de_comp *comp,
 		if (ret != 0) {
 			comp->layers[index].enable = 0;
 			de_video_layer_enable(comp->regs, 0);
+			comp->layer_mask &= ~BIT(AICFB_LAYER_TYPE_VIDEO);
 		} else {
 			memcpy(&comp->layers[index], layer_data,
 			       sizeof(struct aicfb_layer_data));
+			comp->layer_mask |= BIT(AICFB_LAYER_TYPE_VIDEO);
 		}
 		return ret;
 	}
 	return 0;
 }
 
-static int aic_de_update_layer_config(struct aicfb_layer_data *layer_data)
+static void aic_de_skip_prefetch_line(struct aic_de_comp *comp)
 {
-	struct aic_de_comp *comp = aic_de_request_drvdata();
-	u32 output_line, lock = 1;
-	unsigned long flags;
-	int ret;
+	u32 flags = BIT(AICFB_LAYER_TYPE_UI) | BIT(AICFB_LAYER_TYPE_VIDEO);
+	u32 output_line, val;
 
-	spin_lock_irqsave(&comp->slock, flags);
+	if ((comp->layer_mask & flags) != flags)
+		/* Skip prefetch line only when both UI and VIDEO layers are enabled */
+		return;
 
 	output_line = de_get_output_line(comp->regs);
 	if (output_line >= comp->accum_line || output_line <= DE_PREFETCH_LINE) {
-		spin_unlock_irqrestore(&comp->slock, flags);
-		aic_delay_ms(1);
-		lock = 0;
+		readl_poll_timeout_atomic(comp->regs + TIMING_OUTPUT_LINE, val,
+				val > DE_PREFETCH_LINE,
+				DE_DELAY_US, DE_DELAY_US);
 	}
+}
+
+static int aic_de_update_layer_config(struct aicfb_layer_data *layer_data)
+{
+	struct aic_de_comp *comp = aic_de_request_drvdata();
+	int ret;
+
+	aic_de_skip_prefetch_line(comp);
 
 	de_config_update_enable(comp->regs, 0);
 	ret = update_one_layer_config(comp, layer_data);
 	de_config_update_enable(comp->regs, 1);
-
-	if (lock)
-		spin_unlock_irqrestore(&comp->slock, flags);
 
 	aic_de_release_drvdata();
 	return ret;

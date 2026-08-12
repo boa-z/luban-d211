@@ -239,6 +239,7 @@ static int aic_dbi_probe(struct udevice *dev)
 
 static const struct udevice_id aic_dbi_match_ids[] = {
 	{ .compatible = "artinchip,aic-dbi-v1.0" },
+	{ .compatible = "artinchip,aic-dbi-v1.2" },
 	{ /* sentinel*/ },
 };
 

@@ -409,6 +409,7 @@ int aicmac_1588_hwtstamp_set(struct net_device *dev, struct ifreq *ifr)
 	if (!ptp_data->hwts_tx_en && !ptp_data->hwts_rx_en) {
 		aicmac_hwtstamp_config_hw_tstamping(ptp_data->ptpaddr, 0);
 	} else {
+		ts_event_en = 0;
 		value = (PTP_TCR_TSENA | PTP_TCR_TSCFUPDT | PTP_TCR_TSCTRLSSR |
 			 tstamp_all | ptp_v2 | ptp_over_ethernet |
 			 ptp_over_ipv6_udp | ptp_over_ipv4_udp | ts_event_en |

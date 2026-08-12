@@ -15,7 +15,11 @@ GMP_DEPENDENCIES = host-m4
 HOST_GMP_DEPENDENCIES = host-m4
 
 # 0001-mpz-inp_raw.c-Avoid-bit-size-overflows.patch
+# 0002-acinclude.m4-Add-parameter-names-in-prototype-for-g.patch (fix GCC 15/C23 compatibility)
 GMP_IGNORE_CVES += CVE-2021-43618
+
+# Need autoreconf to regenerate configure after patching acinclude.m4
+HOST_GMP_AUTORECONF = YES
 
 # GMP doesn't support assembly for coldfire or mips r6 ISA yet
 # Disable for ARM v7m since it has different asm constraints

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2022 Artinchip Technology Co. Ltd
+ * Copyright (C) 2020-2026 ArtInChip Technology Co. Ltd
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -201,6 +201,169 @@ int bs_read(struct bit_stream_parser* p, struct mpp_packet* pkt)
 
     return 0;
 
+}
+
+/* Helper function: read unsigned Exp-Golomb coded value (ue(v)) */
+static int read_uegolomb(const unsigned char* data, int bit_offset, int max_bits)
+{
+	int leading_zero_bits = 0;
+	int bit_pos = bit_offset;
+
+	// Count leading zero bits
+	while (bit_pos < max_bits && ((data[bit_pos / 8] >> (7 - (bit_pos % 8))) & 1) == 0) {
+		leading_zero_bits++;
+		bit_pos++;
+	}
+
+	if (bit_pos >= max_bits) {
+		return -1; // Error: not enough bits
+	}
+
+	// Skip the leading 1 bit
+	bit_pos++;
+
+	// Read the info bits
+	unsigned int code_num = 0;
+	for (int i = 0; i < leading_zero_bits && bit_pos < max_bits; i++) {
+		code_num = (code_num << 1) | ((data[bit_pos / 8] >> (7 - (bit_pos % 8))) & 1);
+		bit_pos++;
+	}
+
+	// ue(v) = 2^leadingZeroBits - 1 + codeNum
+	return (1 << leading_zero_bits) - 1 + code_num;
+}
+
+/* Parse first_mb_in_slice from a slice NALU */
+static int parse_first_mb_in_slice(const unsigned char* nal_data, int nal_size)
+{
+	if (nal_size < 2) {
+		return -1; // Too small to contain slice header
+	}
+
+	unsigned char nal_type = nal_data[0] & 0x1f;
+
+	// Only parse for slice NALUs (type 1-5)
+	if (nal_type < 1 || nal_type > 5) {
+		return -1;
+	}
+
+	// nal_data points to the NAL header byte
+	// Slice header starts immediately after NAL header (1 byte)
+	// first_mb_in_slice is the first ue(v) in the slice header
+	int bit_offset = 8; // Skip 1 byte NAL header
+	int max_bits = nal_size * 8;
+
+	return read_uegolomb(nal_data, bit_offset, max_bits);
+}
+
+/* Check if there is a start code (00 00 01) at position i */
+static int is_startcode(const char* data, int i)
+{
+	return (data[i] == 0 && data[i + 1] == 0 && data[i + 2] == 1);
+}
+
+/* Get start code length: 4 bytes (00 00 00 01) or 3 bytes (00 00 01) */
+static int get_startcode_len(const char* data, int i)
+{
+	if (i > 0 && data[i - 1] == 0)
+		return 4;
+	return 3;
+}
+
+/* Check if the NALU at start code position i is a frame start:
+ * SPS (7), PPS (8), or a VCL slice with first_mb_in_slice == 0 */
+static int is_frame_start_nalu(const char* data, int i, int valid_size)
+{
+	unsigned char nal_type = data[i + 3] & 0x1f;
+
+	if (nal_type == 7 || nal_type == 8)
+		return 1;
+	if (nal_type >= 1 && nal_type <= 5) {
+		int first_mb = parse_first_mb_in_slice((unsigned char*)(data + i + 3),
+						      valid_size - i - 3);
+		logd("NAL type %d, first_mb_in_slice = %d", nal_type, first_mb);
+		return (first_mb == 0);
+	}
+	return 0;
+}
+
+/* Find the next frame-start NALU starting from start_pos.
+ * Return its position, or -1 if not found. */
+static int find_next_frame_start(const char* data, int start_pos, int valid_size)
+{
+	for (int i = start_pos; i < (valid_size - 4); i++) {
+		if (is_startcode(data, i) && is_frame_start_nalu(data, i, valid_size))
+			return i;
+	}
+	return -1;
+}
+
+/* Find frame boundary by parsing first_mb_in_slice in slice headers */
+int bs_prefetch_frame(struct bit_stream_parser* p, struct mpp_packet* pkt)
+{
+	int i = 0;
+	int nStart = 0;
+	int stream_data_len = -1;
+	int ret = 0;
+	char* cur_data_ptr = NULL;
+	int startcode_len = 3;
+
+	if(p->valid_size <= 0) {
+		ret = get_data(p);
+		if(ret == -1) {
+			loge("get data error");
+			return -1;
+		}
+	}
+
+find_startCode:
+
+	cur_data_ptr = p->stream_buf + p->cur_read_pos;
+
+	// Find the first VCL NALU with first_mb_in_slice == 0
+	i = find_next_frame_start(cur_data_ptr, 0, p->valid_size);
+	if (i >= 0) {
+		startcode_len = get_startcode_len(cur_data_ptr, i);
+		p->cur_read_pos += i;
+		nStart = i;
+		if (startcode_len == 4) {
+			p->cur_read_pos -= 1;
+			nStart -= 1;
+		}
+
+		// Find the next frame start
+		i = find_next_frame_start(cur_data_ptr, i + 3, p->valid_size);
+		if (i >= 0) {
+			startcode_len = get_startcode_len(cur_data_ptr, i);
+			if (startcode_len == 4)
+				stream_data_len = i - nStart - 1;
+			else
+				stream_data_len = i - nStart;
+		} else {
+			ret = get_data(p);
+			if(ret == -1)
+				return -1;
+			if(ret == 0) {
+				printf("eos, file_size: %d, cur_read: %d\n", p->file_size, p->cur_read_len);
+				stream_data_len = p->valid_size - nStart;
+				pkt->flag |= PACKET_FLAG_EOS;
+				goto out;
+			}
+
+			goto find_startCode;
+		}
+	} else {
+		ret = get_data(p);
+		if(ret == -1 || ret == 0)
+			return -1;
+
+		goto find_startCode;
+	}
+
+out:
+	pkt->size = stream_data_len;
+	logd("frame packet size = %d", pkt->size);
+	return 0;
 }
 
 

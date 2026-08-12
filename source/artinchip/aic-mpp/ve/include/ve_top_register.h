@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2022 Artinchip Technology Co. Ltd
+ * Copyright (C) 2020-2026 ArtInChip Technology Co. Ltd
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -11,8 +11,12 @@
 #define VE_TOP_REGISTER_H
 
 #include <stdint.h>
-
+#include <unistd.h>
 #include "mpp_log.h"
+
+#ifndef LINUX_VERSION_6
+#define AIC_VE_DRV_V10
+#endif
 /*
  * ( see linux/arch/riscv/include/asm/mmio.h )
  * I/O memory access primitives. Reads are ordered relative to any
@@ -35,11 +39,30 @@
 				__v = (*((volatile uint32_t*)(offset))); __io_ar(__v); __v; })
 #define	write_reg_u32(offset,v)	({ __io_bw(); (*((volatile uint32_t *)(offset)) = (v)); __io_aw(); })
 
+#ifdef AIC_VE_DRV_V10
 #define PNG_REG_OFFSET_ADDR	0xC00
 #define JPG_REG_OFFSET_ADDR	0x2000
 #define PIC_INFO_START_REG	0x1400
 #define PIC_INFO_END_REG	0x167C
-
+#include "avc_register_v1.h"
+#else
+#define PNG_REG_OFFSET_ADDR		0x100
+#define JPG_REG_OFFSET_ADDR		0x200
+#define PIC_INFO_REG_BASE_ADDR		0x400
+#define PIC_INFO_START_REG		0x600
+#define PIC_INFO_END_REG		0xFFC
+#define AVC_TOP_BASE_ADDR		0x1000
+#define AVC_VLD_BASE_ADDR		0x1200
+#define AVC_MB_BASE_ADDR		0x1400
+#define AVC_TQ_BASE_ADDR		0x1600
+#define AVC_MC_BASE_ADDR		0x1800
+#define AVC_DBLK_BASE_ADDR		0x1c00
+#define AVC_ENC_BASE_ADDR		0x1100
+#define AVC_ME_BASE_ADDR		0x1300
+#define AVC_IP_BASE_ADDR		0x1500
+#define AVC_RC_BASE_ADDR		0x1700
+#include "avc_register_v2.h"
+#endif
 /*
 register mapping
  -----------------------------------------
@@ -58,7 +81,7 @@ register mapping
 
 struct reg_ve_rst
 {
-	unsigned rst_avc :2;    // [0]: avc module reset
+	unsigned rst_avc : 2;    // [0]: avc module reset
 	unsigned rst_jpg : 2;
 	unsigned rst_png : 2;
 	unsigned r0 : 2;
@@ -97,6 +120,7 @@ struct reg_ve_rst
 #define FRAME_YADDR_REG(n)	(PIC_INFO_START_REG + 20*(n) + 8)
 #define FRAME_CBADDR_REG(n)	(PIC_INFO_START_REG + 20*(n) + 12)
 #define FRAME_CRADDR_REG(n)	(PIC_INFO_START_REG + 20*(n) + 16)
+#define PIC_INFO_WRITE_END_REG	(PIC_INFO_START_REG+0x1FC)
 
 struct frame_format_reg
 {

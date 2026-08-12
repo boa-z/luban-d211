@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2023 ArtInChip Technology Co. Ltd
+ * Copyright (C) 2020-2025 ArtInChip Technology Co. Ltd
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -19,59 +19,85 @@
 #include "mpp_encoder.h"
 #include "mpp_log.h"
 
-static void print_help(void)
+static void print_help(char *app)
 {
-	printf("Usage: dec_test [OPTIONS] [SLICES PATH]\n\n"
-		"Options:\n"
-		" -i                             input stream file name\n"
-		" -q				 set quality (value range: 0~100)\n"
-		" -w				 width of input yuv data\n"
-		" -g				 height of input yuv data\n"
-		" -h                             help\n\n"
-		"End:\n");
+	printf("Usage: %s [OPTIONS]\n"
+		   "Options:\n"
+		   "  -i\t\tinput stream file name\n"
+		   "  -q\t\tset quality (value range: 0~100)\n"
+		   "  -w\t\twidth of input yuv data\n"
+		   "  -h\t\theight of input yuv data\n"
+		   "  -u\t\tusage\n\n", app);
+}
+
+void gen_out_filename(char *ofile, char *ifile, int size)
+{
+	char *suffix = strrchr(ifile, '.');
+	char temp[128] = "";
+
+	if (!suffix) {
+		snprintf(ofile, size, "%s.jpg", ifile);
+		return;
+	}
+
+	strncpy(temp, ifile, suffix - ifile);
+	snprintf(ofile, size, "%s.jpg", temp);
 }
 
 int main(int argc, char **argv)
 {
 	int i;
 	int opt;
-	char file_name[1024];
+	char ifile_name[128] = "";
+	char ofile_name[128] = "";
 	int quality = 90;
 
 	int width = 176;
 	int height = 144;
 
 	while (1) {
-		opt = getopt(argc, argv, "i:q:w:g:h");
+		opt = getopt(argc, argv, "i:q:w:h:u");
 		if (opt == -1) {
 			break;
 		}
 		switch (opt) {
 		case 'i':
 			logd("file path: %s", optarg);
-			strcpy(file_name, optarg);
+			strncpy(ifile_name, optarg, 128);
 			break;
 		case 'w':
 			width = atoi(optarg);
 			break;
-		case 'g':
+		case 'h':
 			height = atoi(optarg);
 			break;
 		case 'q':
 			quality = atoi(optarg);
 			break;
-		case 'h':
+		case 'u':
 		default:
-			print_help();
+			print_help(argv[0]);
 			return -1;
 		}
 	}
 
-	FILE* fp = fopen(file_name, "rb");
-	int dmabuf_fd[3];
-	unsigned char* vir_addr[3];
 	int size[3] = {width*height, width*height/4, width*height/4};
-	int dma_fd = dmabuf_device_open();
+	unsigned char *vir_addr[3] = {NULL};
+	int dmabuf_fd[3] = {0};
+	int dma_fd = 0;
+	FILE *fp = fopen(ifile_name, "rb");
+
+	if (!fp) {
+		printf("Failed to open(%s)\n", ifile_name);
+		return -1;
+	}
+
+	dma_fd = dmabuf_device_open();
+	if (dma_fd < 0) {
+		printf("Failed to open dmabuf device\n");
+		fclose(fp);
+		return -1;
+	}
 
 	for (i=0; i<3; i++) {
 		dmabuf_fd[i] = dmabuf_alloc(dma_fd, size[i]);
@@ -104,8 +130,14 @@ int main(int argc, char **argv)
 		goto out;
 	}
 
-	logi("jpeg encode len: %d", len);
-	FILE* fp_save = fopen("/save.jpg", "wb");
+	gen_out_filename(ofile_name, ifile_name, sizeof(ofile_name));
+	printf("Input file   : %s\n", ifile_name);
+	printf("Output file  : %s\n", ofile_name);
+	printf("Compress rate: %.1f%% (%d -> %d)\n",
+		   100 * (1.0 - (float)len / (float)(width * height * 1.5)),
+		   (int)(width * height * 1.5), len);
+
+	FILE* fp_save = fopen(ofile_name, "wb");
 	fwrite(jpeg_vir_addr, 1, len, fp_save);
 	fclose(fp_save);
 

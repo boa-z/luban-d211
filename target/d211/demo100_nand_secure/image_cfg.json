@@ -1,0 +1,265 @@
+{
+	"spi-nand": { // Device, The name should be the same with string in image:info:media:type
+		"size": "128m", // Size of SPI NAND
+		"partitions": {
+			"spl":      { "size": "1m" },
+			"uboot":    { "size": "1m" },
+			"userid":   { "size": "256k" },
+			"bbt":      { "size": "256k" },
+			"env":      { "size": "256k" },
+			"env_r":    { "size": "256k" },
+			"falcon":   { "size": "256k" },
+			"logo":     { "size": "768K" },
+			"kernel":   { "size": "12m" },
+			"recovery": { "size": "16m" },
+			"ubiroot":  {
+				"size": "64m",
+				"ubi": { // Volume in UBI device
+					"rootfs": { "size": "-" },
+				},
+			},
+			"ubisystem": {
+				"size": "-",
+				"ubi": { // Volume in UBI device
+					"ota":   { "size": "32m" },
+					"user":   { "size": "-" },
+				},
+			},
+		}
+	},
+	"image": {
+		"info": { // Header information about image
+			"platform": "d211",
+			"product": "demo100_nand_secure",
+			"version": "1.0.0",
+			"media": {
+				"type": "spi-nand",
+				"device_id": 0,
+				"array_organization": [
+				//	{ "page": "4k", "block": "256k" },
+					{ "page": "2k", "block": "128k" },
+				],
+			}
+		},
+		"updater": { // Image writer which is downloaded to RAM by USB
+			"ddr": {
+				"file": "usbupg-ddr-init.aic",
+				"attr": ["required", "run"],
+				"ram": "0x00103000"
+			},
+			"env": {
+				"file": "env.bin",
+				"attr": ["required"],
+				"ram": "0x41000000"
+			},
+			"uboot": {
+				"file": "u-boot.itb",
+				"attr": ["required"],
+				"ram": "0x41100000"
+			},
+			"logo": {
+				"file": "logo.itb",
+				"attr": ["required"],
+				"ram": "0x42400000"
+			},
+			"spl": {
+				"file": "u-boot-spl-dtb.aic",
+				"attr": ["required", "run"],
+				"ram": "0x40000000"
+			},
+		},
+		"target": { // Image components which will be burn to device's partitions
+			"spl": {
+				"file": "u-boot-spl-dtb.aic.enc",
+				"attr": ["mtd", "required"],
+				"part": ["spl"]
+			},
+			"uboot": {
+				"file": "u-boot.itb.enc",
+				"attr": ["mtd", "required"],
+				"part": ["uboot"]
+			},
+			"env": {
+				"file": "env.bin.enc",
+				"attr": ["mtd", "required"],
+				"part": ["env","env_r"]
+			},
+			"logo": {
+				"file": "logo.itb.enc",
+				"attr": ["mtd", "required"],
+				"part": ["logo"]
+			},
+			"kernel": {
+				"file": "kernel.itb.enc",
+				"attr": ["mtd", "required"],
+				"part": ["kernel"]
+			},
+			"recovery": {
+				"file": "recovery.itb.enc",
+				"attr": ["mtd", "required"],
+				"part": ["recovery"]
+			},
+			"rootfs": {
+				"file": "rootfs*.ubifs.enc",
+				"attr": ["ubi", "required"],
+				"part": ["ubiroot:rootfs"]
+			},
+			"ota": {
+				"file": "ota*.ubifs",
+				"attr": ["ubi", "optional"],
+				"part": ["ubisystem:ota"]
+			},
+			"app": {
+				"file": "user*.ubifs",
+				"attr": ["ubi", "optional"],
+				"part": ["ubisystem:user"]
+			},
+		},
+	},
+	"pre-process": { // Pre-proccess to generate image components from raw data
+		"aicimage": { // Create aic boot image
+			"usbupg-ddr-init.aic": { // No loader, only PreBootProgram to initialize DDR
+				"head_ver": "0x00010001",
+				"resource": {
+					"private": "ddr_init.bin",
+					"pubkey": "keys/rsa_public_key.der",
+					"pbp": "d211.pbp",
+				},
+				"encryption": {
+					"algo": "aes-128-cbc",
+					"key": "keys/aes-128-cbc-key.bin",
+					"iv": "keys/aes-128-cbc-iv.bin",
+				},
+				"ssk_derived_key": "true",
+				"signature": {
+					"algo": "rsa,2048",
+					"privkey": "keys/rsa_private_key.der",
+				},
+			},
+			"pbp_ext.aic": {
+				"head_ver": "0x00010001",
+				"resource": {
+					"pbp": "d211.pbp",
+					"pubkey": "keys/rsa_public_key.der",
+					"private": "ddr_init.bin",
+				},
+				"encryption": {
+					"algo": "aes-128-cbc",
+					"key": "keys/aes-128-cbc-key.bin",
+					"iv": "keys/aes-128-cbc-iv.bin",
+				},
+				"ssk_derived_key": "true",
+				"signature": {
+					"algo": "rsa,2048",
+					"privkey": "keys/rsa_private_key.der",
+				},
+				// combine to use with spl.aic
+				"with_ext": "true",
+			},
+			"spl.aic": {
+				"head_ver": "0x00010001",
+				"loader": {
+					"file": "u-boot-spl-dtb.bin",
+					"load address": "0x42000000",
+					"entry point":  "0x42000100", // 256 byte aic header
+				},
+				"resource": {
+					"pubkey": "keys/rsa_public_key.der",
+					"private": "ddr_init.bin",
+				},
+				"encryption": {
+					"algo": "aes-128-cbc",
+					"key": "keys/aes-128-cbc-key.bin",
+					"iv": "keys/aes-128-cbc-iv.bin",
+				},
+				"ssk_derived_key": "true",
+				"signature": {
+					"algo": "rsa,2048",
+					"privkey": "keys/rsa_private_key.der",
+				},
+			},
+		},
+		"concatenate": { // cat files in order
+			"u-boot-spl-dtb.aic": ["pbp_ext.aic", "spl.aic"],
+		},
+		"uboot_env": { // Create env data from txt
+			"env.bin": {
+				"file": "env.txt",
+				"size": "0x4000",
+				"redundant": "enable",
+			},
+		},
+		"itb": { // Create itb image from its
+			"u-boot.itb": {
+				"its": "u-boot.its"
+			},
+			"logo.itb": {
+				"its": "logo.its"
+			},
+			"kernel.itb": {
+				"its": "kernel.its"
+			},
+			"recovery.itb": {
+				"its": "recovery.its"
+			},
+		},
+		"data_crypt": {
+			"u-boot-spl-dtb.aic.enc": {
+				"algo": "spienc-aes-128-ecb",
+				"file": "u-boot-spl-dtb.aic", // File to be encrypted
+				"key": "keys/spi_aes.key", // Keys the same in eFuse
+				"nonce": "keys/spi_nonce.key", // Nonce the same in eFuse
+				"tweak": "0",
+			},
+			"u-boot.itb.enc": {
+				"algo": "spienc-aes-128-ecb",
+				"file": "u-boot.itb", // File to be encrypted
+				"key": "keys/spi_aes.key", // Keys the same in eFuse
+				"nonce": "keys/spi_nonce.key", // Nonce the same in eFuse
+				"tweak": "0",
+			},
+			"env.bin.enc": {
+				"algo": "spienc-aes-128-ecb",
+				"file": "env.bin", // File to be encrypted
+				"key": "keys/spi_aes.key", // Keys the same in eFuse
+				"nonce": "keys/spi_nonce.key", // Nonce the same in eFuse
+				"tweak": "0",
+			},
+			"logo.itb.enc": {
+				"algo": "spienc-aes-128-ecb",
+				"file": "logo.itb", // File to be encrypted
+				"key": "keys/spi_aes.key", // Keys the same in eFuse
+				"nonce": "keys/spi_nonce.key", // Nonce the same in eFuse
+				"tweak": "0",
+			},
+			"kernel.itb.enc": {
+				"algo": "spienc-aes-128-ecb",
+				"file": "kernel.itb", // File to be encrypted
+				"key": "keys/spi_aes.key", // Keys the same in eFuse
+				"nonce": "keys/spi_nonce.key", // Nonce the same in eFuse
+				"tweak": "0",
+			},
+			"recovery.itb.enc": {
+				"algo": "spienc-aes-128-ecb",
+				"file": "recovery.itb", // File to be encrypted
+				"key": "keys/spi_aes.key", // Keys the same in eFuse
+				"nonce": "keys/spi_nonce.key", // Nonce the same in eFuse
+				"tweak": "0",
+			},
+			"rootfs*.ubifs.enc": {
+				"algo": "spienc-aes-128-ecb",
+				"file": "rootfs*.ubifs", // File to be encrypted
+				"key": "keys/spi_aes.key", // Keys the same in eFuse
+				"nonce": "keys/spi_nonce.key", // Nonce the same in eFuse
+				"tweak": "0",
+			},
+			"rootfs*.ubi.enc": {
+				"algo": "spienc-aes-128-ecb",
+				"file": "rootfs*.ubi", // File to be encrypted
+				"key": "keys/spi_aes.key", // Keys the same in eFuse
+				"nonce": "keys/spi_nonce.key", // Nonce the same in eFuse
+				"tweak": "0",
+			},
+		},
+	},
+}

@@ -2,7 +2,7 @@
 /*
  * ADCIM driver of ArtInChip SoC
  *
- * Copyright (C) 2020-2024 ArtInChip Technology Co., Ltd.
+ * Copyright (C) 2020-2026 ArtInChip Technology Co., Ltd.
  * Authors:  Matteo <duanmt@artinchip.com>
  */
 #include <linux/platform_device.h>
@@ -81,6 +81,7 @@ struct adcim_dev {
 	struct clk *clk;
 	struct reset_control *rst;
 	int usr_cnt;
+	u32 ldo_vol;	// LDO reference voltage in mV
 };
 static struct adcim_dev *g_adcim_dev;
 static int g_adcim_caled_param;
@@ -454,6 +455,29 @@ static struct bin_attribute sram_attr = {
 };
 #endif
 
+u32 adcim_get_ldo_voltage(void)
+{
+	return g_adcim_dev->ldo_vol;
+}
+EXPORT_SYMBOL(adcim_get_ldo_voltage);
+
+static void adcim_parse_dt(struct platform_device *pdev)
+{
+	struct adcim_dev *adcim = platform_get_drvdata(pdev);
+	struct device_node *np = pdev->dev.of_node;
+	u32 val = 0;
+
+	adcim->ldo_vol = 3000;
+	if (of_property_read_u32(np, "aic,ldo-vref", &val)) {
+		dev_info(&pdev->dev, "No LDO voltage specified, using default\n");
+		return;
+	}
+	if (val >= 1000 && val <= 3300)
+		adcim->ldo_vol = val;
+	else
+		dev_warn(&pdev->dev, "Ignoring invalid LDO voltage %u\n", val);
+}
+
 static int adcim_probe(struct platform_device *pdev)
 {
 	int ret;
@@ -500,6 +524,7 @@ static int adcim_probe(struct platform_device *pdev)
 	dev_info(&pdev->dev, "Artinchip ADCIM Loaded\n");
 	platform_set_drvdata(pdev, adcim);
 	g_adcim_dev = adcim;
+	adcim_parse_dt(pdev);
 	adcim_set_dcalmask();
 	adcim_get_cali_param();
 	return 0;

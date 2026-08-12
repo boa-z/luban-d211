@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2022 Artinchip Technology Co. Ltd
+ * Copyright (C) 2020-2026 Artinchip Technology Co. Ltd
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -105,6 +105,29 @@ int mpp_buf_alloc(int dma_fd, struct mpp_buf* buf);
  * @buf: mpp_buf
  */
 void mpp_buf_free(struct mpp_buf* buf);
+
+/**
+ * dmabuf_alloc_planar - Allocate planar buffers based on dimensions and format
+ * @dma_fd: File descriptor of the DMA-BUF heap device
+ * @width: Width of the buffer in pixels
+ * @height: Height of the buffer in pixels
+ * @format: Pixel format of the buffer
+ * @stride: Array to store the stride of each plane, 8 byte alignment (output)
+ * @fd: Array to store the DMA-BUF file descriptors for each plane (output)
+ * @phy_addr: Array to store the physical addresses of each plane (output)
+ *
+ * This function allocates a set of planar buffers based on the given width, height,
+ * and pixel format. It determines the number of planes required by the format and
+ * automatically calculates the stride for each plane. The resulting strides, DMA-BUF
+ * file descriptors, and physical addresses are returned through the respective output
+ * arrays. This function also supports allocating buffers in RGB format. The allocated
+ * buffers must be released using dmabuf_free().
+ *
+ * Return: 0 on success, -1 on failure.
+ */
+int dmabuf_alloc_planar(int dma_fd, unsigned int width, unsigned int height,
+			enum mpp_pixel_format format, unsigned int stride[3],
+			int fd[3], unsigned int phy_addr[3]);
 
 #ifdef __cplusplus
 }

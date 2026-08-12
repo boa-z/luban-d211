@@ -15,6 +15,9 @@
 #define TEST_PREFIX	"drivers/dma-buf/udmabuf"
 #define NUM_PAGES       4
 
+int open(const char *pathname, int flags);
+int fcntl(int fd, int cmd, ...);
+
 static int memfd_create(const char *name, unsigned int flags)
 {
 	return syscall(__NR_memfd_create, name, flags);

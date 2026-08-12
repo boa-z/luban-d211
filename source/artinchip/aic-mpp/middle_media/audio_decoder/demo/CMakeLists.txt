@@ -3,7 +3,7 @@ include_directories(../include ../base/include ../../base/include)
 
 add_executable(audio_decoder_test audio_decoder_test.c )
 
-target_link_libraries(audio_decoder_test mpp_base mpp_audio_decoder)
+target_link_libraries(audio_decoder_test mpp_base mm_base  mpp_audio_decoder)
 
 target_link_libraries(audio_decoder_test pthread)
 

@@ -1750,11 +1750,6 @@ void __hci_req_update_adv_data(struct hci_request *req, u8 instance)
 
 		len = create_instance_adv_data(hdev, instance, cp.data);
 
-		/* There's nothing to do if the data hasn't changed */
-		if (hdev->adv_data_len == len &&
-		    memcmp(cp.data, hdev->adv_data, len) == 0)
-			return;
-
 		memcpy(hdev->adv_data, cp.data, sizeof(cp.data));
 		hdev->adv_data_len = len;
 

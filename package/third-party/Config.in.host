@@ -58,4 +58,5 @@ menu "Host utilities"
 	source package/third-party/python3-fdt/Config.in.host
 	source package/third-party/python3-pycryptodomex/Config.in.host
 	source package/third-party/swig/Config.in.host
+	source package/third-party/intltool/Config.in.host
 endmenu

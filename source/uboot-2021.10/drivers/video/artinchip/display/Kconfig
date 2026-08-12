@@ -35,9 +35,8 @@ config VIDEO_ARTINCHIP_MAX_BPP
 	  framebuffer during device-model binding/probing.
 
 config LOGO_IMAGE_SIZE
-	int "logo itb image size (size in Kilo Bytes) in nor"
+	int "logo itb image size (size in Kilo Bytes) in nor or mmc"
 	depends on VIDEO_ARTINCHIP
-	depends on DM_SPI_FLASH
 	default 512
 	help
 	  logo.itb image size.
@@ -50,12 +49,29 @@ config LOGO_PART_OFFSET
 	help
 	  logo partition start offset in nor
 
+config LOGO_ITB_ADDRESS
+	hex "Address where BootROM/updater loads logo.itb (must match image_cfg.json updater.logo.ram)"
+	depends on VIDEO_ARTINCHIP
+	default 0x42400000
+	help
+	  Physical address at which logo.itb is loaded by BootROM or USB updater.
+	  Must match the "ram" field of "logo" in target image_cfg.json "updater" section
+
 config PROGRESS_BAR
 	bool "Support PROGRESS BAR (upgrading from SD card or UDISK)"
 	default n
 	depends on VIDEO_ARTINCHIP
 	help
 		Enable a progress bar during the system boot process, available when burning to SD card or upgrading from UDISK.
+
+config AICUPG_DISP_LOGO_BOOT_DEVICE_SDFAT32
+	bool "Board has BD_SDFAT32 in boot_param (use aic_disp_logo with BD_SDFAT32)"
+	default y
+	depends on VIDEO_ARTINCHIP
+	help
+	  Select this if the board's boot_param.h defines BD_SDFAT32.
+	  Boards without BD_SDFAT32 should leave this unset to use
+	  aic_disp_logo_from_fat() for udisk burn logo display.
 
 config JPEG_LOGO_IMAGE
 	bool "Support JPEG BOOT LOGO"
@@ -99,7 +115,7 @@ config AIC_DISP_MIPI_DBI
 	help
 	  ArtInChip display mipi-dbi support
 
-config AIC_DSI_LEGACY_PACKET_CONFIG
+config AIC_DSI_LEGACY_PACKET
 	bool "enable MIPI-DSI legacy packet config"
 	default n
 	depends on AIC_DISP_MIPI_DSI

@@ -1070,6 +1070,20 @@ config VIDEO_GM7150
 	  This is a Video4Linux2 sensor driver for the GuoTeng
 	  GM7150 video decoder.
 
+config VIDEO_XS9950
+	tristate "XS9950 4-Channel Video Decoder support"
+	depends on I2C && VIDEO_V4L2
+	select MEDIA_CONTROLLER
+	select VIDEO_V4L2_SUBDEV_API
+	select V4L2_FWNODE
+	help
+	  This is a Video4Linux2 sensor driver for the XS9950
+	  4-Channel video decoder. It supports SD CVBS and HD HDCCTV
+	  video input formats with BT656 output.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called xs9950.
+
 config VIDEO_TP2825
 	tristate "TechPoint TP2825x AHD support"
 	depends on I2C && VIDEO_V4L2

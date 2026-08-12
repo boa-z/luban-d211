@@ -412,7 +412,7 @@ config SHA512_HW_ACCEL
 	  hash_lookup_algo() function.
 
 config SHA_PROG_HW_ACCEL
-	bool "Enable Progressive hashing support using hardware"
+	bool "Enable SHA Progressive hashing support using hardware"
 	help
 	  This option enables hardware-acceleration for SHA progressive
 	  hashing.
@@ -437,7 +437,27 @@ config SPL_MD5
 	  in 1991 that produces a 16-byte digest (or checksum) from its input
 	  data. It has a number of vulnerabilities which preclude its use in
 	  security applications, but it can be useful for providing a quick
+
+config MD5_HW_ACCEL
+	bool "Enable hardware acceleration for MD5 hash functions"
+	help
+	  This option enables hardware acceleration for the MD5
+	  hashing algorithms. This affects the 'hash' command and also the
+	  hash_lookup_algo() function.
+
 	  checksum of a block of data.
+
+if MD5_HW_ACCEL
+
+config MD5_PROG_HW_ACCEL
+	bool "Enable MD5 Progressive hashing support using hardware"
+	help
+	  This option enables hardware-acceleration for MD5 progressive
+	  hashing.
+	  Data can be streamed in a block at a time and the hashing is
+	  performed in hardware.
+
+endif
 
 config CRC32C
 	bool

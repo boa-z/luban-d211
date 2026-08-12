@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2024 ArtInChip Technology Co. Ltd
+ * Copyright (C) 2020-2026 ArtInChip Technology Co. Ltd
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -16,6 +16,13 @@ extern "C" {
 
 #include "mpp_dec_type.h"
 
+
+enum stream_command {
+	STREAM_GET_LIVE_STATE = 0,
+	STREAM_GET_LAST_HTTP_ERROR,
+	STREAM_GET_MEASURED_BANDWIDTH,
+};
+
 struct aic_stream {
 	/* read data */
 	s64 (*read)(struct aic_stream *stream, void *buf, s64 len);
@@ -29,6 +36,8 @@ struct aic_stream {
 	s64 (*seek)(struct aic_stream *stream, s64 offset, s32 whence);
 	/* get stream total size */
 	s64 (*size)(struct aic_stream *stream);
+	/* control the stream */
+	s32 (*control)(struct aic_stream *stream, enum stream_command cmd, void *params);
 };
 
 
@@ -136,6 +145,16 @@ struct aic_stream {
 
 #define aic_stream_close(stream)\
 	    ((struct aic_stream*)stream)->close(stream)
+
+#define aic_stream_control(          \
+	    stream,            \
+	    cmd,               \
+	    params)            \
+	    { \
+		    if (((struct aic_stream*)stream)->control) { \
+			    ((struct aic_stream*)stream)->control(stream, cmd, params); \
+		    } \
+	    }
 
 s32 aic_stream_open(char *uri, struct aic_stream **stream, int flags);
 

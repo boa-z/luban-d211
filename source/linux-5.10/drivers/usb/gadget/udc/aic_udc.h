@@ -131,6 +131,8 @@ struct aic_gadget_params {
 	unsigned int			phy_type;
 	unsigned int			phy_ulpi_ddr;
 	unsigned int			phy_utmi_width;
+	unsigned int			phy_txref;
+	unsigned int			phy_txpreempamp;
 };
 
 /* --------- AIC gadget ------------ */
@@ -493,6 +495,11 @@ struct aic_usb_gadget {
 #define PCGCTL_STOPPCLK			BIT(0)
 
 #define UDCVERSION			UDC_REG(0x0FFC)
+#define PHY_TUNE			UDC_REG(0x8018)
+#define PHY_TUNE_TXPREEMPAMP_SHIFT	0
+#define PHY_TUNE_TXPREEMPAMP_MASK	(0x3 << PHY_TUNE_TXPREEMPAMP_SHIFT)
+#define PHY_TUNE_TXREF_SHIFT		8
+#define PHY_TUNE_TXREF_MASK		(0xF << PHY_TUNE_TXREF_SHIFT)
 
 #define EP_FIFO(_a)			UDC_REG(0x1000 + ((_a) * 0x1000))
 

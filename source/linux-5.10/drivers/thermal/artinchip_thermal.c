@@ -2,7 +2,7 @@
 /*
  * Thermal Sensor driver of ArtInChip SoC
  *
- * Copyright (C) 2020-2024 ArtInChip Technology Co., Ltd.
+ * Copyright (C) 2020-2026 ArtInChip Technology Co., Ltd.
  * Authors:  Matteo <duanmt@artinchip.com>
  */
 
@@ -22,6 +22,8 @@
 #define AIC_TSEN_NAME		"aic-tsen"
 #define AIC_TSEN_MAX_CH		4
 #define AIC_TSEN_TIMEOUT	msecs_to_jiffies(10000)
+
+extern u32 adcim_get_ldo_voltage(void);
 
 enum aic_tsen_ch_id {
 	AIC_TSEN_CH_CPU = 0,
@@ -179,6 +181,7 @@ struct aic_tsen_dev {
 	struct aic_tsen_ch chan[AIC_TSEN_MAX_CH];
 	struct aic_tsen_plat_data *data;
 	u32 cell_data[TSEN_NVMEM_CELL_NUM];
+	u32 cali_vol;
 };
 
 static DEFINE_SPINLOCK(user_lock);
@@ -674,9 +677,28 @@ static int tsen_parse_dt(struct aic_tsen_dev *tsen)
 	struct aic_tsen_ch_dat *dat = tsen->data->ch;
 	s32 ret = 0, hta = 0;
 	u32 val = 0, i = 0;
+	u32 vol = 0;
+
+	tsen->cali_vol = 3000;
+	if (of_property_read_u32(np, "aic,calibration-voltage", &val) == 0) {
+		if (val >= 1000 && val <= 3300)
+			tsen->cali_vol = val;
+		else
+			dev_warn(dev, "Ignoring invalid calibration voltage: %u\n", val);
+	}
+
+	vol = adcim_get_ldo_voltage();
+	dev_info(&tsen->pdev->dev, "calibration-voltage: %d, ldo-voltage: %d\n",
+		 tsen->cali_vol, vol);
 
 	for_each_child_of_node(np, child) {
 		struct aic_tsen_ch *chan = &tsen->chan[i];
+
+		if (tsen->cali_vol != vol) {
+			dat[i].offset = (long)dat[i].offset + 749L *
+							((long)tsen->cali_vol - (long)vol);
+			dat[i].slope = (long)vol * (long)dat[i].slope / (long)tsen->cali_vol;
+		}
 
 		chan->available = of_device_is_available(child);
 		if (!chan->available) {
@@ -781,7 +803,7 @@ static int aic_tsen_env_temp_cali(u8 sign_mask, u8 val)
 
 static int aic_tsen_get_nvmem_cell(struct aic_tsen_dev *tsen)
 {
-	int i, ret = 0;
+	int i = 0;
 	size_t len = 0;
 	struct device *dev = &tsen->pdev->dev;
 	char *cell_name[TSEN_NVMEM_CELL_NUM] = {"t0_low", "t1_low", "t0_high",
@@ -795,33 +817,30 @@ static int aic_tsen_get_nvmem_cell(struct aic_tsen_dev *tsen)
 
 		cell = devm_nvmem_cell_get(dev, cell_name[i]);
 		if (IS_ERR(cell)) {
-			dev_info(dev, "Failed to get cell\n");
-			ret = PTR_ERR(cell);
-			return -1;
+			dev_info(dev, "Failed to get cell %s\n", cell_name[i]);
+			return PTR_ERR(cell);
 		}
 
 		data = nvmem_cell_read(cell, &len);
 		if (IS_ERR(data)) {
 			dev_info(dev, "Failed to read cell %s: %ld\n", cell_name[i], PTR_ERR(data));
-			ret = PTR_ERR(data);
-			break;
+			return PTR_ERR(data);
 		}
 
-		if (len != sizeof(int)) {
-			dev_info(dev, "Unexpected data length for cell %s: %zu\n", cell_name[i],
-				 len);
+		if (!len || len > 4) {
+			dev_info(dev, "Invalid length %zu for cell %s\n", len, cell_name[i]);
 			kfree(data);
-			ret = -EINVAL;
-			break;
+			return -EINVAL;
 		}
 
 		tsen->cell_data[i] = *(int *)data;
-		if (tsen->cell_data[i] == 0)
-			dev_info(dev, "Efuse%d didn't burn calibration value\n", i);
+		if ((i != TSEN_THS_ENV_TEMP_LOW) && (i != TSEN_THS_ENV_TEMP_HIGH) &&
+		    (tsen->cell_data[i] == 0))
+			dev_info(dev, "%s is empty in eFuse\n", cell_name[i]);
 
 		kfree(data);
 	}
-	return ret;
+	return 0;
 }
 
 #if 0
@@ -1011,10 +1030,10 @@ static int aic_tsen_probe(struct platform_device *pdev)
 	tsen_enable(tsen->regs, 1);
 	tsen->ch_num = tsen->data->num;
 	tsen->pdev = pdev;
-	tsen_parse_dt(tsen);
 
 	aic_tsen_get_nvmem_cell(tsen);
 	aic_tsen_curve_fitting(tsen);
+	tsen_parse_dt(tsen);
 
 	for (i = 0; i < tsen->ch_num; i++) {
 		struct aic_tsen_ch *chan = &tsen->chan[i];

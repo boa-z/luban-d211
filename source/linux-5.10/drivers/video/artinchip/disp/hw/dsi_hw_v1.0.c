@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * Copyright (C) 2020-2022 ArtInChip Technology Co., Ltd.
+ * Copyright (C) 2020-2026 ArtInChip Technology Co., Ltd.
  * Authors:  matteo <duanmt@artinchip.com>
  */
 
@@ -147,7 +147,7 @@ static void dsi_dphy_cfg_hsfreq(void __iomem *base, ulong mclk)
 	for (i = 0; i < ARRAY_SIZE(hs_clk_div); ++i) {
 		if (hs_clk_div[i].div >= freq_rdata) {
 			value = hs_clk_div[i].value;
-#ifdef AIC_DSI_LEGACY_PACKET_CONFIG
+#ifdef CONFIG_AIC_DSI_LEGACY_PACKET
 			value = value << 1;
 #endif
 			break;
@@ -175,7 +175,7 @@ void dsi_phy_init(void __iomem *base, ulong mclk, u32 lane, enum dsi_mode mode)
 	aic_delay_us(10);
 	reg_set_bit(ANA2, DSI_ANA_CFG2_EN_RESCAL);
 	reg_set_bit(ANA2, DSI_ANA_CFG2_ON_RESCAL);
-	ret = readl_poll_timeout(ANA2, val, val & DSI_ANA_CFG2_RCAL_FLAG,
+	ret = readl_poll_timeout_atomic(ANA2, val, val & DSI_ANA_CFG2_RCAL_FLAG,
 			DSI_DELAY_US, DSI_TIMEOUT_US);
 	if (ret) {
 		pr_err("Timeout during wait rcal flag\n");
@@ -220,7 +220,7 @@ void dsi_hs_clk(void __iomem *base, u32 enable)
 	u32 val;
 
 	if (enable) {
-		ret = readl_poll_timeout(base + DSI_PHY_STA,
+		ret = readl_poll_timeout_atomic(base + DSI_PHY_STA,
 			val, val & DSI_PHY_STA_STOP_STATE_C,
 			DSI_DELAY_US, DSI_TIMEOUT_US);
 		if (ret) {
@@ -233,7 +233,7 @@ void dsi_hs_clk(void __iomem *base, u32 enable)
 	}
 
 	reg_clr_bit(base + DSI_PHY_CFG, DSI_PHY_CFG_HSCLK_REQ);
-	ret =  readl_poll_timeout(base + DSI_PHY_STA,
+	ret =  readl_poll_timeout_atomic(base + DSI_PHY_STA,
 		val, val & DSI_PHY_STA_STOP_STATE_C,
 		DSI_DELAY_US, DSI_TIMEOUT_US);
 	if (ret)
@@ -415,7 +415,7 @@ void dsi_cmd_wr(void __iomem *base, u32 dt, u32 vc, const u8 *data, u32 len)
 			(*(p + i + 3) << 24) | (*(p + i + 2) << 16) |
 			(*(p + i + 1) <<  8) | (*(p + i + 0) << 0));
 
-	ret = readl_poll_timeout(base + DSI_PHY_STA,
+	ret = readl_poll_timeout_atomic(base + DSI_PHY_STA,
 			val, val & DSI_PHY_STA_STOP_STATE_0,
 			DSI_DELAY_US, DSI_TIMEOUT_US);
 	if (ret) {
@@ -426,7 +426,7 @@ void dsi_cmd_wr(void __iomem *base, u32 dt, u32 vc, const u8 *data, u32 len)
 	reg_write(base + DSI_GEN_PH_CFG,
 		(d1 << 16) | (d0 << 8) | (vc << 6) | dt);
 
-	ret = readl_poll_timeout(base + DSI_CMD_PKG_STA,
+	ret = readl_poll_timeout_atomic(base + DSI_CMD_PKG_STA,
 			val, val & DSI_CMD_PKG_STA_PLD_W_EMPTY,
 			DSI_DELAY_US, DSI_TIMEOUT_US);
 	if (ret) {

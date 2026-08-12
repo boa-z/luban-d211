@@ -159,7 +159,7 @@ enum {
 	profile_voice = 6,
 	profile_sink = 7,
 	profile_lea_src = 8,
-	profile_opprx = 9,
+	profile_panrx = 9,
 	profile_lea_snk = 10,
 	profile_a2dpsink = 11,
 	profile_max = 12
@@ -167,6 +167,7 @@ enum {
 
 #define A2DP_SIGNAL	0x01
 #define A2DP_MEDIA	0x02
+#define PAN_RX		0x04
 //profile info data
 typedef struct {
 	struct list_head list;
@@ -196,6 +197,8 @@ typedef struct rtl_hci_conn {
 	uint16_t profile_bitmap;
 	uint16_t profile_status;
 	int8_t profile_refcount[profile_max];
+	u32 panrx_bytes;
+	u32 pantx_bytes;
 } rtk_conn_prof, *prtk_conn_prof;
 
 #ifdef RTB_SOFTWARE_MAILBOX

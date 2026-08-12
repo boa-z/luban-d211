@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0+
 /*
- * Copyright (C) 2021 ArtInChip Technology Co., Ltd
+ * Copyright (C) 2021-2026 ArtInChip Technology Co., Ltd
  */
 
 #include <common.h>
@@ -120,8 +120,8 @@ static int load_from_mmc_partition(int argc, char *const argv[])
 		d = time * 1024 * 1024;
 		speed_int =  n / d;
 		speed_pnt = n * 100 / d - speed_int * 100;
-		pr_info("Read kernel speed (size %lu time %lu ms) %lu.%lu MB/s\n",
-			rdsiz, time, speed_int, speed_pnt);
+		pr_info("Read kernel speed: %lu.%lu MB/s (%lu / %lu ms)\n",
+			speed_int, speed_pnt, rdsiz, time);
 	}
 
 	return 0;
@@ -195,8 +195,8 @@ static int load_from_mtd_partition(int argc, char *const argv[])
 		d = time * 1024 * 1024;
 		speed_int =  n / d;
 		speed_pnt = n * 100 / d - speed_int * 100;
-		pr_info("Read kernel speed (size %lu time %lu ms) %lu.%lu MB/s\n",
-			rdsiz, time, speed_int, speed_pnt);
+		pr_info("Read kernel speed: %lu.%lu MB/s (%lu / %lu ms)\n",
+			speed_int, speed_pnt, rdsiz, time);
 	}
 out:
 	if (cmdbuf)

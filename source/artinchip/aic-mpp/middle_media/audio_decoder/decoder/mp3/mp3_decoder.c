@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2023 ArtInChip Technology Co. Ltd
+ * Copyright (C) 2020-2026 ArtInChip Technology Co. Ltd
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -21,7 +21,7 @@
 #include "audio_decoder.h"
 #include "mad.h"
 
-#define MAD_BUFFER_LEEN (4*1024)
+#define MAD_BUFFER_LEEN (32 * 1024)
 
 struct mp3_audio_decoder {
 	struct aic_audio_decoder decoder;
@@ -108,7 +108,7 @@ static int synth_pcm(struct aic_audio_decoder *decoder,struct mad_synth *synth)
 	nsamples = synth->pcm.length;
 	left_ch = synth->pcm.samples[0];
 	right_ch = synth->pcm.samples[1];
-	frame = audio_fm_decoder_get_frame(mp3_decoder->decoder.fm);
+	frame = audio_fm_dequeue_empty_frame(mp3_decoder->decoder.fm);
 	frame->channels =  mp3_decoder->channels;
 	frame->sample_rate = mp3_decoder->sample_rate;
 	frame->pts = mp3_decoder->curr_packet_info.pts;
@@ -128,7 +128,7 @@ static int synth_pcm(struct aic_audio_decoder *decoder,struct mad_synth *synth)
 			data[pos++] = (sample>>8) & 0xff;
 		}
 	}
-	audio_fm_decoder_put_frame(mp3_decoder->decoder.fm, frame);
+	audio_fm_enqueue_ready_frame(mp3_decoder->decoder.fm, frame);
 	return 0;
 }
 
@@ -200,10 +200,10 @@ int __mp3_decode_frame(struct aic_audio_decoder *decoder)
 			}
 			//Decoding the last frame failed,zero data will be used instead
 			printf("Decoding the last frame failed,zero data will be used instead\n");
-			frame = audio_fm_decoder_get_frame(mp3_decoder->decoder.fm);
+			frame = audio_fm_dequeue_empty_frame(mp3_decoder->decoder.fm);
 			memset(frame->data,0x00,frame->size);
 			frame->flag |= PACKET_FLAG_EOS;
-			audio_fm_decoder_put_frame(mp3_decoder->decoder.fm, frame);
+			audio_fm_enqueue_ready_frame(mp3_decoder->decoder.fm, frame);
 			mp3_decoder->final_frame = 0;
 			return DEC_OK;
 		}
@@ -233,6 +233,17 @@ int __mp3_decode_frame(struct aic_audio_decoder *decoder)
 	if (ret != MAD_ERROR_NONE) {
 		if (mp3_decoder->stream.error != MAD_ERROR_BUFLEN)
 			printf("%s\n",mad_stream_errorstr(&mp3_decoder->stream));
+		if (mp3_decoder->stream.error == MAD_ERROR_LOSTSYNC) {
+			int skip_bytes = 64;
+			while (skip_bytes-- > 0 && mp3_decoder->stream.error == MAD_ERROR_LOSTSYNC) {
+				mad_stream_skip(&mp3_decoder->stream, 1);
+				ret = mad_frame_decode(&mp3_decoder->frame, &mp3_decoder->stream);
+				if (ret == MAD_ERROR_NONE) {
+					logi("Resync success skipping %d bytes\n", 64 - skip_bytes);
+					break;
+				}
+			}
+		}
 		return DEC_NO_RENDER_FRAME;
 	}
 

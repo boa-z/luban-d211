@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 /*
- * Copyright (C) 2021-2025 ArtInChip Technology Co., Ltd.
+ * Copyright (C) 2021-2026 ArtInChip Technology Co., Ltd.
  * Author: Keliang Liu <keliang.liu@artinchip.com>
  */
 #include <stdio.h>
@@ -223,16 +223,19 @@ static int config_device(int fd, int nSpeed, int nBits, int nParity, int nStop)
 	case 'O':
 		newtio.c_cflag |= PARENB;
 		newtio.c_cflag |= PARODD;
-		newtio.c_iflag |= (INPCK | ISTRIP);
+		newtio.c_iflag &= ~ISTRIP;
+		newtio.c_iflag |= INPCK;
 		break;
 	case 'e':
 	case 'E':
-		newtio.c_iflag |= (INPCK | ISTRIP);
+		newtio.c_iflag &= ~ISTRIP;
+		newtio.c_iflag |= INPCK;
 		newtio.c_cflag |= PARENB;
 		newtio.c_cflag &= ~PARODD;
 		break;
 	case 'n':
 	case 'N':
+		newtio.c_iflag &= ~ISTRIP;
 		newtio.c_cflag &= ~PARENB;
 		break;
 	default:

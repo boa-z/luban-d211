@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 /*
- * Copyright (c) 2020 Artinchip Inc.
+ * Copyright (c) 2020-2026 Artinchip Inc.
  */
 #include <linux/clk.h>
 #include <linux/reset.h>
@@ -15,120 +15,120 @@
 #include <sound/soc-dai.h>
 #include <sound/pcm_params.h>
 
-#define I2S_CTL_REG			0x00
-#define I2S_CTL_GEN			BIT(0)
-#define I2S_CTL_RXEN			BIT(1)
-#define I2S_CTL_TXEN			BIT(2)
-#define I2S_CTL_LOOP			BIT(3)
-#define I2S_CTL_MODE_MASK		GENMASK(5, 4)
-#define I2S_CTL_PCM_MODE		(0 << 4)
-#define I2S_CTL_LEFT_MODE		(1 << 4)
-#define I2S_CTL_RIGHT_J_MODE		(2 << 4)
-#define I2S_CTL_OUTMUTE_MASK		BIT(6)
-#define I2S_CTL_DOUT_EN			BIT(8)
-#define I2S_CTL_LRCK_MASK		BIT(17)
-#define I2S_CTL_LRCK_SLAVE		(0 << 17)
-#define I2S_CTL_LRCK_MASTER		(1 << 17)
-#define I2S_CTL_BCLK_MASK		BIT(18)
-#define I2S_CTL_BCLK_SLAVE		(0 << 18)
-#define I2S_CTL_BCLK_MASTER		(1 << 18)
+#define I2S_CTL_REG 0x00
+#define I2S_CTL_GEN BIT(0)
+#define I2S_CTL_RXEN BIT(1)
+#define I2S_CTL_TXEN BIT(2)
+#define I2S_CTL_LOOP BIT(3)
+#define I2S_CTL_MODE_MASK GENMASK(5, 4)
+#define I2S_CTL_PCM_MODE (0 << 4)
+#define I2S_CTL_LEFT_MODE (1 << 4)
+#define I2S_CTL_RIGHT_J_MODE (2 << 4)
+#define I2S_CTL_OUTMUTE_MASK BIT(6)
+#define I2S_CTL_DOUT_EN BIT(8)
+#define I2S_CTL_LRCK_MASK BIT(17)
+#define I2S_CTL_LRCK_SLAVE (0 << 17)
+#define I2S_CTL_LRCK_MASTER (1 << 17)
+#define I2S_CTL_BCLK_MASK BIT(18)
+#define I2S_CTL_BCLK_SLAVE (0 << 18)
+#define I2S_CTL_BCLK_MASTER (1 << 18)
 
-#define I2S_FMT0_REG			(0x04)
-#define I2S_FMT0_SW_MASK		GENMASK(2, 0)
-#define I2S_FMT0_SW(sw)			((sw) << 0)
-#define I2S_FMT0_EDGE_TRANS		BIT(3)
-#define I2S_FMT0_SR_MASK		GENMASK(6, 4)
-#define I2S_FMT0_SR(sr)			((sr) << 4)
-#define I2S_FMT0_BCLK_POL_MASK		BIT(7)
-#define I2S_FMT0_BCLK_POL_NORMAL	(0 << 7)
-#define I2S_FMT0_BCLK_POL_INVERTED	(1 << 7)
-#define I2S_FMT0_LRCK_PERIOD_MASK	GENMASK(17, 8)
-#define I2S_FMT0_LRCK_PERIOD(wid)	((wid) << 8)
-#define I2S_FMT0_LRCK_PERIOD_MAX	(1024)
-#define I2S_FMT0_LRCK_POL_MASK		BIT(19)
-#define I2S_FMT0_LRCK_POL_NORMAL	(0 << 19)
-#define I2S_FMT0_LRCK_POL_INVERTED	(1 << 19)
-#define I2S_FMT0_LRCK_WIDTH		BIT(30)
+#define I2S_FMT0_REG (0x04)
+#define I2S_FMT0_SW_MASK GENMASK(2, 0)
+#define I2S_FMT0_SW(sw) ((sw) << 0)
+#define I2S_FMT0_EDGE_TRANS BIT(3)
+#define I2S_FMT0_SR_MASK GENMASK(6, 4)
+#define I2S_FMT0_SR(sr) ((sr) << 4)
+#define I2S_FMT0_BCLK_POL_MASK BIT(7)
+#define I2S_FMT0_BCLK_POL_NORMAL (0 << 7)
+#define I2S_FMT0_BCLK_POL_INVERTED (1 << 7)
+#define I2S_FMT0_LRCK_PERIOD_MASK GENMASK(17, 8)
+#define I2S_FMT0_LRCK_PERIOD(wid) ((wid) << 8)
+#define I2S_FMT0_LRCK_PERIOD_MAX (1024)
+#define I2S_FMT0_LRCK_POL_MASK BIT(19)
+#define I2S_FMT0_LRCK_POL_NORMAL (0 << 19)
+#define I2S_FMT0_LRCK_POL_INVERTED (1 << 19)
+#define I2S_FMT0_LRCK_WIDTH BIT(30)
 
-#define I2S_FMT1_REG			(0x08)
-#define I2S_FMT1_TX_PDM_MASK		GENMASK(1, 0)
-#define I2S_FMT1_TX_PDM_LINEAR		(0 << 0)
-#define I2S_FMT1_TX_PDM_ULAW		(2 << 0)
-#define I2S_FMT1_TX_PDM_ALAW		(3 << 0)
-#define I2S_FMT1_RX_PDM_MASK		GENMASK(3, 2)
-#define I2S_FMT1_RX_PDM_LINEAR		(0 << 2)
-#define I2S_FMT1_RX_PDM_ULAW		(2 << 2)
-#define I2S_FMT1_RX_PDM_ALAW		(3 << 2)
-#define I2S_FMT1_SEXT_MASK		GENMASK(5, 4)
-#define I2S_FMT1_SEXT_ZERO_LSB		(0 << 4)
-#define I2S_FMT1_SEXT_SE_MSB		(1 << 4)
-#define I2S_FMT1_SEXT_TRANS0		(3 << 4)
-#define I2S_FMT1_TXMLS			BIT(6)
-#define I2S_FMT1_RXMLS			BIT(7)
+#define I2S_FMT1_REG (0x08)
+#define I2S_FMT1_TX_PDM_MASK GENMASK(1, 0)
+#define I2S_FMT1_TX_PDM_LINEAR (0 << 0)
+#define I2S_FMT1_TX_PDM_ULAW (2 << 0)
+#define I2S_FMT1_TX_PDM_ALAW (3 << 0)
+#define I2S_FMT1_RX_PDM_MASK GENMASK(3, 2)
+#define I2S_FMT1_RX_PDM_LINEAR (0 << 2)
+#define I2S_FMT1_RX_PDM_ULAW (2 << 2)
+#define I2S_FMT1_RX_PDM_ALAW (3 << 2)
+#define I2S_FMT1_SEXT_MASK GENMASK(5, 4)
+#define I2S_FMT1_SEXT_ZERO_LSB (0 << 4)
+#define I2S_FMT1_SEXT_SE_MSB (1 << 4)
+#define I2S_FMT1_SEXT_TRANS0 (3 << 4)
+#define I2S_FMT1_TXMLS BIT(6)
+#define I2S_FMT1_RXMLS BIT(7)
 
-#define I2S_ISTA_REG			(0x0c)
-#define I2S_RXFIFO_REG			(0x10)
+#define I2S_ISTA_REG (0x0c)
+#define I2S_RXFIFO_REG (0x10)
 
-#define I2S_FCTL_REG			(0x14)
-#define I2S_FCTL_RXOM_MASK		GENMASK(1, 0)
-#define I2S_FCTL_RXOM(mode)		((mode) << 0)
-#define I2S_FCTL_TXIM			BIT(2)
-#define I2S_FCTL_FRX			BIT(24)
-#define I2S_FCTL_FTX			BIT(25)
+#define I2S_FCTL_REG (0x14)
+#define I2S_FCTL_RXOM_MASK GENMASK(1, 0)
+#define I2S_FCTL_RXOM(mode) ((mode) << 0)
+#define I2S_FCTL_TXIM BIT(2)
+#define I2S_FCTL_FRX BIT(24)
+#define I2S_FCTL_FTX BIT(25)
 
-#define I2S_FSTA_REG			(0x18)
-#define I2S_INT_REG			(0x1c)
-#define I2S_INT_RXDRQ_EN		BIT(3)
-#define I2S_INT_TXDRQ_EN		BIT(7)
+#define I2S_FSTA_REG (0x18)
+#define I2S_INT_REG (0x1c)
+#define I2S_INT_RXDRQ_EN BIT(3)
+#define I2S_INT_TXDRQ_EN BIT(7)
 
-#define I2S_TXFIFO_REG			(0x20)
-#define I2S_CLKD_REG			(0X24)
-#define I2S_CLKD_MCLKDIV_MASK		GENMASK(3, 0)
-#define I2S_CLKD_MCLKDIV(mdiv)  	((mdiv) << 0)
-#define I2S_CLKD_BCLKDIV_MASK		GENMASK(7, 4)
-#define I2S_CLKD_BCLKDIV(bdiv)		((bdiv) << 4)
-#define I2S_CLKD_MCLKO_EN		BIT(8)
+#define I2S_TXFIFO_REG (0x20)
+#define I2S_CLKD_REG (0X24)
+#define I2S_CLKD_MCLKDIV_MASK GENMASK(3, 0)
+#define I2S_CLKD_MCLKDIV(mdiv) ((mdiv) << 0)
+#define I2S_CLKD_BCLKDIV_MASK GENMASK(7, 4)
+#define I2S_CLKD_BCLKDIV(bdiv) ((bdiv) << 4)
+#define I2S_CLKD_MCLKO_EN BIT(8)
 
-#define I2S_TXCNT_REG			(0x28)
-#define I2S_RXCNT_REG			(0x2c)
+#define I2S_TXCNT_REG (0x28)
+#define I2S_RXCNT_REG (0x2c)
 
-#define I2S_CHCFG_REG			(0x30)
-#define I2S_CHCFG_TXSLOTNUM_MASK	GENMASK(3, 0)
-#define I2S_CHCFG_TXSLOTNUM(num)	(((num) - 1) << 0)
-#define I2S_CHCFG_RXSLOTNUM_MASK	GENMASK(7, 4)
-#define I2S_CHCFG_RXSLOTNUM(num)	(((num) - 1) << 4)
+#define I2S_CHCFG_REG (0x30)
+#define I2S_CHCFG_TXSLOTNUM_MASK GENMASK(3, 0)
+#define I2S_CHCFG_TXSLOTNUM(num) (((num)-1) << 0)
+#define I2S_CHCFG_RXSLOTNUM_MASK GENMASK(7, 4)
+#define I2S_CHCFG_RXSLOTNUM(num) (((num)-1) << 4)
 
-#define I2S_TXCHSEL_REG			(0x34)
-#define I2S_TXCHSEL_TXCHEN_MASK		GENMASK(15, 0)
-#define I2S_TXCHSEL_TXCHEN(ch)		((1 << (ch)) - 1)
-#define I2S_TXCHSEL_TXCHSEL_MASK	GENMASK(19, 16)
-#define I2S_TXCHSEL_TXCHSEL(num)	(((num) - 1) << 16)
-#define I2S_TXCHSEL_TXOFFSET_MASK	GENMASK(21, 20)
-#define I2S_TXCHSEL_OFFSET_0		(0 << 20)
-#define I2S_TXCHSEL_OFFSET_1		(1 << 20)
+#define I2S_TXCHSEL_REG (0x34)
+#define I2S_TXCHSEL_TXCHEN_MASK GENMASK(15, 0)
+#define I2S_TXCHSEL_TXCHEN(ch) ((1 << (ch)) - 1)
+#define I2S_TXCHSEL_TXCHSEL_MASK GENMASK(19, 16)
+#define I2S_TXCHSEL_TXCHSEL(num) (((num)-1) << 16)
+#define I2S_TXCHSEL_TXOFFSET_MASK GENMASK(21, 20)
+#define I2S_TXCHSEL_OFFSET_0 (0 << 20)
+#define I2S_TXCHSEL_OFFSET_1 (1 << 20)
 
-#define I2S_TXCHMAP0_REG		(0x44)
-#define I2S_TXCHMAP0_CHMAP_MASK(ch)	GENMASK(((ch) - 8) * 4 + 3, (ch) - 8)
-#define I2S_TXCHMAP0_CHMAP(ch, chmap)	((chmap) << ((ch) - 8) * 4)
+#define I2S_TXCHMAP0_REG (0x44)
+#define I2S_TXCHMAP0_CHMAP_MASK(ch) GENMASK(((ch)-8) * 4 + 3, (ch)-8)
+#define I2S_TXCHMAP0_CHMAP(ch, chmap) ((chmap) << ((ch)-8) * 4)
 
-#define I2S_TXCHMAP1_REG		(0x48)
-#define I2S_TXCHMAP1_CHMAP_MASK(ch)	GENMASK((ch) * 4 + 3, (ch) * 4)
-#define I2S_TXCHMAP1_CHMAP(ch, chmap)	((chmap) << ((ch) * 4))
+#define I2S_TXCHMAP1_REG (0x48)
+#define I2S_TXCHMAP1_CHMAP_MASK(ch) GENMASK((ch)*4 + 3, (ch)*4)
+#define I2S_TXCHMAP1_CHMAP(ch, chmap) ((chmap) << ((ch)*4))
 
-#define I2S_RXCHSEL_REG			(0x64)
-#define I2S_RXCHSEL_RXCHSEL_MASK	GENMASK(19, 16)
-#define I2S_RXCHSEL_RXCHSEL(num)	((num - 1) << 16)
-#define I2S_RXCHSEL_RXOFFSET_MASK	GENMASK(21, 20)
-#define I2S_RXCHSEL_RXOFFSET_0		(0 << 20)
-#define I2S_RXCHSEL_RXOFFSET_1		(1 << 20)
+#define I2S_RXCHSEL_REG (0x64)
+#define I2S_RXCHSEL_RXCHSEL_MASK GENMASK(19, 16)
+#define I2S_RXCHSEL_RXCHSEL(num) ((num - 1) << 16)
+#define I2S_RXCHSEL_RXOFFSET_MASK GENMASK(21, 20)
+#define I2S_RXCHSEL_RXOFFSET_0 (0 << 20)
+#define I2S_RXCHSEL_RXOFFSET_1 (1 << 20)
 
-#define I2S_RXCHMAP0_REG		(0x68)
-#define I2S_RXCHMAP0_CHMAP_MASK(ch)	GENMASK(((ch) - 8) * 4 + 3, (ch) - 8)
-#define I2S_RXCHMAP0_CHMAP(ch, chmap)	((chmap) << ((ch) - 8) * 4)
+#define I2S_RXCHMAP0_REG (0x68)
+#define I2S_RXCHMAP0_CHMAP_MASK(ch) GENMASK(((ch)-8) * 4 + 3, (ch)-8)
+#define I2S_RXCHMAP0_CHMAP(ch, chmap) ((chmap) << ((ch)-8) * 4)
 
-#define I2S_RXCHMAP1_REG		(0x6C)
-#define I2S_RXCHMAP1_CHMAP_MASK(ch)	GENMASK((ch) * 4 + 3, (ch) * 4)
-#define I2S_RXCHMAP1_CHMAP(ch, chmap)	((chmap) << ((ch) * 4))
+#define I2S_RXCHMAP1_REG (0x6C)
+#define I2S_RXCHMAP1_CHMAP_MASK(ch) GENMASK((ch)*4 + 3, (ch)*4)
+#define I2S_RXCHMAP1_CHMAP(ch, chmap) ((chmap) << ((ch)*4))
 
 struct aic_i2s {
 	struct clk *clk;
@@ -142,6 +142,7 @@ struct aic_i2s {
 	unsigned int format;
 	unsigned int slots;
 	unsigned int slot_width;
+	bool loopback_enabled;
 };
 
 struct aic_i2s_clk_div {
@@ -150,63 +151,54 @@ struct aic_i2s_clk_div {
 };
 
 static const struct aic_i2s_clk_div i2s_bmclk_div[] = {
-		{ .div = 1,   .val = 1 },
-		{ .div = 2,   .val = 2 },
-		{ .div = 4,   .val = 3 },
-		{ .div = 6,   .val = 4 },
-		{ .div = 8,   .val = 5 },
-		{ .div = 12,  .val = 6 },
-		{ .div = 16,  .val = 7 },
-		{ .div = 24,  .val = 8 },
-		{ .div = 32,  .val = 9 },
-		{ .div = 48,  .val = 10 },
-		{ .div = 64,  .val = 11 },
-		{ .div = 96,  .val = 12 },
-		{ .div = 128, .val = 13 },
-		{ .div = 176, .val = 14 },
-		{ .div = 192, .val = 15 },
+	{ .div = 1, .val = 1 },	   { .div = 2, .val = 2 },
+	{ .div = 4, .val = 3 },	   { .div = 6, .val = 4 },
+	{ .div = 8, .val = 5 },	   { .div = 12, .val = 6 },
+	{ .div = 16, .val = 7 },   { .div = 24, .val = 8 },
+	{ .div = 32, .val = 9 },   { .div = 48, .val = 10 },
+	{ .div = 64, .val = 11 },  { .div = 96, .val = 12 },
+	{ .div = 128, .val = 13 }, { .div = 176, .val = 14 },
+	{ .div = 192, .val = 15 },
 };
 
-static void aic_set_lrck_period(struct aic_i2s *i2s,
-					unsigned int ratio)
+static void aic_set_lrck_period(struct aic_i2s *i2s, unsigned int ratio)
 {
 	switch (i2s->format & SND_SOC_DAIFMT_FORMAT_MASK) {
 	case SND_SOC_DAI_FORMAT_I2S:
 	case SND_SOC_DAI_FORMAT_LEFT_J:
 	case SND_SOC_DAI_FORMAT_RIGHT_J:
 		regmap_update_bits(i2s->regmap, I2S_FMT0_REG,
-					I2S_FMT0_LRCK_PERIOD_MASK,
-					I2S_FMT0_LRCK_PERIOD(ratio / 2 -1));
+				   I2S_FMT0_LRCK_PERIOD_MASK,
+				   I2S_FMT0_LRCK_PERIOD(ratio / 2 - 1));
 		break;
 	case SND_SOC_DAI_FORMAT_DSP_A:
 		regmap_update_bits(i2s->regmap, I2S_FMT0_REG,
-					I2S_FMT0_LRCK_PERIOD_MASK,
-					I2S_FMT0_LRCK_PERIOD(ratio - 1));
+				   I2S_FMT0_LRCK_PERIOD_MASK,
+				   I2S_FMT0_LRCK_PERIOD(ratio - 1));
 		regmap_update_bits(i2s->regmap, I2S_FMT0_REG,
-					I2S_FMT0_LRCK_POL_MASK,
-					I2S_FMT0_LRCK_POL_MASK);
+				   I2S_FMT0_LRCK_POL_MASK,
+				   I2S_FMT0_LRCK_POL_MASK);
 		break;
 	case SND_SOC_DAI_FORMAT_DSP_B:
 		regmap_update_bits(i2s->regmap, I2S_FMT0_REG,
-					I2S_FMT0_LRCK_WIDTH,
-					I2S_FMT0_LRCK_WIDTH);
+				   I2S_FMT0_LRCK_WIDTH, I2S_FMT0_LRCK_WIDTH);
 		regmap_update_bits(i2s->regmap, I2S_FMT0_REG,
-					I2S_FMT0_LRCK_POL_MASK,
-					I2S_FMT0_LRCK_POL_MASK);
+				   I2S_FMT0_LRCK_POL_MASK,
+				   I2S_FMT0_LRCK_POL_MASK);
 		regmap_update_bits(i2s->regmap, I2S_FMT0_REG,
-					I2S_FMT0_LRCK_PERIOD_MASK,
-					I2S_FMT0_LRCK_PERIOD(ratio - 1));
+				   I2S_FMT0_LRCK_PERIOD_MASK,
+				   I2S_FMT0_LRCK_PERIOD(ratio - 1));
 		break;
-	default:	/* I2S default Mode is PCM mode */
+	default: /* I2S default Mode is PCM mode */
 		regmap_update_bits(i2s->regmap, I2S_FMT0_REG,
-					I2S_FMT0_LRCK_PERIOD_MASK,
-					I2S_FMT0_LRCK_PERIOD(ratio - 1));
+				   I2S_FMT0_LRCK_PERIOD_MASK,
+				   I2S_FMT0_LRCK_PERIOD(ratio - 1));
 		break;
 	}
 }
 
 static int aic_i2s_set_sysclk(struct snd_soc_dai *dai, int clk_id,
-					unsigned int freq, int dir)
+			      unsigned int freq, int dir)
 {
 	struct aic_i2s *i2s = snd_soc_dai_get_drvdata(dai);
 
@@ -217,8 +209,7 @@ static int aic_i2s_set_sysclk(struct snd_soc_dai *dai, int clk_id,
 	return 0;
 }
 
-static int aic_i2s_set_bclk_ratio(struct snd_soc_dai *dai,
-					unsigned int ratio)
+static int aic_i2s_set_bclk_ratio(struct snd_soc_dai *dai, unsigned int ratio)
 {
 	struct aic_i2s *i2s = snd_soc_dai_get_drvdata(dai);
 
@@ -256,7 +247,7 @@ static int aic_i2s_set_fmt(struct snd_soc_dai *dai, unsigned int fmt)
 	}
 
 	regmap_update_bits(i2s->regmap, I2S_CTL_REG,
-				I2S_CTL_LRCK_MASK | I2S_CTL_BCLK_MASK, val);
+			   I2S_CTL_LRCK_MASK | I2S_CTL_BCLK_MASK, val);
 
 	/* Set I2S BCLK and LRCK polarity */
 	switch (fmt & SND_SOC_DAIFMT_INV_MASK) {
@@ -278,8 +269,8 @@ static int aic_i2s_set_fmt(struct snd_soc_dai *dai, unsigned int fmt)
 	}
 
 	regmap_update_bits(i2s->regmap, I2S_FMT0_REG,
-			I2S_FMT0_BCLK_POL_MASK | I2S_FMT0_LRCK_POL_MASK,
-			val);
+			   I2S_FMT0_BCLK_POL_MASK | I2S_FMT0_LRCK_POL_MASK,
+			   val);
 
 	/* Set Transfer Mode selection */
 	switch (fmt & SND_SOC_DAIFMT_FORMAT_MASK) {
@@ -299,15 +290,13 @@ static int aic_i2s_set_fmt(struct snd_soc_dai *dai, unsigned int fmt)
 		return -EINVAL;
 	}
 
-	regmap_update_bits(i2s->regmap, I2S_CTL_REG,
-					   I2S_CTL_MODE_MASK, val);
+	regmap_update_bits(i2s->regmap, I2S_CTL_REG, I2S_CTL_MODE_MASK, val);
 	i2s->format = fmt;
 	return 0;
 }
 
-static int aic_i2s_set_tdm_slot(struct snd_soc_dai *dai,
-				unsigned int tx_mask, unsigned int rx_mask,
-				int slots, int slot_width)
+static int aic_i2s_set_tdm_slot(struct snd_soc_dai *dai, unsigned int tx_mask,
+				unsigned int rx_mask, int slots, int slot_width)
 {
 	struct aic_i2s *i2s = snd_soc_dai_get_drvdata(dai);
 
@@ -330,7 +319,7 @@ static int aic_i2s_set_tdm_slot(struct snd_soc_dai *dai,
 }
 
 static int aic_i2s_set_chan_cfg(const struct aic_i2s *i2s,
-					const struct snd_pcm_hw_params *params)
+				const struct snd_pcm_hw_params *params)
 {
 	unsigned int channels = params_channels(params);
 	u32 val = 0;
@@ -341,18 +330,16 @@ static int aic_i2s_set_chan_cfg(const struct aic_i2s *i2s,
 	regmap_write(i2s->regmap, I2S_RXCHMAP1_REG, 0x76543210);
 
 	/* Select channels number */
-	regmap_update_bits(i2s->regmap, I2S_CHCFG_REG,
-					   I2S_CHCFG_TXSLOTNUM_MASK,
-					   I2S_CHCFG_TXSLOTNUM(channels));
-	regmap_update_bits(i2s->regmap, I2S_CHCFG_REG,
-					   I2S_CHCFG_RXSLOTNUM_MASK,
-					   I2S_CHCFG_RXSLOTNUM(channels));
+	regmap_update_bits(i2s->regmap, I2S_CHCFG_REG, I2S_CHCFG_TXSLOTNUM_MASK,
+			   I2S_CHCFG_TXSLOTNUM(channels));
+	regmap_update_bits(i2s->regmap, I2S_CHCFG_REG, I2S_CHCFG_RXSLOTNUM_MASK,
+			   I2S_CHCFG_RXSLOTNUM(channels));
 	regmap_update_bits(i2s->regmap, I2S_TXCHSEL_REG,
-					   I2S_TXCHSEL_TXCHSEL_MASK,
-					   I2S_TXCHSEL_TXCHSEL(channels));
+			   I2S_TXCHSEL_TXCHSEL_MASK,
+			   I2S_TXCHSEL_TXCHSEL(channels));
 	regmap_update_bits(i2s->regmap, I2S_RXCHSEL_REG,
-					   I2S_RXCHSEL_RXCHSEL_MASK,
-					   I2S_RXCHSEL_RXCHSEL(channels));
+			   I2S_RXCHSEL_RXCHSEL_MASK,
+			   I2S_RXCHSEL_RXCHSEL(channels));
 
 	/* Set channel offset */
 	switch (i2s->format & SND_SOC_DAIFMT_FORMAT_MASK) {
@@ -371,14 +358,14 @@ static int aic_i2s_set_chan_cfg(const struct aic_i2s *i2s,
 
 	/* Setting offset to select transfer mode */
 	regmap_update_bits(i2s->regmap, I2S_TXCHSEL_REG,
-					I2S_TXCHSEL_TXOFFSET_MASK, val);
+			   I2S_TXCHSEL_TXOFFSET_MASK, val);
 	regmap_update_bits(i2s->regmap, I2S_RXCHSEL_REG,
-					I2S_RXCHSEL_RXOFFSET_MASK, val);
+			   I2S_RXCHSEL_RXOFFSET_MASK, val);
 
 	/* Enable TX channel */
 	regmap_update_bits(i2s->regmap, I2S_TXCHSEL_REG,
-						I2S_TXCHSEL_TXCHEN_MASK,
-						I2S_TXCHSEL_TXCHEN(channels));
+			   I2S_TXCHSEL_TXCHEN_MASK,
+			   I2S_TXCHSEL_TXCHEN(channels));
 
 	return 0;
 }
@@ -440,10 +427,8 @@ static int aic_i2s_get_mclk_div(struct aic_i2s *i2s,
 	return -EINVAL;
 }
 
-static int aic_i2s_set_clk(struct snd_soc_dai *dai,
-				unsigned int sample_rate,
-				unsigned int slots,
-				unsigned int slot_width)
+static int aic_i2s_set_clk(struct snd_soc_dai *dai, unsigned int sample_rate,
+			   unsigned int slots, unsigned int slot_width)
 {
 	struct aic_i2s *i2s = snd_soc_dai_get_drvdata(dai);
 	unsigned int clk_rate, bclk_div, mclk_div;
@@ -498,11 +483,11 @@ static int aic_i2s_set_clk(struct snd_soc_dai *dai,
 
 	/* Set bclk div */
 	if (i2s->bclk_ratio)
-		bclk_div = aic_i2s_get_bclk_div(i2s, clk_rate,
-					sample_rate, i2s->bclk_ratio);
+		bclk_div = aic_i2s_get_bclk_div(i2s, clk_rate, sample_rate,
+						i2s->bclk_ratio);
 	else
-		bclk_div = aic_i2s_get_bclk_div(i2s, clk_rate,
-					sample_rate, slots * slot_width);
+		bclk_div = aic_i2s_get_bclk_div(i2s, clk_rate, sample_rate,
+						slots * slot_width);
 
 	if (bclk_div < 0) {
 		dev_err(dai->dev, "Unsupported BCLK divider\n");
@@ -516,16 +501,17 @@ static int aic_i2s_set_clk(struct snd_soc_dai *dai,
 		return -EINVAL;
 	}
 
-	regmap_update_bits(i2s->regmap, I2S_CLKD_REG,
-			I2S_CLKD_BCLKDIV_MASK, I2S_CLKD_BCLKDIV(bclk_div));
-	regmap_update_bits(i2s->regmap, I2S_CLKD_REG,
-			I2S_CLKD_MCLKDIV_MASK, I2S_CLKD_MCLKDIV(mclk_div));
+	regmap_update_bits(i2s->regmap, I2S_CLKD_REG, I2S_CLKD_BCLKDIV_MASK,
+			   I2S_CLKD_BCLKDIV(bclk_div));
+	regmap_update_bits(i2s->regmap, I2S_CLKD_REG, I2S_CLKD_MCLKDIV_MASK,
+			   I2S_CLKD_MCLKDIV(mclk_div));
 
 	return 0;
 }
 
 static int aic_i2s_hw_params(struct snd_pcm_substream *substream,
-		struct snd_pcm_hw_params *params, struct snd_soc_dai *dai)
+			     struct snd_pcm_hw_params *params,
+			     struct snd_soc_dai *dai)
 {
 	struct aic_i2s *i2s = snd_soc_dai_get_drvdata(dai);
 	unsigned int word_size = params_width(params);
@@ -558,7 +544,7 @@ static int aic_i2s_hw_params(struct snd_pcm_substream *substream,
 		break;
 	default:
 		dev_err(dai->dev, "Unsupported physical sample width: %d\n",
-				params_physical_width(params));
+			params_physical_width(params));
 		return -EINVAL;
 	}
 	i2s->playback_dma_data.addr_width = width;
@@ -579,10 +565,10 @@ static int aic_i2s_hw_params(struct snd_pcm_substream *substream,
 	if (sw < 0)
 		return -EINVAL;
 
-	regmap_update_bits(i2s->regmap, I2S_FMT0_REG,
-					I2S_FMT0_SR_MASK, I2S_FMT0_SR(sr));
-	regmap_update_bits(i2s->regmap, I2S_FMT0_REG,
-					I2S_FMT0_SW_MASK, I2S_FMT0_SW(sw));
+	regmap_update_bits(i2s->regmap, I2S_FMT0_REG, I2S_FMT0_SR_MASK,
+			   I2S_FMT0_SR(sr));
+	regmap_update_bits(i2s->regmap, I2S_FMT0_REG, I2S_FMT0_SW_MASK,
+			   I2S_FMT0_SW(sw));
 
 	/* Set bclk, mclk and PLL_Audio clock */
 	ret = aic_i2s_set_clk(dai, params_rate(params), slots, slot_width);
@@ -597,34 +583,34 @@ static int aic_i2s_hw_params(struct snd_pcm_substream *substream,
 static void aic_i2s_start_capture(struct aic_i2s *i2s)
 {
 	/* Flush RX FIFO */
-	regmap_update_bits(i2s->regmap, I2S_FCTL_REG,
-					I2S_FCTL_FRX, I2S_FCTL_FRX);
+	regmap_update_bits(i2s->regmap, I2S_FCTL_REG, I2S_FCTL_FRX,
+			   I2S_FCTL_FRX);
 	/* Clear RX counter */
 	regmap_write(i2s->regmap, I2S_RXCNT_REG, 0);
 	/* Enable RX block */
-	regmap_update_bits(i2s->regmap, I2S_CTL_REG,
-					I2S_CTL_RXEN, I2S_CTL_RXEN);
+	regmap_update_bits(i2s->regmap, I2S_CTL_REG, I2S_CTL_RXEN,
+			   I2S_CTL_RXEN);
 	/* Enable RX DRQ */
-	regmap_update_bits(i2s->regmap, I2S_INT_REG,
-					I2S_INT_RXDRQ_EN, I2S_INT_RXDRQ_EN);
+	regmap_update_bits(i2s->regmap, I2S_INT_REG, I2S_INT_RXDRQ_EN,
+			   I2S_INT_RXDRQ_EN);
 }
 
 static void aic_i2s_start_playback(struct aic_i2s *i2s)
 {
 	/* Flush TX FIFO */
-	regmap_update_bits(i2s->regmap, I2S_FCTL_REG,
-					I2S_FCTL_FTX, I2S_FCTL_FTX);
+	regmap_update_bits(i2s->regmap, I2S_FCTL_REG, I2S_FCTL_FTX,
+			   I2S_FCTL_FTX);
 	/* Clear TX counter */
 	regmap_write(i2s->regmap, I2S_TXCNT_REG, 0);
 	/* Enable TX block */
-	regmap_update_bits(i2s->regmap, I2S_CTL_REG,
-					I2S_CTL_TXEN, I2S_CTL_TXEN);
+	regmap_update_bits(i2s->regmap, I2S_CTL_REG, I2S_CTL_TXEN,
+			   I2S_CTL_TXEN);
 	/* Enable TX DRQ */
-	regmap_update_bits(i2s->regmap, I2S_INT_REG,
-					I2S_INT_TXDRQ_EN, I2S_INT_TXDRQ_EN);
+	regmap_update_bits(i2s->regmap, I2S_INT_REG, I2S_INT_TXDRQ_EN,
+			   I2S_INT_TXDRQ_EN);
 	/* Enable DOUT */
-	regmap_update_bits(i2s->regmap, I2S_CTL_REG,
-					I2S_CTL_DOUT_EN, I2S_CTL_DOUT_EN);
+	regmap_update_bits(i2s->regmap, I2S_CTL_REG, I2S_CTL_DOUT_EN,
+			   I2S_CTL_DOUT_EN);
 }
 
 static void aic_i2s_stop_capture(struct aic_i2s *i2s)
@@ -646,7 +632,7 @@ static void aic_i2s_stop_playback(struct aic_i2s *i2s)
 }
 
 static int aic_i2s_trigger(struct snd_pcm_substream *substream, int cmd,
-				    struct snd_soc_dai *dai)
+			   struct snd_soc_dai *dai)
 {
 	struct aic_i2s *i2s = snd_soc_dai_get_drvdata(dai);
 
@@ -683,36 +669,40 @@ static int aic_i2s_startup(struct snd_pcm_substream *substream,
 	 * the DMA transfer requested.
 	 */
 	if (of_device_is_compatible(dai->dev->of_node,
-		"artinchip,aic-i2s-v1.0")) {
-		ret = snd_pcm_hw_constraint_step(substream->runtime, 0,
-					SNDRV_PCM_HW_PARAM_PERIOD_BYTES, 8);
+				    "artinchip,aic-i2s-v1.0")) {
+		ret = snd_pcm_hw_constraint_step(
+			substream->runtime, 0, SNDRV_PCM_HW_PARAM_PERIOD_BYTES,
+			8);
 		if (ret < 0) {
-			dev_err(dai->dev,
-				"Could not apply period step: %d\n", ret);
+			dev_err(dai->dev, "Could not apply period step: %d\n",
+				ret);
 			return ret;
 		}
 
-		ret = snd_pcm_hw_constraint_step(substream->runtime, 0,
-					SNDRV_PCM_HW_PARAM_BUFFER_BYTES, 8);
+		ret = snd_pcm_hw_constraint_step(
+			substream->runtime, 0, SNDRV_PCM_HW_PARAM_BUFFER_BYTES,
+			8);
 		if (ret < 0) {
-			dev_err(dai->dev,
-				"Could not apply buffer step: %d\n", ret);
+			dev_err(dai->dev, "Could not apply buffer step: %d\n",
+				ret);
 			return ret;
 		}
 	} else {
-		ret = snd_pcm_hw_constraint_step(substream->runtime, 0,
-					SNDRV_PCM_HW_PARAM_PERIOD_BYTES, 128);
+		ret = snd_pcm_hw_constraint_step(
+			substream->runtime, 0, SNDRV_PCM_HW_PARAM_PERIOD_BYTES,
+			128);
 		if (ret < 0) {
-			dev_err(dai->dev,
-				"Could not apply period step: %d\n", ret);
+			dev_err(dai->dev, "Could not apply period step: %d\n",
+				ret);
 			return ret;
 		}
 
-		ret = snd_pcm_hw_constraint_step(substream->runtime, 0,
-					SNDRV_PCM_HW_PARAM_BUFFER_BYTES, 128);
+		ret = snd_pcm_hw_constraint_step(
+			substream->runtime, 0, SNDRV_PCM_HW_PARAM_BUFFER_BYTES,
+			128);
 		if (ret < 0) {
-			dev_err(dai->dev,
-				"Could not apply buffer step: %d\n", ret);
+			dev_err(dai->dev, "Could not apply buffer step: %d\n",
+				ret);
 			return ret;
 		}
 	}
@@ -735,7 +725,7 @@ static int aic_i2s_dai_probe(struct snd_soc_dai *dai)
 	struct aic_i2s *i2s = snd_soc_dai_get_drvdata(dai);
 
 	snd_soc_dai_init_dma_data(dai, &i2s->playback_dma_data,
-					&i2s->capture_dma_data);
+				  &i2s->capture_dma_data);
 
 	snd_soc_dai_set_drvdata(dai, i2s);
 	return 0;
@@ -762,19 +752,69 @@ static struct snd_soc_dai_driver aic_i2s_dai = {
 	.ops = &aic_i2s_dai_ops,
 };
 
+static int aic_i2s_loopback_info(struct snd_kcontrol *kcontrol,
+				 struct snd_ctl_elem_info *uinfo)
+{
+	uinfo->type = SNDRV_CTL_ELEM_TYPE_BOOLEAN;
+	uinfo->count = 1;
+	uinfo->value.integer.min = 0;
+	uinfo->value.integer.max = 1;
+	return 0;
+}
+
+static int aic_i2s_loopback_get(struct snd_kcontrol *kcontrol,
+				struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_soc_component *comp = snd_kcontrol_chip(kcontrol);
+	struct aic_i2s *i2s = snd_soc_component_get_drvdata(comp);
+
+	ucontrol->value.integer.value[0] = i2s->loopback_enabled ? 1 : 0;
+	return 0;
+}
+
+static int aic_i2s_loopback_put(struct snd_kcontrol *kcontrol,
+				struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_soc_component *comp = snd_kcontrol_chip(kcontrol);
+	struct aic_i2s *i2s = snd_soc_component_get_drvdata(comp);
+	bool enable = !!ucontrol->value.integer.value[0];
+
+	if (i2s->loopback_enabled == enable)
+		return 0;
+
+	i2s->loopback_enabled = enable;
+	regmap_update_bits(i2s->regmap, I2S_CTL_REG, I2S_CTL_LOOP,
+			   enable ? I2S_CTL_LOOP : 0);
+	dev_dbg(comp->dev, "I2S loopback %s\n",
+		enable ? "enabled" : "disabled");
+	return 1;
+}
+
+static const struct snd_kcontrol_new aic_i2s_controls[] = {
+	{
+		.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
+		.name = "Loopback Switch",
+		.info = aic_i2s_loopback_info,
+		.get = aic_i2s_loopback_get,
+		.put = aic_i2s_loopback_put,
+	},
+};
+
 static const struct snd_soc_component_driver aic_i2s_component = {
 	.name = "aic_i2s_comp",
+	.controls = aic_i2s_controls,
+	.num_controls = ARRAY_SIZE(aic_i2s_controls),
 };
 
 static const struct snd_pcm_hardware aic_i2s_pcm_hardware = {
-	.info			= SNDRV_PCM_INFO_MMAP | SNDRV_PCM_INFO_MMAP_VALID |
-					SNDRV_PCM_INFO_INTERLEAVED,
-	.buffer_bytes_max	= 128 * 1024,
-	.period_bytes_max	= 64 * 1024,
-	.period_bytes_min	= 256,
-	.periods_max		= 255,
-	.periods_min		= 2,
-	.fifo_size		= 0,
+	.info = SNDRV_PCM_INFO_MMAP | SNDRV_PCM_INFO_MMAP_VALID |
+		SNDRV_PCM_INFO_INTERLEAVED,
+	.buffer_bytes_max = 128 * 1024,
+	.period_bytes_max = 64 * 1024,
+	.period_bytes_min = 256,
+	.periods_max = 255,
+	.periods_min = 2,
+	.fifo_size = 0,
 };
 
 static const struct snd_dmaengine_pcm_config aic_i2s_dmaengine_pcm_config = {
@@ -811,6 +851,7 @@ static bool aic_i2s_volatile_reg(struct device *dev, unsigned int reg)
 	case I2S_ISTA_REG:
 	case I2S_TXCNT_REG:
 	case I2S_RXCNT_REG:
+	case I2S_FCTL_REG:
 		return true;
 	default:
 		return false;
@@ -818,20 +859,13 @@ static bool aic_i2s_volatile_reg(struct device *dev, unsigned int reg)
 }
 
 static const struct reg_default aic_i2s_reg_default[] = {
-	{ I2S_CTL_REG, 0x00060000 },
-	{ I2S_FMT0_REG, 0x00000033 },
-	{ I2S_FMT1_REG, 0x00000030 },
-	{ I2S_ISTA_REG, 0x00000010 },
-	{ I2S_FCTL_REG, 0x000400f0 },
-	{ I2S_INT_REG, 0x00000000 },
-	{ I2S_CLKD_REG, 0x00000000 },
-	{ I2S_CHCFG_REG, 0x00000000 },
-	{ I2S_TXCHSEL_REG, 0x00000000 },
-	{ I2S_TXCHMAP0_REG, 0x00000000 },
-	{ I2S_TXCHMAP1_REG, 0x00000000 },
-	{ I2S_RXCHSEL_REG, 0x00000000 },
-	{ I2S_RXCHMAP0_REG, 0x00000000 },
-	{ I2S_RXCHMAP1_REG, 0x00000000 },
+	{ I2S_CTL_REG, 0x00060000 },	  { I2S_FMT0_REG, 0x00000033 },
+	{ I2S_FMT1_REG, 0x00000030 },	  { I2S_ISTA_REG, 0x00000010 },
+	{ I2S_FCTL_REG, 0x000400f0 },	  { I2S_INT_REG, 0x00000000 },
+	{ I2S_CLKD_REG, 0x00000000 },	  { I2S_CHCFG_REG, 0x00000000 },
+	{ I2S_TXCHSEL_REG, 0x00000000 },  { I2S_TXCHMAP0_REG, 0x00000000 },
+	{ I2S_TXCHMAP1_REG, 0x00000000 }, { I2S_RXCHSEL_REG, 0x00000000 },
+	{ I2S_RXCHMAP0_REG, 0x00000000 }, { I2S_RXCHMAP1_REG, 0x00000000 },
 };
 
 static const struct regmap_config aic_i2s_regmap_config = {
@@ -874,7 +908,6 @@ static int aic_i2s_runtime_suspend(struct device *dev)
 	/* Disable the whole hardware block */
 	regmap_update_bits(i2s->regmap, I2S_CTL_REG, I2S_CTL_GEN, 0);
 
-	regcache_cache_only(i2s->regmap, true);
 	clk_disable_unprepare(i2s->clk);
 	return 0;
 }
@@ -896,8 +929,8 @@ static int aic_i2s_probe(struct platform_device *pdev)
 	if (IS_ERR(regs))
 		return PTR_ERR(regs);
 
-	i2s->regmap = devm_regmap_init_mmio(&pdev->dev, regs,
-						&aic_i2s_regmap_config);
+	i2s->regmap =
+		devm_regmap_init_mmio(&pdev->dev, regs, &aic_i2s_regmap_config);
 	if (IS_ERR(i2s->regmap)) {
 		dev_err(&pdev->dev, "Regmap initialization failed\n");
 		return PTR_ERR(i2s->regmap);
@@ -920,7 +953,7 @@ static int aic_i2s_probe(struct platform_device *pdev)
 	i2s->rst = devm_reset_control_get_exclusive(&pdev->dev, NULL);
 	if (IS_ERR(i2s->rst)) {
 		dev_err(&pdev->dev, "Failed to get I2S reset control\n");
-		//return PTR_ERR(i2s->rst);
+		ret = PTR_ERR(i2s->rst);
 		goto err_suspend;
 	}
 
@@ -931,38 +964,54 @@ static int aic_i2s_probe(struct platform_device *pdev)
 	}
 
 	/* Enable MCLK OUT enable */
-	regmap_update_bits(i2s->regmap, I2S_CLKD_REG,
-					I2S_CLKD_MCLKO_EN, I2S_CLKD_MCLKO_EN);
+	regmap_update_bits(i2s->regmap, I2S_CLKD_REG, I2S_CLKD_MCLKO_EN,
+			   I2S_CLKD_MCLKO_EN);
 	/* Configure valid data to occupy the low bytes of TX FIFO */
-	regmap_update_bits(i2s->regmap, I2S_FCTL_REG,
-					I2S_FCTL_TXIM, I2S_FCTL_TXIM);
+	regmap_update_bits(i2s->regmap, I2S_FCTL_REG, I2S_FCTL_TXIM,
+			   I2S_FCTL_TXIM);
 	/* Configure valid data to occupy the low bytes of RX FIFO */
-	regmap_update_bits(i2s->regmap, I2S_FCTL_REG,
-					I2S_FCTL_RXOM_MASK, I2S_FCTL_RXOM(1));
+	regmap_update_bits(i2s->regmap, I2S_FCTL_REG, I2S_FCTL_RXOM_MASK,
+			   I2S_FCTL_RXOM(1));
 
 	i2s->playback_dma_data.addr = res->start + I2S_TXFIFO_REG;
 	i2s->playback_dma_data.maxburst = 1;
 	i2s->capture_dma_data.addr = res->start + I2S_RXFIFO_REG;
 	i2s->capture_dma_data.maxburst = 1;
 
+	/*
+	 * Clock was enabled for HW init. Now hand control to pm_runtime:
+	 * disable manual clock, let runtime_resume/suspend manage it.
+	 */
+	clk_disable_unprepare(i2s->clk);
+
 	pm_runtime_set_active(&pdev->dev);
 	pm_runtime_enable(&pdev->dev);
-	if (!pm_runtime_enabled(&pdev->dev)) {
+	if (pm_runtime_enabled(&pdev->dev)) {
+		/* Clock is off; runtime resume re-enables it via callback */
+		ret = aic_i2s_runtime_resume(&pdev->dev);
+		if (ret) {
+			/* resume failed, clock already off internally */
+			pm_runtime_disable(&pdev->dev);
+			goto err_reset;
+		}
+	} else {
+		/* PM_RUNTIME not available; clock is off from L985.
+		 * runtime_resume re-enables it internally.
+		 */
 		ret = aic_i2s_runtime_resume(&pdev->dev);
 		if (ret)
-			goto err_pm_disable;
+			goto err_suspend;
 	}
 
 	ret = devm_snd_dmaengine_pcm_register(&pdev->dev,
-						&aic_i2s_dmaengine_pcm_config, 0);
+					      &aic_i2s_dmaengine_pcm_config, 0);
 	if (ret) {
 		dev_err(&pdev->dev, "Could not register PCM DMA\n");
 		goto err_pm_disable;
 	}
 
-	ret = devm_snd_soc_register_component(&pdev->dev,
-						&aic_i2s_component,
-						&aic_i2s_dai, 1);
+	ret = devm_snd_soc_register_component(&pdev->dev, &aic_i2s_component,
+					      &aic_i2s_dai, 1);
 	if (ret) {
 		dev_err(&pdev->dev, "Could not register CPU DAI\n");
 		goto err_pm_disable;
@@ -971,10 +1020,13 @@ static int aic_i2s_probe(struct platform_device *pdev)
 
 err_pm_disable:
 	pm_runtime_disable(&pdev->dev);
-err_suspend:
-	if (!pm_runtime_status_suspended(&pdev->dev))
-		aic_i2s_runtime_suspend(&pdev->dev);
+	aic_i2s_runtime_suspend(&pdev->dev);
+	goto err_reset;
 
+err_suspend:
+	clk_disable_unprepare(i2s->clk);
+
+err_reset:
 	if (!IS_ERR(i2s->rst))
 		reset_control_assert(i2s->rst);
 
@@ -1013,17 +1065,16 @@ static const struct dev_pm_ops aic_i2s_pm_ops = {
 };
 
 static struct platform_driver aic_i2s_driver = {
-	.probe = aic_i2s_probe,
-	.remove = aic_i2s_remove,
-	.driver = {
-		.name = "aic-i2s",
-		.of_match_table = aic_i2s_match,
-		.pm = &aic_i2s_pm_ops,
-	}
+	.probe	= aic_i2s_probe,
+	.remove	= aic_i2s_remove,
+	.driver	= {
+		.name		= "aic-i2s",
+		.of_match_table	= aic_i2s_match,
+		.pm		= &aic_i2s_pm_ops,
+	},
 };
 
 module_platform_driver(aic_i2s_driver);
 MODULE_AUTHOR("dwj <weijie.ding@artinchip.com>");
 MODULE_DESCRIPTION("ArtInChip aic I2S driver");
 MODULE_LICENSE("GPL");
-

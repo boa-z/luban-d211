@@ -126,8 +126,8 @@ int panel_parse_dts(struct udevice *dev)
 	int ret, switch_status;
 
 	if (IS_ENABLED(CONFIG_DM_REGULATOR)) {
-		ret = uclass_find_device_by_phandle(UCLASS_REGULATOR, dev,
-						   "power", &priv->supply);
+		ret = uclass_get_device_by_phandle(UCLASS_REGULATOR, dev,
+						   "power-supply", &priv->supply);
 		if (ret) {
 			debug("failed to request panel regulator\n");
 			priv->supply = NULL;

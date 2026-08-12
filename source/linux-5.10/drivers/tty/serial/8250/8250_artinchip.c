@@ -146,10 +146,14 @@ static void aic8250_do_pm(struct uart_port *port, unsigned int state,
 static void aic8250_set_termios(struct uart_port *p, struct ktermios *termios,
 				struct ktermios *old)
 {
+	struct aic8250_data *d = to_aic8250_data(p->private_data);
 	unsigned int timeout = AIC_UART_SETTING_TIMEOUT;
-	unsigned char old_mcr = 0;
 	struct uart_8250_port *up = up_to_u8250p(p);
+	unsigned char old_mcr = 0;
+	unsigned int module_clk;
+	unsigned int baud;
 
+	baud = tty_termios_baud_rate(termios);
 	old_mcr = serial8250_in_MCR(up);
 	serial8250_out_MCR(up, UART_MCR_LOOP);
 
@@ -158,6 +162,27 @@ static void aic8250_set_termios(struct uart_port *p, struct ktermios *termios,
 		if ((serial_in(up, UART_USR) & UART_USR_BUSY) == 0)
 			break;
 	}
+
+	switch (baud) {
+	case 380400:
+	case 1152000:
+		module_clk = 54545454;
+		break;
+	case 460800:
+	case 921600:
+		module_clk = 44444444;
+		break;
+	case 2500000:
+		module_clk = 40000000;
+		break;
+	default:
+		module_clk = 48000000;
+		break;
+	}
+
+	clk_disable_unprepare(d->clk);
+	clk_set_rate(d->clk, module_clk);
+	clk_prepare_enable(d->clk);
 
 	p->status &= ~UPSTAT_AUTOCTS;
 	if (termios->c_cflag & CRTSCTS)

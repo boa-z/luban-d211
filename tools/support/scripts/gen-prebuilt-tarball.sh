@@ -118,7 +118,7 @@ prepare_prebuilt_files()
 
     while read line; do
         if [ ! -d "${src_root}/${line}" ]; then
-            mkdir -p `dirname "${dst_root}/${line}"`
+            mkdir -p "$(dirname "${dst_root}/${line}")"
         fi
         cp -rdf "${src_root}/${line}" "${dst_root}/${line}"
 	count=`expr ${count} + 1`
@@ -161,7 +161,10 @@ main()
     filelist=${PKG_BUILDDIR}/.files-list-host.txt
     prepare_prebuilt_files host ${filelist} ${HOST_DIR} ${PREBUILT_HOST_DIR}
 
-    if [ "${is_target}" = "y" ]; then
+    # For host packages (name starts with "host-"), always use HOST_ARCH
+    if [[ "${PKG_NAME}" == host-* ]]; then
+	    subdir=${HOST_ARCH}
+    elif [ "${is_target}" = "y" ]; then
 	    subdir=${TARGET_ARCH}
     else
 	    subdir=${HOST_ARCH}
@@ -171,22 +174,26 @@ main()
 	    return
     fi
     # Remove m4 frozen file
-    find ${PREBUILT_PKGDIR} -name "*.m4f" |xargs -I {} rm {}
+    find "${PREBUILT_PKGDIR}" -name "*.m4f" -exec rm -f {} +
 
     if [ "${PKG_NAME}" = "host-tar" ]; then
 	    # host-tar is required to use cpio, otherwise no other tar program to extract it
-	    cd ${PREBUILT_PKGDIR}
-	    find ${PKG_BASENAME} | cpio --quiet -oH newc > ${PKG_BASENAME}.cpio
+	    cd "${PREBUILT_PKGDIR}" || return
+	    find "${PKG_BASENAME}" | cpio --quiet -oH newc > "${PKG_BASENAME}.cpio"
 	    # cd -
-	    mv ${PREBUILT_PKGDIR2}.cpio ${PREBUILT_DIR}/${subdir}/${PKG_BASENAME}.cpio
-	    cd ${PREBUILT_DIR}/${subdir} && echo In $PWD: && ls -og --time-style=iso ${PKG_BASENAME}.cpio
+	    mv "${PREBUILT_PKGDIR2}.cpio" "${PREBUILT_DIR}/${subdir}/${PKG_BASENAME}.cpio"
+	    cd "${PREBUILT_DIR}/${subdir}" || return
+	    echo "In $PWD:"
+	    ls -og --time-style=iso "${PKG_BASENAME}.cpio"
     else
-	    tar -C ${PREBUILT_PKGDIR} -czf ${PREBUILT_PKGDIR2}.tar.gz ${PKG_BASENAME}
-	    mkdir -p ${PREBUILT_DIR}/${subdir}/
-	    mv ${PREBUILT_PKGDIR2}.tar.gz ${PREBUILT_DIR}/${subdir}/${PKG_BASENAME}.tar.gz
-	    cd ${PREBUILT_DIR}/${subdir} && echo In $PWD: && ls -og --time-style=iso ${PKG_BASENAME}.tar.gz
+	    tar -C "${PREBUILT_PKGDIR}" -czf "${PREBUILT_PKGDIR2}.tar.gz" "${PKG_BASENAME}"
+	    mkdir -p "${PREBUILT_DIR}/${subdir}/"
+	    mv "${PREBUILT_PKGDIR2}.tar.gz" "${PREBUILT_DIR}/${subdir}/${PKG_BASENAME}.tar.gz"
+	    cd "${PREBUILT_DIR}/${subdir}" || return
+	    echo "In $PWD:"
+	    ls -og --time-style=iso "${PKG_BASENAME}.tar.gz"
     fi
-    rm -rf ${PREBUILT_PKGDIR}
+    rm -rf "${PREBUILT_PKGDIR}"
 }
 
 main

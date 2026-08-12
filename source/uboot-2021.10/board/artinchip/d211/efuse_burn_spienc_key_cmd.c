@@ -33,7 +33,7 @@ static struct udevice *get_efuse_device(void)
 	do {
 		if (device_is_compatible(dev, "artinchip,aic-sid-v1.0"))
 			break;
-		ret = uclass_next_device_err(&dev);
+		uclass_next_device_err(&dev);
 	} while (dev);
 
 	efuse_dev = dev;
@@ -144,6 +144,7 @@ static int check_brom_spienc_bit(void)
 	return 0;
 }
 
+#ifndef CONFIG_ARTINCHIP_SID_BURN_DEBUG_MODE
 static int burn_jtag_lock_bit(void)
 {
 	u32 offset = 0xFFFF, val;
@@ -161,6 +162,7 @@ static int burn_jtag_lock_bit(void)
 
 	return 0;
 }
+#endif
 
 static int check_jtag_lock_bit(void)
 {
@@ -192,6 +194,10 @@ static int burn_spienc_key(void)
 	int ret;
 
 	offset = 0xA0;
+	if (spi_aes_key_len != 16) {
+		printf("SPI ENC AES key length is not equal 16 bytes.\n");
+		return -1;
+	}
 
 	ret = write_efuse("spi_aes.key", offset, (const void *)spi_aes_key, spi_aes_key_len);
 	if (ret <= 0) {
@@ -228,6 +234,11 @@ static int burn_spienc_nonce(void)
 	int ret;
 
 	offset = 0xB0;
+	if (spi_nonce_key_len != 8) {
+		printf("SPI ENC NONCE key length is not equal 8 bytes.\n");
+		return -1;
+	}
+
 	ret = write_efuse("spi_nonce.key", offset, (const void *)spi_nonce_key,
 			  spi_nonce_key_len);
 	if (ret <= 0) {
@@ -263,6 +274,11 @@ static int burn_spienc_rotpk(void)
 	int ret;
 
 	offset = 0x40;
+	if (rotpk_bin_len != 16) {
+		printf("ROTPK bin length is not equal 16 bytes.\n");
+		return -1;
+	}
+
 	ret = write_efuse("rotpk.bin", offset, (const void *)rotpk_bin,
 			  rotpk_bin_len);
 	if (ret <= 0) {
@@ -292,6 +308,7 @@ static int check_spienc_rotpk(void)
 	return 0;
 }
 
+#ifndef CONFIG_ARTINCHIP_SID_BURN_DEBUG_MODE
 static int burn_spienc_key_read_write_disable_bits(void)
 {
 	u32 offset, val;
@@ -330,6 +347,7 @@ static int burn_spienc_key_read_write_disable_bits(void)
 
 	return 0;
 }
+#endif
 
 static int check_spienc_key_read_write_disable_bits(void)
 {
@@ -406,6 +424,7 @@ int cmd_efuse_do_spienc(struct cmd_tbl *cmdtp, int flag, int argc, char *const a
 		return -1;
 	}
 
+#ifndef CONFIG_ARTINCHIP_SID_BURN_DEBUG_MODE
 	ret = burn_spienc_key_read_write_disable_bits();
 	if (ret) {
 		printf("Error\n");
@@ -417,6 +436,7 @@ int cmd_efuse_do_spienc(struct cmd_tbl *cmdtp, int flag, int argc, char *const a
 		printf("Error\n");
 		return -1;
 	}
+#endif
 
 	ret = check_brom_spienc_bit();
 	if (ret) {
@@ -455,6 +475,9 @@ int cmd_efuse_do_spienc(struct cmd_tbl *cmdtp, int flag, int argc, char *const a
 
 	printf("\n");
 	printf("Write SPI ENC eFuse done.\n");
+#if CONFIG_ARTINCHIP_SID_BURN_DEBUG_MODE
+	printf("WARNING: The debug mode, the key is visible to the CPU.\n");
+#endif
 #if CONFIG_ARTINCHIP_SID_BURN_SIMULATED
 	printf("WARNING: This is a dry run to check the eFuse content, key is not burn to eFuse yet.\n");
 #endif

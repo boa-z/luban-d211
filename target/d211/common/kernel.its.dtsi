@@ -37,7 +37,6 @@
 			data = /incbin/("./u-boot.dtb");
 			type = "flat_dt";
 			arch = "riscv";
-			load = <0x43F00000>;
 			compression = "none";
 		};
 	};

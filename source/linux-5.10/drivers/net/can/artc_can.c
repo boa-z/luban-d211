@@ -337,7 +337,7 @@ static netdev_tx_t artc_can_start_xmit(struct sk_buff *skb,
 	struct artc_priv *priv = netdev_priv(dev);
 	struct can_frame *cf = (struct can_frame *)skb->data;
 	u8 dlc;
-	u32 dreg, msg_flag_n;
+	u32 dreg, msg_flag_n, cmd_reg_val = 0;
 	canid_t id;
 	int i;
 
@@ -373,10 +373,15 @@ static netdev_tx_t artc_can_start_xmit(struct sk_buff *skb,
 
 	can_put_echo_skb(skb, dev, 0);
 
+	if (priv->can.ctrlmode & CAN_CTRLMODE_ONE_SHOT)
+		cmd_reg_val |= ARTC_CAN_MCR_ABORTREQ;
+
 	if (priv->can.ctrlmode & CAN_CTRLMODE_LOOPBACK)
-		writel(ARTC_CAN_MCR_SELFREQ, priv->base + ARTC_CAN_MCR_REG);
+		cmd_reg_val |= ARTC_CAN_MCR_SELFREQ;
 	else
-		writel(ARTC_CAN_MCR_TXREQ, priv->base + ARTC_CAN_MCR_REG);
+		cmd_reg_val |= ARTC_CAN_MCR_TXREQ;
+
+	writel(cmd_reg_val, priv->base + ARTC_CAN_MCR_REG);
 
 	return NETDEV_TX_OK;
 }
@@ -560,11 +565,16 @@ static irqreturn_t artc_can_interrupt(int irq, void *dev_id)
 			netdev_warn(dev, "wakeup interrupt\n");
 
 		if (isrc & ARTC_CAN_INTR_TX) {
-			/* transmission complete interrupt */
-			stats->tx_bytes += readl(priv->base +
-						 ARTC_CAN_TXBRO_REG) & 0xf;
-			stats->tx_packets++;
-			can_get_echo_skb(dev, 0);
+			if (priv->can.ctrlmode & CAN_CTRLMODE_ONE_SHOT &&
+			    !(status & ARTC_CAN_STAT_TXC)) {
+				stats->tx_errors++;
+				can_free_echo_skb(dev, 0);
+			} else {
+				/* transmission complete interrupt */
+				stats->tx_bytes += readl(priv->base + ARTC_CAN_TXBRO_REG) & 0xf;
+				stats->tx_packets++;
+				can_get_echo_skb(dev, 0);
+			}
 			netif_wake_queue(dev);
 			can_led_event(dev, CAN_LED_EVENT_TX);
 		}

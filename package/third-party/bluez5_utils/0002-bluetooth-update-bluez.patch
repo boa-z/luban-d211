@@ -1,0 +1,43 @@
+From de4652b6429c4233075c5f0da79d5bef95afbb92 Mon Sep 17 00:00:00 2001
+From: "hanlei.liu" <hanlei.liu@artinchip.com>
+Date: Wed, 26 Nov 2025 14:10:31 +0800
+Subject: [PATCH] bluez:  add adv name and solve server problem
+
+    1.add name in advertise
+    2.solve no server problem in notify
+
+Change-Id: If674fc5d02b1ec77c951416051cb1944520ee89c
+---
+ bluez5_utils/bluez-5.62/src/adapter.c     | 2 +-
+ bluez5_utils/bluez-5.62/src/advertising.c | 2 +-
+ 2 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/src/adapter.c b/src/adapter.c
+index 5846f03..83d2d7a 100644
+--- a/src/adapter.c
++++ b/src/adapter.c
+@@ -4968,7 +4968,7 @@ void device_resolved_drivers(struct btd_adapter *adapter,
+ static void adapter_add_device(struct btd_adapter *adapter,
+ 						struct btd_device *device)
+ {
+-	adapter->devices = g_slist_append(adapter->devices, device);
++	adapter->devices = g_slist_prepend(adapter->devices, device);
+ 	device_added_drivers(adapter, device);
+ }
+
+diff --git a/src/advertising.c b/src/advertising.c
+index 41b8186..a6121c2 100644
+--- a/src/advertising.c
++++ b/src/advertising.c
+@@ -767,7 +767,7 @@ static uint8_t *generate_adv_data(struct btd_adv_client *client,
+
+ 		bt_ad_add_appearance(client->data, appearance);
+ 	}
+-
++	bt_ad_add_name(client->data, client->name);
+ 	return bt_ad_generate(client->data, len);
+ }
+
+--
+2.25.1
+

@@ -246,11 +246,12 @@ static ssize_t status_show(struct device *dev,
 	int mcr, version;
 	struct aic_rtp_dev *rtp = dev_get_drvdata(dev);
 	void __iomem *regs = rtp->regs;
+	unsigned long flags;
 
-	spin_lock(&user_lock);
+	spin_lock_irqsave(&user_lock, flags);
 	mcr = readl(regs + RTP_MCR);
 	version = readl(regs + RTP_VERSION);
-	spin_unlock(&user_lock);
+	spin_unlock_irqrestore(&user_lock, flags);
 
 	return sprintf(buf, "In RTP controller V%d.%02d:\n"
 		       "Mode %d/%d, RTP enale %d, Press detect enable %d\n"
@@ -394,8 +395,9 @@ static void rtp_enable(struct aic_rtp_dev *rtp, int en)
 {
 	void __iomem *regs = rtp->regs;
 	enum aic_rtp_mode mode = rtp->mode;
+	unsigned long flags;
 
-	spin_lock(&user_lock);
+	spin_lock_irqsave(&user_lock, flags);
 	if (mode != RTP_MODE_MANUAL) {
 		rtp_reg_enable(regs, RTP_MCR,
 			       mode << RTR_MCR_MODE_SHIFT | RTP_MCR_PRES_DET_EN | RTP_MCR_EN, en);
@@ -427,22 +429,23 @@ static void rtp_enable(struct aic_rtp_dev *rtp, int en)
 		}
 	}
 
-	spin_unlock(&user_lock);
+	spin_unlock_irqrestore(&user_lock, flags);
 }
 
 static void rtp_int_enable(struct aic_rtp_dev *rtp, int en)
 {
 	u32 val = RTP_INTR_FIFO_ERR_IE | RTP_INTR_DAT_RDY_IE
 			| RTP_INTR_RISE_DET_IE | RTP_INTR_SCI_IE;
+	unsigned long flags;
 
 	if (rtp->mode == RTP_MODE_MANUAL) {
 		val |= RTP_INTR_PRES_DET_IE;
 		init_completion(&rtp->complete);
 	}
 
-	spin_lock(&user_lock);
+	spin_lock_irqsave(&user_lock, flags);
 	rtp_reg_enable(rtp->regs, RTP_INTR, val, en);
-	spin_unlock(&user_lock);
+	spin_unlock_irqrestore(&user_lock, flags);
 }
 
 static u16 rtp_adc_soft_trigger(struct aic_rtp_dev *rtp, int ch)
@@ -949,8 +952,9 @@ static void aic_rtp_manual_worker(struct work_struct *work)
 {
 	struct aic_rtp_dev *rtp = container_of(work, struct aic_rtp_dev,
 					       event_work);
+	unsigned long flags;
 
-	spin_lock(&user_lock);
+	spin_lock_irqsave(&user_lock, flags);
 
 	if (rtp->intr & RTP_INTR_PRES_DET_FLG)
 		rtp_manual_mode(rtp, 0);
@@ -959,25 +963,26 @@ static void aic_rtp_manual_worker(struct work_struct *work)
 		aic_rtp_read_fifo(rtp, (rtp->fcr & RTP_FCR_DAT_CNT_MASK)
 					  >> RTP_FCR_DAT_CNT_SHIFT);
 
-	spin_unlock(&user_lock);
+	spin_unlock_irqrestore(&user_lock, flags);
 }
 
 static void aic_rtp_single_smp_worker(struct work_struct *work)
 {
 	struct aic_rtp_dev *rtp = container_of(work, struct aic_rtp_dev,
 					       event_work);
+	unsigned long flags;
 
-	spin_lock(&user_lock);
+	spin_lock_irqsave(&user_lock, flags);
 	if (rtp->intr & RTP_INTR_DRDY_FLG) {
 		aic_rtp_read_fifo(rtp, (rtp->fcr & RTP_FCR_DAT_CNT_MASK)
 				  >> RTP_FCR_DAT_CNT_SHIFT);
-		spin_unlock(&user_lock);
+		spin_unlock_irqrestore(&user_lock, flags);
 		usleep_range(9000, 11000);
-		spin_lock(&user_lock);
+		spin_lock_irqsave(&user_lock, flags);
 	}
 
 	rtp_smp_period(rtp->regs, rtp->smp_period);
-	spin_unlock(&user_lock);
+	spin_unlock_irqrestore(&user_lock, flags);
 }
 
 static irqreturn_t aic_rtp_irq(int irq, void *dev_id)
@@ -987,10 +992,9 @@ static irqreturn_t aic_rtp_irq(int irq, void *dev_id)
 	struct device *dev = &rtp->pdev->dev;
 	enum aic_rtp_mode mode = rtp->mode;
 	u32 intr, fcr;
-	unsigned long flags;
 	u32 data_cnt = 0, data_thd = 0;
 
-	spin_lock_irqsave(&user_lock, flags);
+	spin_lock(&user_lock);
 
 	intr = readl(regs + RTP_INTR);
 	fcr = readl(regs + RTP_FCR);
@@ -1076,7 +1080,7 @@ irq_clean_fifo:
 	}
 
 irq_done:
-	spin_unlock_irqrestore(&user_lock, flags);
+	spin_unlock(&user_lock);
 	return IRQ_HANDLED;
 }
 

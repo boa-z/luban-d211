@@ -44,10 +44,12 @@ void lv_draw_ge2d_fill_with_blend(lv_draw_unit_t *draw_unit, const lv_draw_fill_
 
     /* dst buf */
     fill.dst_buf.buf_type = disp_buf_type();
-    if (fill.dst_buf.buf_type == MPP_PHY_ADDR)
+    if (fill.dst_buf.buf_type == MPP_PHY_ADDR) {
         fill.dst_buf.phy_addr[0] = disp_buf_phy_addr((uint8_t *)draw_buf->data);
-    else
-        fill.dst_buf.fd[0] = disp_buf_fd((uint8_t *)draw_buf->data);
+    } else {
+        fill.dst_buf.buf_type = MPP_PHY_ADDR;
+        fill.dst_buf.phy_addr[0] = disp_buf_draw_addr((uint8_t *)draw_buf->data);
+    }
 
     fill.dst_buf.stride[0] = draw_buf->header.stride;
     fill.dst_buf.size.width = dest_width;
@@ -70,6 +72,70 @@ void lv_draw_ge2d_fill_with_blend(lv_draw_unit_t *draw_unit, const lv_draw_fill_
         LV_LOG_WARN("fillrect1 fail");
         return;
     }
+
+    ret = mpp_ge_emit(ge2d_device);
+    if (ret < 0) {
+        LV_LOG_WARN("emit fail");
+        return;
+    }
+    ret = mpp_ge_sync(ge2d_device);
+    if (ret < 0) {
+        LV_LOG_WARN("sync fail");
+        return;
+    }
+}
+
+void lv_draw_ge2d_buf_clear(lv_draw_buf_t *draw_buf, const lv_area_t *a)
+{
+    int32_t width;
+    int32_t height;
+
+    struct ge_fillrect fill = { 0 };
+    struct mpp_ge *ge2d_device = get_ge2d_device();
+    int ret;
+
+    if (a) {
+        width = lv_area_get_width(a);
+        height = lv_area_get_height(a);
+    } else {
+        width = draw_buf->header.w;
+        height = draw_buf->header.h;
+    }
+
+    /* fill info */
+    fill.type = GE_NO_GRADIENT;
+    fill.start_color = 0x0;
+
+    /* dst buf */
+    fill.dst_buf.buf_type = disp_buf_type();
+    if (fill.dst_buf.buf_type == MPP_PHY_ADDR) {
+        fill.dst_buf.phy_addr[0] = disp_buf_phy_addr((uint8_t *)draw_buf->data);
+    } else {
+        fill.dst_buf.buf_type = MPP_PHY_ADDR;
+        fill.dst_buf.phy_addr[0] = disp_buf_draw_addr((uint8_t *)draw_buf->data);
+    }
+
+    fill.dst_buf.stride[0] = draw_buf->header.stride;
+    fill.dst_buf.size.width = draw_buf->header.w;
+    fill.dst_buf.size.height = draw_buf->header.h;
+    fill.dst_buf.format = lv_fmt_to_mpp_fmt(draw_buf->header.cf);
+
+    if (a) {
+        fill.dst_buf.crop_en = 1;
+        fill.dst_buf.crop.x = a->x1;
+        fill.dst_buf.crop.y = a->y1;
+        fill.dst_buf.crop.width = width;
+        fill.dst_buf.crop.height = height;
+    } else {
+        fill.dst_buf.crop_en = 0;
+    }
+
+    ret = mpp_ge_fillrect(ge2d_device, &fill);
+    if (ret < 0) {
+        LV_LOG_WARN("fillrect1 fail");
+        return;
+    }
+
     ret = mpp_ge_emit(ge2d_device);
     if (ret < 0) {
         LV_LOG_WARN("emit fail");
@@ -85,9 +151,12 @@ void lv_draw_ge2d_fill_with_blend(lv_draw_unit_t *draw_unit, const lv_draw_fill_
 void lv_draw_ge2d_fill(lv_draw_unit_t *draw_unit, const lv_draw_fill_dsc_t *dsc,
                        const lv_area_t *coords)
 {
+    LV_PROFILER_BEGIN;
     int32_t alpha_en;
-    if (dsc->opa <= (lv_opa_t)LV_OPA_MIN)
+    if (dsc->opa <= (lv_opa_t)LV_OPA_MIN) {
+        LV_PROFILER_END;
         return;
+    }
 
     if (dsc->opa < LV_OPA_MAX)
         alpha_en = 1;
@@ -95,6 +164,7 @@ void lv_draw_ge2d_fill(lv_draw_unit_t *draw_unit, const lv_draw_fill_dsc_t *dsc,
         alpha_en = 0;
 
     lv_draw_ge2d_fill_with_blend(draw_unit, dsc, coords, alpha_en);
+    LV_PROFILER_END;
 }
 
 #endif /*LV_USE_DRAW_GE2D*/

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2024 ArtInChip Technology Co. Ltd
+ * Copyright (C) 2020-2026 ArtInChip Technology Co. Ltd
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -22,6 +22,7 @@ enum CodecID {
 	/* video codecs */
 	CODEC_ID_MJPEG,
 	CODEC_ID_H264,
+	CODEC_ID_MPEG12,
 	CODEC_ID_MPEG4,
 
 	/* various PCM "codecs" */
@@ -65,6 +66,7 @@ enum CodecID {
 
 	CODEC_ID_MP3, ///< preferred ID for decoding MPEG audio layer 1, 2 or 3
 	CODEC_ID_AAC,
+	CODEC_ID_FLAC,
 };
 
 struct codec_tag {
@@ -86,11 +88,13 @@ struct aic_codec_param {
 	/* Video only.*/
 	int       width;
 	int       height;
+	int       max_ref_frames;
 
 	/* Audio only.*/
 	int       channels;
 	int       sample_rate;
 	int       block_align;
+	int       audio_track_id;
 };
 
 extern const struct codec_tag aic_codec_bmp_tags[];

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2022 Artinchip Technology Co. Ltd
+ * Copyright (C) 2020-2025 ArtInChip Technology Co. Ltd
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -106,18 +106,18 @@ int png_hardware_decode(struct png_dec_ctx *s, unsigned char *buf, int length)
 
 	ve_get_client();
 
-	//* 1. reset ve
+	// 1. reset ve
 	config_ve_top_reg(s);
 	png_reset(s);
 
-	//* 2.set png info
+	// 2.set png info
 	pval = (u32 *)&reg_list->_10_png_ctrl;
 	reg_list->_10_png_ctrl.bit_depth = s->bit_depth;
 	reg_list->_10_png_ctrl.color_type = s->color_type;
 	reg_list->_10_png_ctrl.dec_type = 1;
 	write_reg_u32(s->regs_base + PNG_CTRL_REG, *pval);
 
-	//* 3. set picture size
+	// 3. set picture size
 	pval = (u32 *)&reg_list->_14_png_size;
 	reg_list->_14_png_size.width = s->width;
 	reg_list->_14_png_size.height = s->height;
@@ -145,20 +145,25 @@ int png_hardware_decode(struct png_dec_ctx *s, unsigned char *buf, int length)
 
 	write_reg_u32(s->regs_base + PNG_FORMAT_REG, format);
 
-	//* 4. set output buffer
+	// 4. set output buffer
 	val = s->curr_frame->phy_addr[0];
 	write_reg_u32(s->regs_base + OUTPUT_BUFFER_ADDR_REG, val);
 
-	val = s->height * s->curr_frame->mpp_frame.buf.stride[0];
+	int stride = s->curr_frame->mpp_frame.buf.stride[0];
+#ifdef AIC_VE_DRV_V10
+	val = s->height * stride;
 	write_reg_u32(s->regs_base + OUTPUT_BUFFER_LENGTH_REG, val);
+#else
+	write_reg_u32(s->regs_base + OUTPUT_BUFFER_LENGTH_REG, s->curr_frame->phy_addr[0] + s->height * stride);
+#endif
 
-	//* 5. set LZ77 buffer 32K
+	// 5. set LZ77 buffer 32K
 	val = s->lz77_mpp_buf->phy_addr;
 	write_reg_u32(s->regs_base + INFLATE_WINDOW_BUFFER_ADDR_REG, val);
 
-	//* 6. set memory register for palette
+	// 6. set memory register for palette
 	if (s->color_type == PNG_COLOR_TYPE_PALETTE) {
-		//* PNG filter line buffer address
+		// PNG filter line buffer address
 		val = s->filter_mpp_buf->phy_addr;
 		write_reg_u32(s->regs_base + PNG_FILTER_LINE_BUF_ADDR_REG, val);
 
@@ -170,13 +175,13 @@ int png_hardware_decode(struct png_dec_ctx *s, unsigned char *buf, int length)
 		write_reg_u32(s->regs_base + PNG_PNG_PALETTE_ADDR_REG, val);
 	}
 
-	//* 7. decode start
+	// 7. decode start
 	logd("config start");
 	write_reg_u32(s->regs_base + INFLATE_INTERRUPT_REG, 15);
 	write_reg_u32(s->regs_base + INFLATE_STATUS_REG, 15);
 	write_reg_u32(s->regs_base + INFLATE_START_REG, 1);
 
-	//* 9.set bitstream
+	// 9.set bitstream
 	if (set_bitstream_and_wait(s, buf, length)) {
 		ve_put_client();
 		return -1;
@@ -202,31 +207,31 @@ int gzip_hardware_decode(struct png_dec_ctx *s, unsigned char *buf, int length)
 	memset(reg_list, 0, sizeof(struct png_register_list));
 	ve_get_client();
 
-	//* 1. reset ve
+	// 1. reset ve
 	config_ve_top_reg(s);
 	png_reset(s);  // TODO
 
-	//* 2. set decode type to inflate
+	// 2. set decode type to inflate
 	write_reg_u32(s->regs_base + PNG_CTRL_REG, 0);
 
-	//* 3. set output buffer
+	// 3. set output buffer
 	val = s->curr_frame->phy_addr[0];
 	write_reg_u32(s->regs_base + OUTPUT_BUFFER_ADDR_REG, val);
 
 	val = INFLATE_MAX_OUTPUT;
 	write_reg_u32(s->regs_base + OUTPUT_BUFFER_LENGTH_REG, val);
 
-	//* 4. set LZ77 buffer 32K
+	// 4. set LZ77 buffer 32K
 	val = s->lz77_mpp_buf->phy_addr;
 	write_reg_u32(s->regs_base + INFLATE_WINDOW_BUFFER_ADDR_REG, val);
 
-	//* 5. decode start
+	// 5. decode start
 	logd("config start");
 	write_reg_u32(s->regs_base + INFLATE_INTERRUPT_REG, 15);
 	write_reg_u32(s->regs_base + INFLATE_STATUS_REG, 15);
 	write_reg_u32(s->regs_base + INFLATE_START_REG, 1);
 
-	//* 6. set bitstream and wait finish irq
+	// 6. set bitstream and wait finish irq
 	if (set_bitstream_and_wait(s, buf, length)) {
 		ve_put_client();
 		return -1;

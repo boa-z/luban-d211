@@ -60,6 +60,8 @@ enum fpga_mmcm_daddr {
 #define SYSCFG_USB0_CFG		0x40C
 #define SYSCFG_GMAC0_CFG	0x410
 #define SYSCFG_GMAC1_CFG	0x414
+#define SYSCFG_USB0_RES_CFG	0x048
+#define SYSCFG_USB1_RES_CFG	0x04C
 
 #define SYSCFG_USB0_HOST_MODE			0
 #define SYSCFG_USB0_DEVICE_MODE			1
@@ -178,7 +180,34 @@ EXPORT_SYMBOL_GPL(syscfg_fpga_lcd_io_set);
 
 static int syscfg_usb_init(struct syscfg_dev *syscfg)
 {
-	// TODO: read some parameters in usb dts, and set it to syscfg register
+	ofnode dev_np, host_np;
+	s32 ret = -1;
+	u32 dev_val = 0, host_val = 0;
+
+	dev_np = ofnode_by_compatible(ofnode_null(), "artinchip,aic-udc-v1.0");
+	host_np = ofnode_by_compatible(ofnode_null(), "artinchip,aic-usbh-v1.0");
+
+	ret = ofnode_read_u32(dev_np, "aic,usbd-ext-resistance", &dev_val);
+	if (ret) {
+		debug("Can't find max-speed\n");
+	}
+
+	if (dev_val) {
+		writel(dev_val, g_syscfg->regs + SYSCFG_USB0_RES_CFG);
+		printf("syscfg: set usb dev res to 0x%x\n", readl(g_syscfg->regs + SYSCFG_USB0_RES_CFG));
+	}
+
+	ret = ofnode_read_u32(host_np, "aic,usbh-ext-resistance", &host_val);
+	if (ret) {
+		debug("Can't find max-speed\n");
+	}
+
+	if (host_val) {
+		writel(host_val, g_syscfg->regs + SYSCFG_USB0_RES_CFG);
+		writel(host_val, g_syscfg->regs + SYSCFG_USB1_RES_CFG);
+		printf("syscfg: set usb host res to 0x%x\n", readl(g_syscfg->regs + SYSCFG_USB0_RES_CFG));
+	}
+
 	return 0;
 }
 

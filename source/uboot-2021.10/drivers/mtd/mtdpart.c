@@ -30,6 +30,10 @@
 #include <linux/mtd/partitions.h>
 #include <linux/err.h>
 #include <linux/sizes.h>
+#include <linux/string.h>
+#if defined(__UBOOT__) && !defined(CONFIG_SPL_BUILD)
+#include <asm/arch/boot_param.h>
+#endif
 
 #include "mtdcore.h"
 
@@ -60,6 +64,29 @@ char *kstrdup(const char *s, gfp_t gfp)
 	if (buf)
 		memcpy(buf, s, len);
 	return buf;
+}
+
+/*
+ * In normal boot, skip bad-block pre-scan for large UBI data partitions
+ * (ubiroot/ubisystem) to reduce boot latency. In upgrade/burn mode,
+ * do full scan for all partitions.
+ */
+static bool aic_is_upg_flow(void)
+{
+	bool upg = false;
+	static int mode_logged = -1;
+#if !defined(CONFIG_SPL_BUILD)
+	enum boot_device bd = aic_get_boot_device();
+
+	upg = (bd == BD_BOOTROM || bd == (BD_BOOTROM + 1));
+#endif
+	if (mode_logged != (int)upg) {
+		printf("[mtdpart] mode=%s, %s ubiroot/ubisystem bad-scan\n",
+		       upg ? "upgrade" : "normal-boot",
+		       upg ? "enable" : "disable");
+		mode_logged = (int)upg;
+	}
+	return upg;
 }
 #endif
 
@@ -765,11 +792,24 @@ static struct mtd_info *allocate_partition(struct mtd_info *master,
 	if (master->_block_isbad) {
 		uint64_t offs = 0;
 
-		while (offs < slave->size) {
-			if (mtd_block_isbad(master, offs + slave->offset))
-				slave->ecc_stats.badblocks++;
-			offs += slave->erasesize;
+		/*
+		 * ubiroot/ubisystem are large UBI areas not needed for early
+		 * U-Boot normal boot; skip per-erase-block bad scan to save
+		 * boot time. In upgrade flow, do full scan.
+		 */
+#ifdef __UBOOT__
+		if (!slave->name || aic_is_upg_flow() ||
+		    (strcmp(slave->name, "ubiroot") &&
+		     strcmp(slave->name, "ubisystem"))) {
+#endif
+			while (offs < slave->size) {
+				if (mtd_block_isbad(master, offs + slave->offset))
+					slave->ecc_stats.badblocks++;
+				offs += slave->erasesize;
+			}
+#ifdef __UBOOT__
 		}
+#endif
 	}
 
 out_register:

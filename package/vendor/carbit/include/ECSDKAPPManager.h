@@ -156,6 +156,25 @@ public:
 	* @param data
 	*/
 	virtual void        onPhoneAppHUDLaneGuidancePicture(const ECHudLaneGuidancePictureInfo& data) {};
+
+	/**
+     * @brief Get Cache Size.
+     * @param data
+     */
+    virtual void        onParallelWorldCache(const ECParallelWorldCache& data) {};
+
+    /**
+     * @brief Get parallel world audio source
+     * @param data
+     */
+    virtual void        onParallelWorldAudioSource(const int type) {};
+
+	/**
+	 * 
+	 * @param data
+	*/
+	virtual void        onVirtualInstStateChanged(const ECVirtualInstStateData& data) {}
+	
 };
 
 

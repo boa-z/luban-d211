@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2022 Artinchip Technology Co. Ltd
+ * Copyright (C) 2020-2026 Artinchip Technology Co. Ltd
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -107,6 +107,7 @@ struct png_dec_ctx {
 
 	int hw_size;
 	int vbv_offset;
+	int extra_frame_num;
 };
 
 #endif /* PNG_DECODER_H */

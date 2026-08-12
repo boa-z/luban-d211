@@ -54,7 +54,9 @@ struct aic_ehci_platform_priv {
 };
 
 #define DRIVER_DESC "Artinchip EHCI driver"
-
+#ifndef CONFIG_USB_EHCI_HCD_AIC
+#define CONFIG_USB_EHCI_HCD_AIC
+#endif
 #define hcd_to_ehci_priv(h) \
 	((struct aic_ehci_platform_priv *)hcd_to_ehci(h)->priv)
 
@@ -455,11 +457,13 @@ static int aic_ehci_suspend(struct device *dev)
 	struct usb_ehci_pdata *pdata = dev_get_platdata(dev);
 	struct platform_device *pdev = to_platform_device(dev);
 	bool do_wakeup = device_may_wakeup(dev);
-	int ret;
+	int ret = 0;
 
-	ret = ehci_suspend(hcd, do_wakeup);
-	if (ret)
-		return ret;
+	if (hcd->self.root_hub != NULL) {
+		ret = ehci_suspend(hcd, do_wakeup);
+		if (ret)
+			return ret;
+	}
 
 	if (pdata->power_suspend)
 		pdata->power_suspend(pdev);
@@ -474,7 +478,7 @@ static int aic_ehci_resume(struct device *dev)
 	struct usb_hcd *hcd = dev_get_drvdata(dev);
 	struct usb_ehci_pdata *pdata = dev_get_platdata(dev);
 	struct platform_device *pdev = to_platform_device(dev);
-	int err;
+	int err = 0;
 
 	pinctrl_pm_select_default_state(dev);
 
@@ -484,7 +488,9 @@ static int aic_ehci_resume(struct device *dev)
 			return err;
 	}
 
-	ehci_resume(hcd, false);
+	if (hcd->self.root_hub != NULL)
+		ehci_resume(hcd, false);
+
 	return 0;
 }
 

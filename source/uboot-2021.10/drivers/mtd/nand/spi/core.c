@@ -1331,7 +1331,7 @@ static int spinand_probe(struct udevice *dev)
 	aic_nand_bbt_init(spinand);
 #endif
 
-	dev_info(dev, "%s done.\n", __func__);
+	dev_dbg(dev, "%s done.\n", __func__);
 	return 0;
 
 err_spinand_cleanup:

@@ -4,6 +4,7 @@
 # Author: Nitin Garg <nitin.garg@freescale.com>
 
 obj-$(CONFIG_DM_THERMAL) += thermal-uclass.o
+obj-$(CONFIG_ARTINCHIP_THERMAL) += artinchip_thermal.o
 obj-$(CONFIG_IMX_THERMAL) += imx_thermal.o
 obj-$(CONFIG_IMX_SCU_THERMAL) += imx_scu_thermal.o
 obj-$(CONFIG_TI_DRA7_THERMAL) += ti-bandgap.o

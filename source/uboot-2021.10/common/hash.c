@@ -17,6 +17,7 @@
 #include <malloc.h>
 #include <mapmem.h>
 #include <hw_sha.h>
+#include <hw_md5.h>
 #include <asm/cache.h>
 #include <asm/global_data.h>
 #include <asm/io.h>
@@ -40,6 +41,34 @@ DECLARE_GLOBAL_DATA_PTR;
 #endif
 
 static void reloc_update(void);
+
+#if defined(CONFIG_MD5) && !defined(CONFIG_MD5_PROG_HW_ACCEL)
+static int hash_init_md5(struct hash_algo *algo, void **ctxp)
+{
+	struct MD5Context *ctx = malloc(sizeof(struct MD5Context));
+	MD5Init(ctx);
+	*ctxp = ctx;
+	return 0;
+}
+
+static int hash_update_md5(struct hash_algo *algo, void *ctx, const void *buf,
+			    unsigned int size, int is_last)
+{
+	MD5Update((struct MD5Context *)ctx, buf, size);
+	return 0;
+}
+
+static int hash_finish_md5(struct hash_algo *algo, void *ctx, void *dest_buf,
+			    int size)
+{
+	if (size < algo->digest_size)
+		return -1;
+
+	MD5Final(dest_buf, (struct MD5Context *)ctx);
+	free(ctx);
+	return 0;
+}
+#endif
 
 #if defined(CONFIG_SHA1) && !defined(CONFIG_SHA_PROG_HW_ACCEL)
 static int hash_init_sha1(struct hash_algo *algo, void **ctxp)
@@ -210,7 +239,7 @@ static int hash_finish_crc32(struct hash_algo *algo, void *ctx, void *dest_buf,
 #ifdef USE_HOSTCC
 # define I_WANT_MD5	1
 #else
-# define I_WANT_MD5	CONFIG_IS_ENABLED(MD5)
+# define I_WANT_MD5	CONFIG_MD5
 #endif
 /*
  * These are the hash algorithms we support.  If we have hardware acceleration
@@ -223,7 +252,20 @@ static struct hash_algo hash_algo[] = {
 		.name		= "md5",
 		.digest_size	= MD5_SUM_LEN,
 		.chunk_size	= CHUNKSZ_MD5,
+#ifdef CONFIG_MD5_HW_ACCEL
+		.hash_func_ws	= hw_md5,
+#else
 		.hash_func_ws	= md5_wd,
+#endif
+#ifdef CONFIG_MD5_PROG_HW_ACCEL
+		.hash_init	= hw_sha_init,
+		.hash_update	= hw_sha_update,
+		.hash_finish	= hw_sha_finish,
+#else
+		.hash_init	= hash_init_md5,
+		.hash_update	= hash_update_md5,
+		.hash_finish	= hash_finish_md5,
+#endif
 	},
 #endif
 #ifdef CONFIG_SHA1

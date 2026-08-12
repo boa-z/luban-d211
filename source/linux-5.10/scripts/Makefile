@@ -3,8 +3,24 @@
 # scripts contains sources for various helper programs used throughout
 # the kernel for the build process.
 
-CRYPTO_LIBS = $(shell pkg-config --libs libcrypto 2> /dev/null || echo -lcrypto)
-CRYPTO_CFLAGS = $(shell pkg-config --cflags libcrypto 2> /dev/null)
+# Use pkg-config to find OpenSSL, with fallback to common locations
+# This ensures extract-cert and sign-file can find the correct libcrypto
+CRYPTO_LIBS = $(shell pkg-config --libs libcrypto 2>/dev/null)
+ifeq ($(CRYPTO_LIBS),)
+  # pkg-config failed, try common locations
+  ifneq ($(wildcard /usr/local/lib/libcrypto.so*),)
+    CRYPTO_LIBS = -L/usr/local/lib -lcrypto
+    CRYPTO_CFLAGS = -I/usr/local/include
+  else ifneq ($(wildcard /usr/lib/x86_64-linux-gnu/libcrypto.so*),)
+    CRYPTO_LIBS = -L/usr/lib/x86_64-linux-gnu -lcrypto
+    CRYPTO_CFLAGS =
+  else
+    CRYPTO_LIBS = -lcrypto
+    CRYPTO_CFLAGS =
+  endif
+else
+  CRYPTO_CFLAGS = $(shell pkg-config --cflags libcrypto 2>/dev/null)
+endif
 
 hostprogs-always-$(CONFIG_BUILD_BIN2C)			+= bin2c
 hostprogs-always-$(CONFIG_KALLSYMS)			+= kallsyms

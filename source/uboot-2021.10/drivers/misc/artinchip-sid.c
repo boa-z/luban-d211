@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0+
 /*
- * Copyright (c) 2022, ArtInChip Technology Co., Ltd
+ * Copyright (c) 2022-2026, ArtInChip Technology Co., Ltd
  * Dehuang Wu <dehuang.wu@artinchip.com>
  */
 
@@ -12,8 +12,6 @@
 #include <clk.h>
 #include <reset.h>
 #include <misc.h>
-
-#ifndef CONFIG_SPL_BUILD
 
 #define SID_MAX_WORDS 64
 #define SID_REG_CTL 0x0
@@ -165,7 +163,6 @@ static int aic_sid_write(struct udevice *dev, int offset, const void *buf,
 		return -1;
 	}
 
-	val = 0;
 	wid = offset >> 2;
 	ofs = offset % 4;
 	end = (offset + size + 3) >> 2;
@@ -173,6 +170,7 @@ static int aic_sid_write(struct udevice *dev, int offset, const void *buf,
 	p = buf;
 
 	while (wid < end) {
+		val = 0;
 		if (wid == (end - 1) && end_siz) {
 			cpsiz = end_siz;
 			if (cpsiz > size)
@@ -256,8 +254,10 @@ static int aic_sid_probe(struct udevice *dev)
 	}
 
 	if (ofnode_read_u32(node, "aic,max-words", &(plat->max_words))) {
-		dev_info(dev, "Can't parse max-words value\n");
+		dev_info(dev, "Can't parse max-words value, use default max_words %d\n", SID_MAX_WORDS);
 		plat->max_words = SID_MAX_WORDS;
+	} else {
+		dev_info(dev, "Parse max-words is %d\n", plat->max_words);
 	}
 
 	return ret;
@@ -281,4 +281,3 @@ U_BOOT_DRIVER(artinchip_sid) = {
 	.probe     = aic_sid_probe,
 	.plat_auto = sizeof(struct aic_sid_platdata),
 };
-#endif

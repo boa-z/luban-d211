@@ -173,7 +173,7 @@ int spl_ubi_load_image(struct spl_image_info *spl_image,
 		volumes[0].vol_id = CONFIG_SPL_UBI_LOAD_KERNEL_ID;
 		volumes[0].load_addr = (void *)CONFIG_SYS_LOAD_ADDR;
 		volumes[1].vol_id = CONFIG_SPL_UBI_LOAD_ARGS_ID;
-		volumes[1].load_addr = (void *)CONFIG_SYS_SPL_ARGS_ADDR;
+		volumes[1].load_addr = (void *)(uintptr_t)board_get_dtb_ram_top(0);
 
 		ret = ubispl_load_volumes(&info, volumes, 2);
 		if (!ret) {
@@ -299,7 +299,7 @@ static int spl_spi_nand_load_image(struct spl_image_info *spl_image,
 				  CONFIG_CMD_SPL_WRITE_SIZE, &retlen,
 				  (u_char *)CONFIG_SYS_TEXT_BASE);
 		/* copy to destintion */
-		dst = (int *)CONFIG_SYS_SPL_ARGS_ADDR;
+		dst = (int *)board_get_dtb_ram_top(0);
 		src = (int *)CONFIG_SYS_TEXT_BASE;
 		memcpy(dst, src, CONFIG_CMD_SPL_WRITE_SIZE);
 

@@ -1,0 +1,4 @@
+config BR2_PACKAGE_APE
+	bool "ape"
+	help
+	  APE: A lightweight APE decoding library.

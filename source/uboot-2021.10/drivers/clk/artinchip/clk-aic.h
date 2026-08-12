@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
- * Copyright (c) 2020 ArtInChip Inc.
+ * Copyright (c) 2020-2026 ArtInChip Inc.
  */
 #ifndef __DRV_CLK_AIC_H
 #define __DRV_CLK_AIC_H
@@ -263,7 +263,7 @@ struct aic_clk_tree {
 	u16 disp_cnt;
 	u16 clkout_base;
 	u16 clkout_cnt;
-#ifdef CONFIG_CLK_ARTINCHIP_CMU_V2_0
+#ifdef CONFIG_CLK_ARTINCHIP_CMU_V2_x
 	u16 cross_zone_base;
 	u16 cross_zone_cnt;
 #endif
@@ -273,7 +273,7 @@ struct aic_clk_tree {
 	struct aic_periph_clk   *periph;
 	struct aic_disp_clk	*disp;
 	struct aic_clk_out      *clkout;
-#ifdef CONFIG_CLK_ARTINCHIP_CMU_V2_0
+#ifdef CONFIG_CLK_ARTINCHIP_CMU_V2_x
 	struct aic_clk_crosszone *clk_cz;
 #endif
 };

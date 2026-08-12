@@ -9,16 +9,21 @@ source package/artinchip/gst1-plugins-aic/Config.in
 source package/artinchip/awtk-ui/Config.in
 source package/artinchip/lvgl-ui/Config.in
 source package/artinchip/aicp-dec/Config.in
+source package/artinchip/aic-cast/Config.in
 source package/artinchip/aic-mem/Config.in
 source package/artinchip/wifimanager/Config.in
 source package/artinchip/p2p_auto/Config.in
+source package/artinchip/wifi_p2p_config/Config.in
+source package/artinchip/wifi_ap_config/Config.in
 source package/artinchip/http-wificonfig/Config.in
+source package/artinchip/selfie/Config.in
 
 menu "Sample code"
 	source package/artinchip/test-mtop/Config.in
 	source package/artinchip/test-ce/Config.in
 	source package/artinchip/test-dma-buf/Config.in
 	source package/artinchip/test-dvp/Config.in
+	source package/artinchip/test-vin/Config.in
 	source package/artinchip/test-fb/Config.in
 	source package/artinchip/test-touchscreen/Config.in
 	source package/artinchip/test-uart/Config.in
@@ -37,6 +42,9 @@ menu "Sample code"
 	source package/artinchip/test-pm-mbox/Config.in
 	source package/artinchip/test-efuse/Config.in
 	source package/artinchip/test-coredump/Config.in
+	source package/artinchip/test-rtc/Config.in
+	source package/artinchip/test-sdmc/Config.in
+	source package/artinchip/test-key-suspend/Config.in
 endmenu
 
 menu "Launchers"

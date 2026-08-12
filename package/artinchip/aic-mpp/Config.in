@@ -7,40 +7,204 @@ config BR2_PACKAGE_AIC_MPP_USE_PREBUILT
 	bool "use prebuilt binary instead of building from source"
 	default n
 
+choice
+	prompt "Render backend type"
+	default BR2_PACKAGE_AIC_MPP_RENDER_FBDEV
+
+	config BR2_PACKAGE_AIC_MPP_RENDER_FBDEV
+	bool "fbdev backend"
+
+	config BR2_PACKAGE_AIC_MPP_RENDER_DRM
+	bool "DRM backend"
+endchoice
+
 config BR2_PACKAGE_AIC_MPP_MIDDLEWARE
+	select BR2_PACKAGE_LWRB
 	bool "enable middle ware"
 	default y
 
-if BR2_PACKAGE_AIC_MPP_MIDDLEWARE
-config BR2_PACKAGE_AIC_MPP_AAC_DECODER
-	bool "enable aac decoder"
-	default n
-endif
-
-if BR2_PACKAGE_AIC_MPP_MIDDLEWARE
-config BR2_PACKAGE_AIC_MPP_WAV_DEMUXER
-	bool "enable wav demuxer"
+config BR2_PACKAGE_AIC_MPP_TEST
+	bool "enable mpp test"
+	select BR2_PACKAGE_AIC_MPP_MIDDLEWARE
 	default n
 
-config BR2_PACKAGE_AIC_MPP_AVI_DEMUXER
-	bool "enable avi demuxer"
+config BR2_PACKAGE_AIC_MPP_RECORDER
+	select BR2_PACKAGE_AIC_MPP_MIDDLEWARE
+	select BR2_PACKAGE_AIC_MPP_VIDEO_ENCODER
+	select BR2_PACKAGE_AIC_MPP_AUDIO_ENCODER
+	select BR2_PACKAGE_AIC_MPP_MP3_ENCODER
+	select BR2_PACKAGE_AIC_MPP_MUXER
+	select BR2_PACKAGE_SQLITE
+	bool "enable recorder"
 	default n
 
-config BR2_PACKAGE_AIC_MPP_MKV_DEMUXER
-	bool "enable mkv demuxer"
+menuconfig BR2_PACKAGE_AIC_MPP_VIDEO_DECODER
+	bool "enable video decoder"
+	select BR2_PACKAGE_AIC_MPP_MIDDLEWARE
+	default y
+
+	if BR2_PACKAGE_AIC_MPP_VIDEO_DECODER
+	config BR2_PACKAGE_AIC_MPP_MPEG12_DECODER
+		bool "enable mpeg12 decoder"
+		default n
+
+	config BR2_PACKAGE_AIC_MPP_MPEG4_DECODER
+		bool "enable mpeg4 decoder"
+		default n
+	endif
+
+menuconfig BR2_PACKAGE_AIC_MPP_VIDEO_ENCODER
+	bool "enable video encoder"
+	select BR2_PACKAGE_AIC_MPP_MIDDLEWARE
+	default y
+
+	if BR2_PACKAGE_AIC_MPP_VIDEO_ENCODER
+	config BR2_PACKAGE_AIC_MPP_H264_ENCODER
+		bool "enable h264 encoder"
+		default n
+	endif
+
+menuconfig BR2_PACKAGE_AIC_MPP_AUDIO_DECODER
+	bool "enable audio decoder"
+	select BR2_PACKAGE_AIC_MPP_MIDDLEWARE
+	default y
+
+	if BR2_PACKAGE_AIC_MPP_AUDIO_DECODER
+	config BR2_PACKAGE_AIC_MPP_AAC_DECODER
+		bool "enable aac decoder"
+		default n
+
+	config BR2_PACKAGE_AIC_MPP_VORBIS_DECODER
+		bool "enable vorbis decoder"
+		select BR2_PACKAGE_LIBVORBIS
+		select BR2_PACKAGE_LIBOGG
+		default n
+
+	config BR2_PACKAGE_AIC_MPP_OPUS_DECODER
+		bool "enable opus decoder"
+		select BR2_PACKAGE_OPUS
+		default n
+
+	config BR2_PACKAGE_AIC_MPP_AAC_ELD_DECODER
+		bool "enable aac-eld decoder"
+		select BR2_PACKAGE_FDK_AAC
+		default n
+
+	config BR2_PACKAGE_AIC_MPP_ALAC_DECODER
+		bool "enable alac decoder"
+		select BR2_PACKAGE_ALAC
+		default n
+
+	config BR2_PACKAGE_AIC_MPP_APE_DECODER
+		bool "enable ape decoder"
+		default n
+
+	config BR2_PACKAGE_AIC_MPP_FLAC_DECODER
+		bool "enable flac decoder"
+		default n
+	endif
+
+menuconfig BR2_PACKAGE_AIC_MPP_AUDIO_ENCODER
+	bool "enable audio encoder"
+	select BR2_PACKAGE_AIC_MPP_MIDDLEWARE
 	default n
 
-config BR2_PACKAGE_AIC_MPP_TS_DEMUXER
-	bool "enable ts demuxer"
+	if BR2_PACKAGE_AIC_MPP_AUDIO_ENCODER
+	config BR2_PACKAGE_AIC_MPP_MP3_ENCODER
+		bool "enable mp3 encoder"
+		select BR2_PACKAGE_LAME
+		default n
+
+	config BR2_PACKAGE_AIC_MPP_AAC_ENCODER
+		bool "enable aac encoder"
+		select BR2_PACKAGE_FDK_AAC
+		default n
+	endif
+
+menuconfig BR2_PACKAGE_AIC_MPP_DEMUX
+	bool "enable demux"
+	select BR2_PACKAGE_AIC_MPP_MIDDLEWARE
+	default y
+
+	if BR2_PACKAGE_AIC_MPP_DEMUX
+	config BR2_PACKAGE_AIC_MPP_WAV_DEMUXER
+		bool "enable wav demuxer"
+		default n
+
+	config BR2_PACKAGE_AIC_MPP_AVI_DEMUXER
+		bool "enable avi demuxer"
+		default n
+
+	config BR2_PACKAGE_AIC_MPP_MKV_DEMUXER
+		bool "enable mkv demuxer"
+		default n
+
+	config BR2_PACKAGE_AIC_MPP_TS_DEMUXER
+		bool "enable ts demuxer"
+		default n
+
+	config BR2_PACKAGE_AIC_MPP_FLV_DEMUXER
+		bool "enable flv demuxer"
+		default n
+
+	config BR2_PACKAGE_AIC_MPP_RTSP_DEMUXER
+		bool "enable rtsp demuxer"
+		default n
+
+	config BR2_PACKAGE_AIC_MPP_HLS_DEMUXER
+		bool "enable hls demuxer"
+		select BR2_PACKAGE_AIC_MPP_HTTP_STREAM
+		select BR2_PACKAGE_AIC_MPP_TS_DEMUXER
+		default n
+
+	config BR2_PACKAGE_AIC_MPP_OGG_DEMUXER
+		bool "enable ogg/opus demuxer"
+		select BR2_PACKAGE_LIBOGG
+		default n
+
+	config BR2_PACKAGE_AIC_MPP_MPG_DEMUXER
+		bool "enable mpg demuxer"
+		default n
+
+	config BR2_PACKAGE_AIC_MPP_PMP_DEMUXER
+		bool "enable pmp demuxer"
+		default n
+	endif
+
+menuconfig BR2_PACKAGE_AIC_MPP_MUXER
+	bool "enable muxer"
+	select BR2_PACKAGE_AIC_MPP_MIDDLEWARE
 	default n
 
-config BR2_PACKAGE_AIC_MPP_FLV_DEMUXER
-	bool "enable flv demuxer"
-	default n
+	if BR2_PACKAGE_AIC_MPP_MUXER
+	config BR2_PACKAGE_AIC_MPP_MP4_MUXER
+		bool "enable mp4 muxer"
+		default y
 
-config BR2_PACKAGE_AIC_MPP_RTSP_DEMUXER
-	bool "enable rtsp demuxer"
-	default n
-endif
+	config BR2_PACKAGE_AIC_MPP_TS_MUXER
+		bool "enable ts muxer"
+		default n
+	endif
+
+menuconfig BR2_PACKAGE_AIC_MPP_STREAM
+	bool "enable stream"
+	select BR2_PACKAGE_AIC_MPP_MIDDLEWARE
+	default y
+
+	if BR2_PACKAGE_AIC_MPP_STREAM
+	config BR2_PACKAGE_AIC_MPP_HTTP_STREAM
+		bool "enable http stream"
+		default n
+
+	menuconfig BR2_PACKAGE_AIC_MPP_RTP_STREAM
+		bool "enable rtp stream"
+		default n
+		if BR2_PACKAGE_AIC_MPP_RTP_STREAM
+		config BR2_PACKAGE_AIC_MPP_RTP_ENABLE_SORTER
+			depends on BR2_PACKAGE_AIC_MPP_RTP_STREAM
+			bool "enable rtp packet sorter"
+			default y
+		endif
+	endif
 endif
 

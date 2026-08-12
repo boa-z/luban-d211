@@ -14,6 +14,7 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
+#include <dirent.h>
 
 #define ENABLE 	1
 #define DISABLE 0
@@ -232,23 +233,80 @@ static void version(void)
 	printf("\n");
 }
 
+static char *find_mtop_path(void)
+{
+	static char real_path[512] = "";
+	DIR *dir;
+	struct dirent *entry;
+	char soc_path[] = "/sys/devices/platform/soc/";
+
+	dir = opendir(soc_path);
+	if (!dir) {
+		fprintf(stderr, "Failed to open %s: %s\n", soc_path, strerror(errno));
+		return NULL;
+	}
+
+	while ((entry = readdir(dir)) != NULL) {
+		if (strstr(entry->d_name, ".mtop")) {
+			int ret = snprintf(real_path, sizeof(real_path), "%s%s/mtop", soc_path, entry->d_name);
+			if (ret >= (int)sizeof(real_path)) {
+				continue;
+			}
+			closedir(dir);
+			return real_path;
+		}
+	}
+
+	closedir(dir);
+	return NULL;
+}
+
 static int get_version_data()
 {
 	int ret = -1;
 	FILE *file;
 	char buffer[16] = " ";
-	char path[64] = "ln -sf /sys/devices/platform/soc/*.mtop/mtop";
+	char old_cwd[256];
+	char *mtop_path = NULL;
 
-	system(path);
-	chdir("/mtop");
-	getcwd(path, 64);
+	if (getcwd(old_cwd, sizeof(old_cwd)) == NULL) {
+		fprintf(stderr, "Failed to get current directory: %s\n", strerror(errno));
+		return -1;
+	}
 
-	snprintf(mtop_dir, sizeof(mtop_dir), "%s/%s", path, "version");
+	mtop_path = find_mtop_path();
+	if (!mtop_path) {
+		fprintf(stderr, "Failed to find mtop directory\n");
+		chdir(old_cwd);
+		return -1;
+	}
 
-	file = fopen(mtop_dir, "r");
+
+	if (chdir(mtop_path) != 0) {
+		fprintf(stderr, "Failed to chdir to %s: %s\n", mtop_path, strerror(errno));
+		chdir(old_cwd);
+		return -1;
+	}
+
+	if (getcwd(mtop_dir, sizeof(mtop_dir)) == NULL) {
+		fprintf(stderr, "Failed to get mtop directory: %s\n", strerror(errno));
+		chdir(old_cwd);
+		return -1;
+	}
+
+	char version_path[256];
+	int path_len = snprintf(version_path, sizeof(version_path), "%s/version", mtop_dir);
+	if (path_len >= (int)sizeof(version_path)) {
+		fprintf(stderr, "Version file path too long\n");
+		chdir(old_cwd);
+		return -1;
+	}
+
+	file = fopen(version_path, "r");
 	if (!file) {
 		fprintf(stderr, "Failed to open %s errno: %d[%s]\n",
-			mtop_dir, errno, strerror(errno));
+			version_path, errno, strerror(errno));
+		chdir(old_cwd);
 		return -1;
 	}
 
@@ -257,10 +315,16 @@ static int get_version_data()
 		fprintf(stderr, "fread() return %d, errno: %d[%s]\n",
 			ret, errno, strerror(errno));
 		fclose(file);
+		chdir(old_cwd);
 		return -1;
 	}
 	fclose(file);
 
+	if (chdir(old_cwd) != 0) {
+		fprintf(stderr, "Failed to restore original directory: %s\n", strerror(errno));
+	}
+
+	ret = -1;
 	for (int i = 0; i < ARRAY_SIZEOF(mtop_data); i++) {
 		if (strlen(mtop_data[i].version) != (strlen(buffer) - 1))
 			continue;
@@ -277,7 +341,7 @@ static int get_version_data()
 		printf("Error! no version !");
 		return -1;
 	}
-	snprintf(mtop_dir, sizeof(mtop_dir), path);
+
 	return 0;
 }
 

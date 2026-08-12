@@ -18,6 +18,9 @@
 #include <linux/err.h>
 
 #include <linux/ctype.h>
+#include <dm.h>
+#include <misc.h>
+#include <artinchip/aic_spienc.h>
 
 static struct mtd_info *get_mtd_by_name(const char *name)
 {
@@ -227,12 +230,10 @@ static int do_mtd_list(struct cmd_tbl *cmdtp, int flag, int argc,
 	return CMD_RET_SUCCESS;
 }
 
-#ifdef CONFIG_ARTINCHIP_SPIENC
-#include <misc.h>
-#include <artinchip/aic_spienc.h>
 static int do_mtd_bypass(struct cmd_tbl *cmdtp, int flag, int argc,
 			char *const argv[])
 {
+#ifdef CONFIG_ARTINCHIP_SPIENC
 	struct udevice *dev = NULL;
 	unsigned long status;
 
@@ -255,8 +256,10 @@ static int do_mtd_bypass(struct cmd_tbl *cmdtp, int flag, int argc,
 	} else {
 		return CMD_RET_FAILURE;
 	}
-}
+#else
+	return 0;
 #endif
+}
 
 static int mtd_special_write_oob(struct mtd_info *mtd, u64 off,
 				 struct mtd_oob_ops *io_op,
@@ -339,8 +342,8 @@ static int do_mtd_io(struct cmd_tbl *cmdtp, int flag, int argc,
 	len = argc > 1 ? hextoul(argv[1], NULL) : default_len;
 	if (!mtd_is_aligned_with_min_io_size(mtd, len)) {
 		len = round_up(len, mtd->writesize);
-		printf("Size not on a page boundary (0x%x), rounding to 0x%llx\n",
-		       mtd->writesize, len);
+		pr_warn("Size not on a page boundary (0x%x), rounding to 0x%llx\n",
+			mtd->writesize, len);
 	}
 
 	remaining = len;
@@ -353,19 +356,19 @@ static int do_mtd_io(struct cmd_tbl *cmdtp, int flag, int argc,
 		buf = map_sysmem(user_addr, 0);
 
 	if (!buf) {
-		printf("Could not map/allocate the user buffer\n");
+		pr_err("Could not map/allocate the user buffer\n");
 		ret = CMD_RET_FAILURE;
 		goto out_put_mtd;
 	}
 
 	if (has_pages)
-		printf("%s %lld byte(s) (%u page(s)) at offset 0x%08llx%s%s%s\n",
-		       read ? "Reading" : "Writing", len, npages, start_off,
-		       raw ? " [raw]" : "", woob ? " [oob]" : "",
-		       !read && write_empty_pages ? " [dontskipff]" : "");
+		pr_info("%s %lld byte(s) (%u page(s)) at offset 0x%08llx%s%s%s\n",
+			read ? "Reading" : "Writing", len, npages, start_off,
+			raw ? " [raw]" : "", woob ? " [oob]" : "",
+			!read && write_empty_pages ? " [dontskipff]" : "");
 	else
-		printf("%s %lld byte(s) at offset 0x%08llx\n",
-		       read ? "Reading" : "Writing", len, start_off);
+		pr_info("%s %lld byte(s) at offset 0x%08llx\n",
+			read ? "Reading" : "Writing", len, start_off);
 
 	io_op.mode = raw ? MTD_OPS_RAW : MTD_OPS_AUTO_OOB;
 #ifdef CONFIG_ARTINCHIP_SPIENC
@@ -647,10 +650,8 @@ static char mtd_help_text[] =
 
 U_BOOT_CMD_WITH_SUBCMDS(mtd, "MTD utils", mtd_help_text,
 		U_BOOT_SUBCMD_MKENT(list, 1, 1, do_mtd_list),
-#ifdef CONFIG_ARTINCHIP_SPIENC
 		U_BOOT_SUBCMD_MKENT_COMPLETE(bypass, 2, 0, do_mtd_bypass,
 					     mtd_name_complete),
-#endif
 		U_BOOT_SUBCMD_MKENT_COMPLETE(read, 5, 0, do_mtd_io,
 					     mtd_name_complete),
 		U_BOOT_SUBCMD_MKENT_COMPLETE(write, 5, 0, do_mtd_io,

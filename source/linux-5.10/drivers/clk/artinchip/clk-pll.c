@@ -79,7 +79,8 @@ static const struct pll_vco vco_arr[] = {
 
 static int clk_pll_wait_lock(struct clk_pll *pll)
 {
-	udelay(100);
+	udelay(200);
+
 	return 0;
 }
 
@@ -93,16 +94,69 @@ static void clk_pll_bypass(struct clk_pll *pll, bool bypass)
 	writel(val, pll->gen_reg);
 }
 
+static void clk_pll_enable_sdm(struct clk_pll *pll)
+{
+	u32 reg_val, ppm_max, sdm_amp, factor_n;
+	u64 sdm_step;
+
+	factor_n = (readl(pll->gen_reg) >> PLL_FACTORN_BIT) & PLL_FACTORN_MASK;
+
+	ppm_max = 1000000 / (factor_n + 1);
+	/* 1% spread */
+	if (ppm_max < PLL_SDM_SPREAD_PPM)
+		sdm_amp = 0;
+	else
+		sdm_amp = PLL_SDM_AMP_MAX -
+			  PLL_SDM_SPREAD_PPM * PLL_SDM_AMP_MAX / ppm_max;
+
+	/* SDM uses triangular wave, 33KHz by default */
+	sdm_step = (u64)(PLL_SDM_AMP_MAX - sdm_amp) * 2 * PLL_SDM_SPREAD_FREQ;
+	/* PLL parent clock freq is a fixed 24MHz */
+	do_div(sdm_step, 24000000);
+	if (sdm_step > 511)
+		sdm_step = 511;
+
+	reg_val = (1UL << PLL_SDM_EN_BIT) |
+		  (2 << PLL_SDM_MODE_BIT) |
+		  (sdm_step << PLL_SDM_STEP_BIT) |
+		  (3 << PLL_SDM_FREQ_BIT) |
+		  (sdm_amp << PLL_SDM_AMP_BIT);
+
+	writel(reg_val, pll->sdm_reg);
+}
+
 static int clk_pll_prepare(struct clk_hw *hw)
 {
 	struct clk_pll *pll = to_clk_pll(hw);
-	u32 val;
+	u32 val, sdm_en, sdm_bot;
+	int ret = 0;
 
 	val = readl(pll->gen_reg);
-	val |= (1 << PLL_OUT_SYS | 1 << PLL_EN_BIT);
+	val |= (1 << PLL_EN_BIT);
 	writel(val, pll->gen_reg);
 
-	return clk_pll_wait_lock(pll);
+	ret = clk_pll_wait_lock(pll);
+	if (unlikely(ret))
+		return ret;
+
+	val |= (1 << PLL_OUT_SYS);
+	writel(val, pll->gen_reg);
+
+	if (pll->type == AIC_PLL_SDM) {
+		val = readl(pll->sdm_reg);
+		sdm_en = val >> 31;
+		sdm_bot = val & 0xFFFF;
+
+		/*
+		 * When the PLL is fractional PLL, SDM_EN will also be set to 1,
+		 * so SDM_BOT is needed to help determine whether the spreading
+		 * function has been enabled.
+		 */
+		if (!sdm_en || !sdm_bot)
+			clk_pll_enable_sdm(pll);
+	}
+
+	return 0;
 }
 
 static void clk_pll_unprepare(struct clk_hw *hw)
@@ -111,7 +165,10 @@ static void clk_pll_unprepare(struct clk_hw *hw)
 	u32 val;
 
 	val = readl(pll->gen_reg);
-	val &= ~(1 << PLL_OUT_SYS | 1 << PLL_EN_BIT);
+	val &= ~(1 << PLL_OUT_SYS);
+	writel(val, pll->gen_reg);
+
+	val &= ~(1 << PLL_EN_BIT);
 	writel(val, pll->gen_reg);
 }
 
@@ -163,10 +220,9 @@ static unsigned long clk_pll_recalc_rate(struct clk_hw *hw,
 	if (pll->type == AIC_PLL_FRA)
 		fra_en = (readl(pll->fra_reg) >> PLL_FRAC_EN_BIT) & 0x1;
 
-	if (pll->type != AIC_PLL_FRA || !fra_en)
-		rate = parent_rate / (factor_p + 1) *
-			(factor_n + 1) / (factor_m + 1);
-	else {
+	if (pll->type == AIC_PLL_INT || !fra_en) {
+		rate = parent_rate / (factor_p + 1) * (factor_n + 1) / (factor_m + 1);
+	} else {
 		fra_in = readl(pll->fra_reg) & PLL_FRAC_DIV_MASK;
 		rate_int = parent_rate / (factor_p + 1) *
 			   (factor_n + 1) / (factor_m + 1);
@@ -237,9 +293,8 @@ static int clk_pll_set_rate(struct clk_hw *hw, unsigned long rate,
 	u32 factor_n, factor_m, factor_p, reg_val;
 	u64 val, fra_in = 0;
 	u8 fra_en, factor_m_en;
+	u32 sdm_en;
 	unsigned long vco_rate, pll_vco_min, pll_vco_max;
-	u32 ppm_max, sdm_amp, sdm_en = 0;
-	u64 sdm_step;
 	struct clk_pll *pll = to_clk_pll(hw);
 
 	clk_vco_select(pll, &pll_vco_min, &pll_vco_max);
@@ -275,7 +330,7 @@ static int clk_pll_set_rate(struct clk_hw *hw, unsigned long rate,
 		vco_rate = pll_vco_max;
 
 	factor_p = (vco_rate % parent_rate) ? 1 : 0;
-	factor_n = vco_rate * (factor_p + 1) / parent_rate  - 1;
+	factor_n = vco_rate * (factor_p + 1) / parent_rate - 1;
 
 	reg_val = readl(pll->gen_reg);
 	reg_val &= ~0xFFFF;
@@ -283,10 +338,13 @@ static int clk_pll_set_rate(struct clk_hw *hw, unsigned long rate,
 			(factor_n << PLL_FACTORN_BIT) |
 			(factor_m << PLL_FACTORM_BIT) |
 			(factor_p << PLL_FACTORP_BIT);
+	/* If SDM enable, set PLL_ICP = 0 */
+	if (pll->type == AIC_PLL_SDM)
+		reg_val &= ~(0x1F << 24);
 	writel(reg_val, pll->gen_reg);
 
 	if (pll->type == AIC_PLL_FRA) {
-		val = rate % (parent_rate * (factor_n + 1) /
+		val = rate % ((u64)parent_rate * (factor_n + 1) /
 			      (factor_m + 1) / (factor_p + 1));
 		fra_en = val ? 1 : 0;
 		if (fra_en) {
@@ -296,45 +354,21 @@ static int clk_pll_set_rate(struct clk_hw *hw, unsigned long rate,
 		}
 		/* Configure fractional division */
 		writel(fra_en << PLL_FRAC_EN_BIT | fra_in, pll->fra_reg);
-		/* when using decimal divsion, do not configure spreading parameters */
+		/* When using decimal division, do not configure spreading
+		 * parameters. Only set SDM_EN=1 and SDM_MODE=2 (triangle wave)
+		 * for fractional divider to take effect.
+		 */
 		sdm_en = (1UL << PLL_SDM_EN_BIT) | (2UL << PLL_SDM_MODE_BIT);
 		writel(sdm_en, pll->sdm_reg);
 	}
 
-	if (pll->type == AIC_PLL_SDM) {
-		sdm_en = readl(pll->sdm_reg);
-		sdm_en >>= 31;
+	reg_val = readl(pll->gen_reg);
+	reg_val |= (1 << PLL_OUT_SYS | 1 << PLL_EN_BIT);
+	writel(reg_val, pll->gen_reg);
 
-		if (sdm_en) {
-			ppm_max = 1000000 / (factor_n + 1);
-			/* 1% spread */
-			if (ppm_max < PLL_SDM_SPREAD_PPM)
-				sdm_amp = 0;
-			else
-				sdm_amp = PLL_SDM_AMP_MAX -
-					PLL_SDM_SPREAD_PPM *
-					PLL_SDM_AMP_MAX / ppm_max;
-
-			/* SDM uses triangular wave, 33KHz by default  */
-			sdm_step = (PLL_SDM_AMP_MAX - sdm_amp) * 2 *
-				PLL_SDM_SPREAD_FREQ;
-			do_div(sdm_step, parent_rate);
-			if (sdm_step > 511)
-				sdm_step = 511;
-
-			reg_val = (1UL << PLL_SDM_EN_BIT) |
-				  (2 << PLL_SDM_MODE_BIT) |
-				  (sdm_step << PLL_SDM_STEP_BIT) |
-				  (3 << PLL_SDM_FREQ_BIT) |
-				  (sdm_amp << PLL_SDM_AMP_BIT);
-
-			writel(reg_val, pll->sdm_reg);
-		}
-	}
-
-	if (!clk_pll_wait_lock(pll))
+	if (!clk_pll_wait_lock(pll)) {
 		clk_pll_bypass(pll, false);
-	else {
+	} else {
 		pr_err("%s not lock\n", pll->name);
 		return -EAGAIN;
 	}

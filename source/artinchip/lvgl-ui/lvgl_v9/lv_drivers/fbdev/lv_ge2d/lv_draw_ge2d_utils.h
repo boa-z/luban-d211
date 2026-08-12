@@ -54,6 +54,14 @@ static inline int disp_buf_fd(uint8_t *buf)
     return aic_disp->fd;
 }
 
+static inline unsigned int disp_buf_draw_addr(uint8_t *buf)
+{
+    lv_display_t *disp = lv_display_get_default();
+    aic_disp_t *aic_disp = (aic_disp_t *)lv_display_get_user_data(disp);
+
+    return (unsigned int)aic_disp->draw_addr;
+}
+
 static inline enum mpp_buf_type disp_buf_type(void)
 {
     lv_display_t *disp = lv_display_get_default();
@@ -122,6 +130,8 @@ static inline bool lv_fmt_is_mpp_buf(uint32_t flags)
 }
 
 enum mpp_pixel_format lv_fmt_to_mpp_fmt(lv_color_format_t cf);
+
+void lv_draw_ge2d_buf_clear(lv_draw_buf_t *draw_buf, const lv_area_t *a);
 
 #ifdef __cplusplus
 } /* extern "C" */

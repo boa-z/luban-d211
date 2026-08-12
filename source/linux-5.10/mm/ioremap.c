@@ -277,7 +277,7 @@ void __iomem *ioremap_prot(phys_addr_t addr, size_t size, unsigned long prot)
 		return NULL;
 	}
 
-	printk("%s(): %#lx -> %#lx, size %#lx\n", __func__,
+	pr_info("ioremap %#lx -> %#lx, size %#lx\n",
 		(long)addr, (long)(vaddr + offset), size);
 	return (void __iomem *)(vaddr + offset);
 }

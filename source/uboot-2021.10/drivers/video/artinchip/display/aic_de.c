@@ -395,6 +395,8 @@ static const struct aic_de_configs aic_de_cfg = {
 static const struct udevice_id aic_de_match_ids[] = {
 	{.compatible = "artinchip,aic-de-v1.0",
 	 .data = (ulong)&aic_de_cfg},
+	{.compatible = "artinchip,aic-de-v1.3",
+	 .data = (ulong)&aic_de_cfg},
 	{ /* sentinel*/ },
 };
 

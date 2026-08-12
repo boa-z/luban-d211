@@ -1,3 +1,98 @@
+# V1.3.2 #
+##新增##
+- LVGL:
+  - 从Luban-Lite移植aic_player控件
+  - 添加aic_video_window控件及Demo
+- MPP:
+  - 新增视频解封装格式：MPG、PMP
+  - 新增音频解码格式：ALAC、APE、FLAC
+  - 新增音频解封装格式：ACC、APE、FLAC
+  - 新增流媒体格式：HLS、HTTP
+  - 支持MP3编码
+  - H264解码：支持多Slice的情况
+  - JPEG：优化JPEG编码的API接口
+  - mpp_dec_test：支持按 slice/帧传输数据
+  - 添加数据包重排的重试机制
+  - 优化TS视频流的解析处理，以及兼容性
+  - 在mpp_buf分配时可获取缓冲区的物理地址
+  - 增加帧和包缓存管理器
+- Disp:
+  - 支持SPL阶段切换Logo背景
+  - 支持运行时释放FrameBuffer
+- DVP: 支持隔行模式
+- USB:
+  - 支持设置USB阻抗匹配
+  - 支持通过DTS配置USB TX预加重参数
+- I2S:
+  - 添加dummy codec驱动
+  - 添加硬件回环mixer控制
+- DDR: 支持eFuse未烧写时也可以识别size信息
+- 打包: 支持多Flash设备
+- OneClick: 支持Ubuntu 24/26系统的一键安装
+- OneStep: buildall命令可显示编译结果的统计信息
+- PANEL: 一个镜像可同时支持多个DSI屏幕
+- shell: 增加wri命令显示重启原因
+- test_fb: 支持打开指定FB设备
+- 新增SoC：D211F
+- 新增方案：自拍屏方案、d21x_demo132_nand(for D211F)
+- 新增器件：
+  - NAND: XT26G01D、DS35Q1GA-IB、W25N01KV、ZB35Q01CYIG
+  - NOR：W25Q512
+  - Camera：XS9950
+- 新增第三方组件：evtest、lwrb、mhz
+- 新增示例：selfie、test-i2s、test-key-suspend
+
+##优化##
+- MPP:
+  - PNG解码器支持设置FB的数量
+  - 优化MPP配置项
+  - 优化中间格式的转换处理
+  - 增强aic_parser参数检查
+- Disp:
+  - 优化预取行的处理流程
+  - 增强crop和scale的异常参数检查
+  - MIPI-DSI: 优化待硬件状态的原子操作保护
+  - DMA: 优化停止DMA的处理流程
+- bluez: 优化广播的处理流程
+- Boot logo: 更新为一组黑色背景的图片
+- uboot：
+  - 优化UBI坏块扫描的处理流程
+  - 简化启动过程中的log
+- test_dvp：初始化video Buf为黑白色块
+- test_dvp：优化size信息的处理流程
+- test_fb: 使用-r参数可计算显示FPS
+
+##修改##
+- LVGL:
+  - 默认选择LVGL v9版本
+  - V9：修复aic_widget的内存释放处理
+  - V9：优化DMABUF的处理流程
+- MPP:
+  - HTTP\HLS新增部分特性，修复或优化播放问题
+  - H264解码：跳过非参考B帧解码
+  - JPEG解码: 修复镜像、裁剪的处理
+  - mpp_dec_test：优化buf的并发保护
+  - 完善编解码的cache参数管理
+  - 添加MP4静态内存分配并修复内存泄漏
+  - 添加播放器组件调试信息
+  - 修复物理地址的释放问题
+  - 修复外部缓冲区PNG解码错误
+  - 修正单声道音频的播放处理
+- CMU: 修正小数分屏的参数配置
+- DDR: 优化DDR2参数
+- GMAC:
+  - 修复IEEE1588时间戳错误
+  - 修复异常情况的资源释放处理
+- PHY: Realtek默认禁用EEE广播
+- I2C：完善写数据出错的异常处理
+- I2S: 修正FIFO的配置参数
+- RTC: 设置RTC起始年份为2020
+- SPI: 修复某些场景下四线模式切换的信号异常问题
+- 打包: 修正rootfs_r分区大小的处理
+- test_fb: 确保32位色块Alpha值设为0xFF
+- test_uart: 修复UART设置数据位的问题
+- test-clock: 完善内存资源的释放处理
+
 # V1.3.0 #
 
 ## 新增 ##

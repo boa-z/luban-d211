@@ -18,10 +18,13 @@
 /* code  begin */
 
 #undef LV_USE_FREETYPE
-#define LV_USE_FREETYPE 1
+#define LV_USE_FREETYPE 0
 
 #undef LV_COLOR_DEPTH
 #define LV_COLOR_DEPTH 32
+
+#undef LV_USE_PERF_MONITOR
+#define LV_USE_PERF_MONITOR 0
 
 /* code end */
 

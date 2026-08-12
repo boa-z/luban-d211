@@ -154,24 +154,27 @@ menuconfig RESET_ARTINCHIP
 	depends on DM_RESET && ARCH_ARTINCHIP
 	help
 	  Support for reset controller on ArtInChip SoCs.
+
+config RESET_ARTINCHIP_V2_x
+	bool
+	default n
+
+config RESET_ARTINCHIP_V3_x
+	bool
+	default n
+
 if RESET_ARTINCHIP
 	choice
 		prompt "Select aic reset driver"
 		default RESET_ARTINCHIP_V1_0
+
 		config RESET_ARTINCHIP_V1_0
 			bool "aic-reset-v1.0"
+			depends on TARGET_D211
 			help
-			reset driver for ArtInChip SoCs
+			  reset driver for ArtInChip SoCs
 
-		config RESET_ARTINCHIP_V2_0
-			bool "aic-reset-v2.0"
-			help
-			reset driver for ArtInChip SoCs
 
-		config RESET_ARTINCHIP_V3_0
-			bool "aic-reset-v3.0"
-			help
-			reset driver for ArtInChip SoCs
 	endchoice
 endif
 

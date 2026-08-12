@@ -243,6 +243,7 @@ static int lvds_probe(struct udevice *dev)
 
 static const struct udevice_id lvds_match_ids[] = {
 	{.compatible = "artinchip,aic-lvds-v1.0"},
+	{.compatible = "artinchip,aic-lvds-v1.1"},
 	{ /* sentinel*/ },
 };
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2024 ArtInChip Technology Co. Ltd
+ * Copyright (C) 2020-2026 ArtInChip Technology Co. Ltd
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -84,6 +84,8 @@ struct packet_manager *pm_create(struct packet_manager_init_cfg *cfg)
 		loge("alloc mpp buffer %d failed!", pm->buffer_size);
 		mpp_free(pm->packet_node);
 		mpp_free(pm);
+
+		return NULL;
 	}
 
 	logd("packet manager create %d count packet, buffer size %d", pm->packet_count, pm->buffer_size);
@@ -274,6 +276,41 @@ int pm_enqueue_ready_packet(struct packet_manager *pm, struct mpp_packet *packet
 	return 0;
 }
 
+int pm_return_empty_packet(struct packet_manager *pm, struct mpp_packet *packet)
+{
+	struct packet_impl *pkt_impl;
+
+	if (!pm || !packet)
+		return -1;
+
+	pthread_mutex_lock(&pm->lock);
+
+	pkt_impl = mpp_list_first_entry_or_null(&pm->empty_list, struct packet_impl, list);
+	if (!pkt_impl) {
+		pthread_mutex_unlock(&pm->lock);
+		return -1;
+	}
+
+	if (pkt_impl->pos_offset > 0) {
+		pm->write_offset = pm->buffer_size - pkt_impl->pos_offset;
+		pm->available_size += pkt_impl->pos_offset + pkt_impl->pkt.size;
+	} else {
+		pm->write_offset = pkt_impl->pkt.phy_offset;
+		pm->available_size += pkt_impl->pos_offset + pkt_impl->pkt.size;
+	}
+
+	pkt_impl->pkt.size = 0;
+	pkt_impl->pos_offset = 0;
+
+	mpp_list_del_init(&pkt_impl->list);
+	mpp_list_add_tail(&pkt_impl->list, &pm->empty_list);
+	pm->empty_num++;
+
+	pthread_mutex_unlock(&pm->lock);
+
+	return 0;
+}
+
 int pm_reclaim_ready_packet(struct packet_manager *pm, struct packet *packet)
 {
 	logd("packet manager return ready mpp packet");
@@ -311,6 +348,30 @@ struct packet *pm_dequeue_ready_packet(struct packet_manager *pm)
 	pthread_mutex_unlock(&pm->lock);
 
 	return (struct packet *)pkt_impl;
+}
+
+int pm_requeue_ready_packet(struct packet_manager *pm, struct packet *packet)
+{
+	struct packet_impl *pkt_impl = (struct packet_impl *)packet;
+
+	logd("packet manager requeue ready packet to head");
+
+	if (!pm || !pkt_impl)
+		return -1;
+
+	pthread_mutex_lock(&pm->lock);
+
+	if (pkt_impl->list.next != NULL && pkt_impl->list.prev != NULL) {
+		mpp_list_del_init(&pkt_impl->list);
+	}
+
+	mpp_list_add_head(&pkt_impl->list, &pm->ready_list);
+
+	pm->ready_num++;
+
+	pthread_mutex_unlock(&pm->lock);
+
+	return 0;
 }
 
 int pm_enqueue_empty_packet(struct packet_manager *pm, struct packet *packet)

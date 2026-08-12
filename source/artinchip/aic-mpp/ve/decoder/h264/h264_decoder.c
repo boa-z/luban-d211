@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2024 Artinchip Technology Co. Ltd
+ * Copyright (C) 2020-2026 ArtInChip Technology Co. Ltd
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -50,41 +50,22 @@ static int find_startcode(unsigned char* buf, int len)
 	return i == len-2 ? -1 : 0;
 }
 
-/**
-* @dst: [out] remove eptb buffer
-* @offset: [out] offset of first 0x03 byte in eptb
-* @src: [in]  input data
-* @len: [in]  length of input buffer
-* return: remove bytes number
-*/
-static int remove_eptb(unsigned char* dst, int* offset, unsigned char* src, int len)
+static int find_next_startcode(unsigned char* buf, int total_len, int start_offset)
 {
-	int si = 0;
-	int di = 0;
-	while(si+2<len && si<RBSP_BYTES) {
-		if(src[si+2] > 3) {
-			dst[di++] = src[si++];
-			dst[di++] = src[si++];
-		} else if(src[si]==0 && src[si+1]==0 && src[si+2]!=0) {
-			if(src[si+2] == 3) { // escape, remove 0x03
-				dst[di++] = 0;
-				dst[di++] = 0;
-				*offset = si+2;
-				si += 3;
-				continue;
-			} else { // next start code
-				break;
-			}
+	int i = start_offset + 1;
+	while (i + 2 < total_len) {
+		if (buf[i] == 0 && buf[i+1] == 0 && buf[i+2] == 1) {
+			return i;
 		}
-		dst[di++] = src[si++];
+		if (i + 3 < total_len && buf[i] == 0 && buf[i+1] == 0
+		    && buf[i+2] == 0 && buf[i+3] == 1) {
+			return i;
+		}
+		i++;
 	}
 
-	while(si < len && si<RBSP_BYTES)
-		dst[di++] = src[si++];
-
-	return si-di;
+	return total_len;
 }
-
 static int process_extradata(struct h264_dec_ctx *s, unsigned char* buf, int len)
 {
 	int i, cnt, nal_size;
@@ -104,7 +85,7 @@ static int process_extradata(struct h264_dec_ctx *s, unsigned char* buf, int len
 	for (i=0; i<cnt; i++) {
 		nal_size = (p[0] << 8) | p[1];
 		p += 2;
-		init_read_bits(&s->gb, p, nal_size * 8);
+		init_read_bits(&s->gb, p, nal_size * 8, 1);
 		skip_bits(&s->gb, 8); // nalu type
 		if (h264_decode_sps(s)) {
 			loge("decode sps failed");
@@ -119,7 +100,7 @@ static int process_extradata(struct h264_dec_ctx *s, unsigned char* buf, int len
 		nal_size = (p[0] << 8) | p[1];
 		p += 2;
 		logi("pps cnt: %d, nal_size: %d", cnt, nal_size);
-		init_read_bits(&s->gb, p, nal_size * 8);
+		init_read_bits(&s->gb, p, nal_size * 8, 1);
 		skip_bits(&s->gb, 8); // nalu type
 		if (h264_decode_pps(s)) {
 			loge("decode pps failed");
@@ -130,11 +111,22 @@ static int process_extradata(struct h264_dec_ctx *s, unsigned char* buf, int len
 	return 0;
 }
 
-static int procese_nalu(struct h264_dec_ctx *s, unsigned char* buf, int len, int *use_len)
+static int strip_slice_trailing_zeros(unsigned char* buf, int start, int end)
+{
+	while (end > start && buf[end - 1] == 0x00)
+		end--;
+	return end;
+}
+
+static int process_nalu(struct h264_dec_ctx *s, unsigned char* buf, int len, int *use_len)
 {
 	int ret = 0;
 	int i = 0;
 	int error_flag = 0;
+	int start_bit_offset = 0;
+	int slice_header_bit_len = 0;
+	int next_start_code_offset = 0;
+	int slice_data_end;
 
 	// remove startcode
 	s->sc_byte_offset = s->avcc? 4: find_startcode(buf, len);
@@ -146,16 +138,9 @@ static int procese_nalu(struct h264_dec_ctx *s, unsigned char* buf, int len, int
 
 	s->nal_ref_idc = buf[s->sc_byte_offset] & 0x60;
 	s->nal_unit_type = buf[s->sc_byte_offset] & 0x1f;
+	s->remove_bytes = 0;
 
-	// remove eptb only in Slice NALU, maybe error ??
-	if(s->nal_unit_type == NAL_TYPE_IDR || s->nal_unit_type == NAL_TYPE_SLICE) {
-		s->remove_bytes = remove_eptb(s->rbsp_buffer, &s->first_eptb_offset, buf+s->sc_byte_offset, len-s->sc_byte_offset);
-		s->rbsp_len = len - s->sc_byte_offset - s->remove_bytes;
-		logd("s->sc_byte_offset: %d, s->remove_bytes: %d, s->rbsp_len: %d", s->sc_byte_offset, s->remove_bytes, s->rbsp_len);
-		init_read_bits(&s->gb, s->rbsp_buffer, s->rbsp_len * 8);
-	} else {
-		init_read_bits(&s->gb, buf+s->sc_byte_offset, (len-s->sc_byte_offset) * 8);
-	}
+	init_read_bits(&s->gb, buf+s->sc_byte_offset, (len-s->sc_byte_offset) * 8, 1);
 
 	read_bits(&s->gb, 8); // nalu type
 
@@ -176,20 +161,73 @@ static int procese_nalu(struct h264_dec_ctx *s, unsigned char* buf, int len, int
 				s->frame_info.last_pocs[i] = INT_MIN;
 		}
 		case NAL_TYPE_SLICE: {
+#ifdef SW_SEARCH_START_CODE_EN
+			start_bit_offset = read_bits_count(&s->gb);
+#endif
 			logd("decode slice");
 			ret = h264_decode_slice_header(s);
 			if (ret) {
 				return ret;
 			}
+#ifdef SW_SEARCH_START_CODE_EN
+			slice_header_bit_len = read_bits_count(&s->gb) - start_bit_offset;
+			if (s->detect == 0) {
+				next_start_code_offset = find_next_startcode(buf, len, s->sc_byte_offset);
+				s->detect = 1;
 
-			ret = decode_slice(s);
-			if(ret) {
-				loge("decode_slice error, ret: %d", ret);
-				error_flag = 1;
-				ret = DEC_ERR_NOT_SUPPORT;
+				s->multi_slice = (next_start_code_offset == len) ? 0 : 1;
+				*use_len = s->avcc ? len : next_start_code_offset;
+				slice_data_end = strip_slice_trailing_zeros(buf,
+					s->sc_byte_offset + slice_header_bit_len / 8 + 1,
+					*use_len);
+				s->cur_slice_bit_len = (slice_data_end - s->sc_byte_offset) * 8 - slice_header_bit_len - 8;
+			} else {
+				*use_len = s->multi_slice == 0 ? len : find_next_startcode(buf, len, s->sc_byte_offset);
+				slice_data_end = strip_slice_trailing_zeros(buf,
+					s->sc_byte_offset + slice_header_bit_len / 8 + 1,
+					*use_len);
+				s->cur_slice_bit_len = (slice_data_end - s->sc_byte_offset) * 8 - slice_header_bit_len - 8;
+			}
+#endif
+			if (s->drop_b_frame_en
+			    && s->sh.slice_type == H264_SLICE_B
+			    && s->nal_ref_idc == 0
+			    && s->picture_structure == PICT_FRAME) {
+
+				if (s->sh.first_mb_in_slice == 0)
+					s->dropping_b_frame = 1;
+
+				if (s->dropping_b_frame && s->frame_info.cur_pic_ptr) {
+					struct h264_picture *pic = s->frame_info.cur_pic_ptr;
+					int rotmir_idx = pic->rotmir_idx;
+					if (rotmir_idx >= 0 && s->frame_info.picture[rotmir_idx].frame) {
+						fm_decoder_frame_to_render(s->decoder.fm,
+							s->frame_info.picture[rotmir_idx].frame, 0);
+						fm_decoder_put_frame(s->decoder.fm,
+							s->frame_info.picture[rotmir_idx].frame);
+						s->frame_info.picture[rotmir_idx].frame = NULL;
+					}
+					fm_decoder_frame_to_render(s->decoder.fm, pic->frame, 0);
+					fm_decoder_put_frame(s->decoder.fm, pic->frame);
+					pic->frame = NULL;
+					pic->refrence = 0;
+					s->frame_info.cur_pic_ptr = NULL;
+				}
+			} else {
+				s->dropping_b_frame = 0;
+				ret = decode_slice(s);
+				if (ret) {
+					loge("decode_slice error, ret: %d", ret);
+					error_flag = 1;
+					ret = DEC_ERR_NOT_SUPPORT;
+				}
 			}
 
-			*use_len = len;
+#ifndef SW_SEARCH_START_CODE_EN
+			// 3 indicates the start code prefix length(0x000001)
+			int slice_len = s->slice_end_offset - s->slice_offset - 3;
+			*use_len = (slice_len >= len) ? len : slice_len;
+#endif
 			break;
 		}
 		case NAL_TYPE_SPS: {
@@ -208,6 +246,21 @@ static int procese_nalu(struct h264_dec_ctx *s, unsigned char* buf, int len, int
 			if (ret) {
 				s->error = H264_DECODER_ERROR_PPS;
 			}
+			*use_len = read_bits_count(&s->gb) / 8 +
+				s->sc_byte_offset + s->remove_bytes;
+			break;
+		}
+		case NAL_TYPE_SEI: {
+			read_bits(&s->gb, 8);//Payload type
+			int size = read_bits(&s->gb, 8);//Payload size
+			skip_bits(&s->gb, size * 8);
+			read_bits(&s->gb, 8);
+			*use_len = read_bits_count(&s->gb) / 8 +
+				s->sc_byte_offset + s->remove_bytes;
+			break;
+		}
+		case NAL_TYPE_AUD: {
+			read_bits(&s->gb, 8);
 			*use_len = read_bits_count(&s->gb) / 8 +
 				s->sc_byte_offset + s->remove_bytes;
 			break;
@@ -253,11 +306,15 @@ int __h264_decode_init(struct mpp_decoder *ctx, struct decode_config *config)
 {
 	struct h264_dec_ctx *s = (struct h264_dec_ctx*)ctx;
 	s->ve_buf_handle = ve_buffer_allocator_create(VE_BUFFER_TYPE_DMA);
+	if (!s->ve_buf_handle) {
+		loge("ve_buffer_allocator_create failed\n");
+		return -1;
+	}
 
 	s->extra_frame_num = config->extra_frame_num;
 	s->b_frames_max_num = MAX_B_FRAMES; // it is a test val
 
-	struct packet_manager_init_cfg cfg;
+	struct packet_manager_init_cfg cfg = {0};
 	cfg.buffer_size = config->bitstream_buffer_size;
 	cfg.ve_buf_handle = s->ve_buf_handle;
 	cfg.packet_count = config->packet_count;
@@ -292,6 +349,7 @@ int __h264_decode_frame(struct mpp_decoder *ctx)
 	// 2. process extra data
 	if(s->curr_packet->flag & PACKET_FLAG_EXTRA_DATA) {
 		s->avcc = 1;
+		s->detect = 1;
 		ret = process_extradata(s, s->curr_packet->data, s->curr_packet->size);
 		pm_enqueue_empty_packet(s->decoder.pm, s->curr_packet);
 		return ret;
@@ -301,7 +359,7 @@ int __h264_decode_frame(struct mpp_decoder *ctx)
 	while (s->slice_offset+4 < s->curr_packet->size) {
 		int use_len = 0;
 		unsigned char* pos = s->curr_packet->data + s->slice_offset;
-		ret = procese_nalu(s, s->curr_packet->data + s->slice_offset,
+		ret = process_nalu(s, s->curr_packet->data + s->slice_offset,
 			s->curr_packet->size - s->slice_offset, &use_len);
 		if (ret) {
 			break;
@@ -312,7 +370,8 @@ int __h264_decode_frame(struct mpp_decoder *ctx)
 				(uint32_t)pos[2] << 8 | (uint32_t)pos[3]) + 4;
 
 		s->slice_offset += use_len;
-		logi("offset: %d 0x%x", s->slice_offset, s->slice_offset);
+		logi("s->slice_offset: %d, use_len: %d, packet size: %d\n",
+			s->slice_offset, use_len, (int)s->curr_packet->size);
 	}
 
 	if(s->curr_packet->flag & PACKET_FLAG_EOS) {
@@ -367,7 +426,28 @@ int __h264_decode_destroy(struct mpp_decoder *ctx)
 
 int __h264_decode_control(struct mpp_decoder *ctx, int cmd, void *param)
 {
-	// TODO
+	struct h264_dec_ctx *s = (struct h264_dec_ctx *)ctx;
+	struct mpp_size *max_resolution = NULL;
+
+	switch (cmd) {
+		case MPP_DEC_SET_MAX_RESOLUTION:
+			max_resolution = (struct mpp_size*)param;
+			s->max_width = max_resolution->width;
+			s->max_height = max_resolution->height;
+			return 0;
+		case MPP_DEC_SET_NO_B_FRAME:
+			s->no_b_frame = *((int*)param);
+			break;
+		case MPP_DEC_SET_DROP_B_FRAME:
+			s->drop_b_frame_en = *((int*)param);
+			break;
+		case MPP_DEC_INIT_CMD_SET_ROT_FLIP_FLAG:
+			s->decoder.rotmir_flag = *(int *)param;
+			return 0;
+		default:
+			break;
+	}
+
 	return 0;
 }
 
@@ -378,6 +458,7 @@ int __h264_decode_reset(struct mpp_decoder *ctx)
 	render_all_delayed_frame(s);
 	// refresh reference frame
 	reference_refresh(s);
+	s->dropping_b_frame = 0;
 	//force reclaim all frame used by decoder avoid frame lost
 	fm_decoder_reclaim_all_used_frame(s->decoder.fm);
 	s->next_output_poc = INT_MIN;
@@ -427,6 +508,11 @@ struct mpp_decoder* create_h264_decoder()
 	for(i=0; i<MAX_DELAYED_PIC_COUNT; i++) {
 		s->frame_info.last_pocs[i] = INT_MIN;
 	}
+
+	s->rotmir_h_offset = 0;
+	s->rotmir_v_offset = 0;
+	s->rotmir_width = 0;
+	s->rotmir_height = 0;
 
 	return &s->decoder;
 }

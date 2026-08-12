@@ -30,22 +30,3 @@ void ui_style_init(lv_style_t *style)
   else
     lv_style_init(style);
 }
-
-lv_font_t *ui_font_init(char *path, int size) {
-#if LVGL_VERSION_MAJOR == 8
-    static lv_ft_info_t info;
-    info.name = path;
-    info.weight = size;
-    info.style = FT_FONT_STYLE_NORMAL;
-    info.mem = NULL;
-    if (!lv_ft_font_init(&info))
-        return NULL;
-    return info.font;
-#else
-    lv_font_t *font = lv_freetype_font_create(path,
-                                              LV_FREETYPE_FONT_RENDER_MODE_BITMAP,
-                                              size,
-                                              LV_FREETYPE_FONT_STYLE_NORMAL);
-    return font;
-#endif //LVGL_VERSION_MAJOR
-}

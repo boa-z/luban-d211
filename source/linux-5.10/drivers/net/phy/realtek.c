@@ -243,6 +243,10 @@ static int rtl8211f_config_init(struct phy_device *phydev)
 			val_rxdly ? "enabled" : "disabled");
 	}
 
+	// add by artinchip 2026/01/04
+	/* disabled EEE advertise to avoid auto-negotiation exception  */
+	phy_write_mmd(phydev, MDIO_MMD_AN, MDIO_AN_EEE_ADV, 0);
+
 	return 0;
 }
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2024 ArtInChip Technology Co. Ltd
+ * Copyright (C) 2020-2026 ArtInChip Technology Co. Ltd
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -40,11 +40,13 @@ s32 flv_read(struct aic_parser *parser, struct aic_parser_packet *pkt)
 s32 flv_get_media_info(struct aic_parser *parser,
                        struct aic_parser_av_media_info *media)
 {
-    int i;
-    int64_t duration = 0;
     struct aic_flv_parser *c = (struct aic_flv_parser *)parser;
+    struct aic_av_audio_stream *audio_stream;
+    int64_t duration = 0;
+    int i;
 
     logi("================ media info =======================");
+    media->audio_track_count = 0;
     for (i = 0; i < c->nb_streams; i++) {
         struct flv_stream_ctx *st = c->streams[i];
         if (st->codecpar.codec_type == MPP_MEDIA_TYPE_VIDEO) {
@@ -71,25 +73,29 @@ s32 flv_get_media_info(struct aic_parser *parser,
             logi("video extra_data_size: %d", st->codecpar.extradata_size);
         } else if (st->codecpar.codec_type == MPP_MEDIA_TYPE_AUDIO) {
             media->has_audio = 1;
+            audio_stream = &media->audio_stream[media->audio_track_count];
             if (st->codecpar.codec_id == CODEC_ID_MP3)
-                media->audio_stream.codec_type = MPP_CODEC_AUDIO_DECODER_MP3;
+                audio_stream->codec_type = MPP_CODEC_AUDIO_DECODER_MP3;
             else if (st->codecpar.codec_id == CODEC_ID_AAC)
-                media->audio_stream.codec_type = MPP_CODEC_AUDIO_DECODER_AAC;
+                audio_stream->codec_type = MPP_CODEC_AUDIO_DECODER_AAC;
             else
-                media->audio_stream.codec_type = MPP_CODEC_AUDIO_DECODER_UNKOWN;
+                audio_stream->codec_type = MPP_CODEC_AUDIO_DECODER_UNKOWN;
 
-            media->audio_stream.bits_per_sample =
+            audio_stream->bits_per_sample =
                 st->codecpar.bits_per_coded_sample;
-            media->audio_stream.nb_channel = st->codecpar.channels;
-            media->audio_stream.sample_rate = st->codecpar.sample_rate;
+            audio_stream->nb_channel = st->codecpar.channels;
+            audio_stream->sample_rate = st->codecpar.sample_rate;
             if (st->codecpar.extradata_size > 0) {
-                media->audio_stream.extra_data_size =
+                audio_stream->extra_data_size =
                     st->codecpar.extradata_size;
-                media->audio_stream.extra_data = st->codecpar.extradata;
+                audio_stream->extra_data = st->codecpar.extradata;
             }
+            audio_stream->track_id = st->codecpar.audio_track_id;
             st->duration = c->duration;
+            media->audio_track_count++;
+
             logi("audio codec_type: %d codec_id %d",
-                 media->audio_stream.codec_type, st->codecpar.codec_id);
+                 audio_stream->codec_type, st->codecpar.codec_id);
             logi("audio bits_per_sample: %d",
                  st->codecpar.bits_per_coded_sample);
             logi("audio channels: %d", st->codecpar.channels);
@@ -103,9 +109,15 @@ s32 flv_get_media_info(struct aic_parser *parser,
             duration = st->duration;
     }
 
-    media->file_size = aic_stream_size(c->stream);
-    media->seek_able = 1;
-    media->duration = duration;
+    if (c->live_stream) {
+        media->file_size = -1;
+        media->seek_able = 0;
+        media->duration = -1;
+    } else {
+        media->file_size = aic_stream_size(c->stream);
+        media->seek_able = 1;
+        media->duration = duration;
+    }
 
     return 0;
 }
@@ -114,6 +126,12 @@ s32 flv_seek(struct aic_parser *parser, s64 time)
 {
     s32 ret = 0;
     struct aic_flv_parser *flv_parse_parser = (struct aic_flv_parser *)parser;
+
+    if (flv_parse_parser->live_stream) {
+        logi("flv stream is live, seek is not supported");
+        return -1;
+    }
+
     ret = flv_seek_packet(flv_parse_parser, time);
     return ret;
 }
@@ -162,6 +180,8 @@ s32 aic_flv_parser_create(unsigned char *uri, struct aic_parser **parser)
         ret = -1;
         goto exit;
     }
+
+    aic_stream_control(flv_parser->stream, STREAM_GET_LIVE_STATE, &flv_parser->live_stream);
 
     flv_parser->base.get_media_info = flv_get_media_info;
     flv_parser->base.peek = flv_peek;

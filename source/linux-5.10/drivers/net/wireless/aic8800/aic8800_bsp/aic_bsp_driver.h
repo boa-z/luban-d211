@@ -501,6 +501,7 @@ enum chip_rev {
 #define AICBT_TXPWR_LVL            0x00006020
 #define AICBT_TXPWR_LVL_8800dc            0x00006f2f
 #define AICBT_TXPWR_LVL_8800d80           0x00006f2f
+#define AICBT_TXPWR_LVL_8800d80n           0x00006f2f
 #define AICBT_TXPWR_LVL_8800d80x2           0x00006f2f
 
 
@@ -510,6 +511,7 @@ enum chip_rev {
 
 #define AICBT_BTMODE_DEFAULT_8800d80x2    AICBT_BTMODE_BT_ONLY_COANT
 #define AICBT_BTMODE_DEFAULT_8800d80    AICBT_BTMODE_BT_ONLY_COANT
+#define AICBT_BTMODE_DEFAULT_8800d80n    AICBT_BTMODE_BT_ONLY_COANT
 #define AICBT_BTMODE_DEFAULT            AICBT_BTMODE_BT_ONLY_SW
 #ifdef CONFIG_SDIO_BT
 #define AICBT_BTPORT_DEFAULT            AICBT_BTPORT_MB
@@ -522,6 +524,7 @@ enum chip_rev {
 #define AICBT_TXPWR_LVL_DEFAULT         AICBT_TXPWR_LVL
 #define AICBT_TXPWR_LVL_DEFAULT_8800dc  AICBT_TXPWR_LVL_8800dc
 #define AICBT_TXPWR_LVL_DEFAULT_8800d80 AICBT_TXPWR_LVL_8800d80
+#define AICBT_TXPWR_LVL_DEFAULT_8800d80n AICBT_TXPWR_LVL_8800d80n
 #define AICBT_TXPWR_LVL_DEFAULT_8800d80x2 AICBT_TXPWR_LVL_8800d80x2
 
 
@@ -593,6 +596,7 @@ extern const struct aicbsp_firmware fw_8800dc_h_u02[];
 extern const struct aicbsp_firmware fw_8800d80_u01[];
 extern const struct aicbsp_firmware fw_8800d80_u02[];
 extern const struct aicbsp_firmware fw_8800d80_h_u02[];
+extern const struct aicbsp_firmware fw_8800d80n_u02[];
 extern const struct aicbsp_firmware fw_8800d80x2[];
 
 #endif

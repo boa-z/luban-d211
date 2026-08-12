@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2023 ArtInChip Technology Co. Ltd
+ * Copyright (C) 2020-2026 ArtInChip Technology Co. Ltd
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -17,6 +17,11 @@ const struct codec_tag mp4_obj_type[] = {
     { CODEC_ID_MP3         , 0x69 }, /* 13818-3 */
     { CODEC_ID_MP3         , 0x6B }, /* 11172-3 */
     { CODEC_ID_MJPEG       , 0x6C }, /* 10918-1 */
+    { CODEC_ID_MPEG12      , 0x01 }, /* 11172-2 */
+    { CODEC_ID_MPEG12      , 0x02 }, /* 13818-2 */
+    { CODEC_ID_MPEG12      , 0x61 }, /* private */
+    { CODEC_ID_MPEG12      , 0x6A }, /* private */
+    { CODEC_ID_MPEG4       , 0x20 }, /* MPEG-4 Video 14496-2 */
     { CODEC_ID_NONE        ,    0 },
 };
 
@@ -76,6 +81,12 @@ const struct codec_tag mov_video_tags[] = {
     { CODEC_ID_H264,   MKTAG('d', 'v', 'a', '1') }, /* AVC-based Dolby Vision derived from avc1 */
     { CODEC_ID_H264,   MKTAG('d', 'v', 'a', 'v') }, /* AVC-based Dolby Vision derived from avc3 */
 
+    { CODEC_ID_MPEG12, MKTAG('M', 'P', 'G', '1') }, /* MPEG1VIDEO Codec */
+    { CODEC_ID_MPEG12, MKTAG('m', 'p', 'g', '1') }, /* MPEG1VIDEO Codec */
+    { CODEC_ID_MPEG12, MKTAG('M', 'P', 'G', '2') }, /* MPEG2VIDEO Codec */
+    { CODEC_ID_MPEG12, MKTAG('m', 'p', 'g', '2') }, /* MPEG2VIDEO Codec */
+    { CODEC_ID_MPEG4,  MKTAG('F', 'M', 'P', '4') }, /* MPEG-4 */
+    { CODEC_ID_MPEG4,  MKTAG('f', 'm', 'p', '4') }, /* MPEG-4 */
     { CODEC_ID_NONE,   0 },
 };
 

@@ -204,7 +204,8 @@ typedef enum rsa_event {
 
 /****** SHA mode ******/
 typedef enum sha_mode {
-	SHA_MODE_1		= 1U,   // SHA_1 mode
+	MD5_MODE		= 0U,   // MD5 mode
+	SHA_MODE_1,			// SHA_1 mode
 	SHA_MODE_256,			// SHA_256 mode
 	SHA_MODE_224,			// SHA_224 mode
 	SHA_MODE_512,			// SHA_512 mode

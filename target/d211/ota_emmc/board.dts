@@ -524,6 +524,8 @@
 
 	gmac1_mdio: mdio {
 		compatible = "aicmac-mdio";
+		#address-cells = <1>;
+		#size-cells = <0>;
 		gmac1_phy: ethernet-phy@1 {
 			reg = <1>;
 		};

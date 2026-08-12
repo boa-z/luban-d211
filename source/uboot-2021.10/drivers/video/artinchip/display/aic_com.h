@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /*
- * Copyright (c) 2020-2021 ArtInChip Technology Co.,Ltd
+ * Copyright (c) 2020-2026 ArtInChip Technology Co.,Ltd
  * Ning Fang <ning.fang@artinchip.com>
  */
 #ifndef _AIC_COM_H_
@@ -198,6 +198,7 @@ struct de_funcs {
 struct di_funcs {
 	enum AIC_COM_TYPE type;
 	s32 (*clk_enable)(void);
+	s32 (*clk_disable)(void);
 	s32 (*enable)(void);
 	s32 (*attach_panel)(struct aic_panel *panel);
 	s32 (*pixclk2mclk)(ulong pixclk);
@@ -225,6 +226,7 @@ struct aic_panel {
 	struct aic_panel_funcs *funcs;
 	struct aic_panel_callbacks callbacks;
 	struct aic_tearing_effect te;
+	int id;
 	int disp_dither;
 	struct fb_videomode *vm;
 	struct udevice *dev;
@@ -236,6 +238,8 @@ struct aic_panel {
 	};
 	void *panel_private;
 };
+
+int panel_get_screen_id(struct aic_panel *panel);
 
 static inline void aic_delay_ms(u32 ms)
 {

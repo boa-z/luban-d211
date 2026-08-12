@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2023 ArtInChip Technology Co. Ltd
+ * Copyright (C) 2020-2026 ArtInChip Technology Co. Ltd
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -12,30 +12,8 @@
 #define _AIC_AUDIO_DECODER_H_
 
 #include "mpp_dec_type.h"
-
-enum aic_audio_codec_type {
-	MPP_CODEC_AUDIO_DECODER_UNKOWN = -1,
-	MPP_CODEC_AUDIO_DECODER_MP3,         // decoder
-	MPP_CODEC_AUDIO_DECODER_AAC,
-    MPP_CODEC_AUDIO_DECODER_PCM,
-};
-
-struct aic_audio_frame {
-	s32  sample_rate;
-	s32  bits_per_sample;
-	s32  channels;
-	s64  pts;
-	s32  id;
-	void  *data;
-	u32  size;
-	u32  flag;
-};
-
-struct aic_audio_decode_config {
-	s32 packet_buffer_size;				// video bytestream size
-	s32 packet_count;				// packet buffer count
-	s32 frame_count;				// packet buffer count
-};
+#include "audio_frame_manager.h"
+#include "audio_packet_manager.h"
 
 struct aic_audio_decoder;
 
@@ -78,6 +56,13 @@ s32 aic_audio_decoder_get_packet(struct aic_audio_decoder* decoder, struct mpp_p
  * @packet: the packet filled by application
  */
 s32 aic_audio_decoder_put_packet(struct aic_audio_decoder* decoder, struct mpp_packet* packet);
+
+/**
+ * aic_audio_decoder_return_packet - return the packet to empty list (bypass decode)
+ * @decoder: aic_audio_decoder context
+ * @packet: the packet to be returned to empty pool
+ */
+s32 aic_audio_decoder_return_packet(struct aic_audio_decoder* decoder, struct mpp_packet* packet);
 
 /**
  * aic_audio_decoder_get_frame - get a display frame from decoder

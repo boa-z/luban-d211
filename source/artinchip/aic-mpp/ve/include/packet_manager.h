@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2022 Artinchip Technology Co. Ltd
+ * Copyright (C) 2020-2026 ArtInChip Technology Co. Ltd
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -56,9 +56,19 @@ int pm_enqueue_ready_packet(struct packet_manager *pm, struct mpp_packet *packet
 struct packet *pm_dequeue_ready_packet(struct packet_manager *pm);
 
 /*
+	Return the packet to empty list (bypass decode)
+*/
+int pm_return_empty_packet(struct packet_manager *pm, struct mpp_packet *packet);
+
+/*
 	codec put the packet to empty list
 */
 int pm_enqueue_empty_packet(struct packet_manager *pm, struct packet *packet);
+
+/*
+	Return the packet to the ready list to support retry handling
+*/
+int pm_requeue_ready_packet(struct packet_manager *pm, struct packet *packet);
 
 /*
 	get the packet number of empty list

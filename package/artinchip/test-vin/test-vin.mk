@@ -1,0 +1,13 @@
+TEST_VIN_VERSION =
+TEST_VIN_ENABLE_TARBALL = NO
+TEST_VIN_ENABLE_PATCH = NO
+
+TEST_VIN_DEPENDENCIES += test-common v4l-utils libdrm
+
+TEST_VIN_CONF_OPTS += -DCMAKE_INSTALL_PREFIX=/usr/local
+
+ifeq ($(BR2_PACKAGE_AIC_MPP),y)
+TEST_VIN_CONF_OPTS += -DUSE_GE_ROTATION=yes
+endif
+
+$(eval $(cmake-package))

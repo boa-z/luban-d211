@@ -1,0 +1,4 @@
+menuconfig BR2_PACKAGE_TEST_KEY_SUSPEND
+	bool "test-key-suspend"
+	default y
+

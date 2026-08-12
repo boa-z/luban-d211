@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2023 ArtInChip Technology Co. Ltd
+ * Copyright (C) 2020-2026 ArtInChip Technology Co. Ltd
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -32,7 +32,154 @@ struct aic_raw_parser {
 	int cur_read_len;
 	int stream_end_flag;
 	int packet_index;
+
+	/* cached SPS info */
+	int width, height, fps;
 };
+
+/* -- bit helpers (copied from mpegts.c) -- */
+static uint32_t read_bit(const uint8_t *d, int *p, int n, int len)
+{
+	uint32_t v = 0;
+	int max = len * 8;
+
+	for (int i = 0; i < n && *p < max; i++, (*p)++)
+		v = (v << 1) | ((d[*p >> 3] >> (7 - (*p & 7))) & 1);
+	return v;
+}
+
+static uint32_t read_ue(const uint8_t *d, int *p, int len)
+{
+	int z = 0, max = len * 8;
+
+	while (*p < max && read_bit(d, p, 1, len) == 0 && z < 31)
+		z++;
+	if (*p >= max)
+		return 0;
+	return z ? (1 << z) - 1 + read_bit(d, p, z, len) : 0;
+}
+
+/* EPB strip */
+static int rbsp_clean(const uint8_t *n, int len, uint8_t *o, int max)
+{
+	int w = 0;
+
+	for (int i = 0; i < len && w < max; i++) {
+		if (i + 2 < len && !n[i] && !n[i + 1] && n[i + 2] == 3) {
+			o[w++] = 0;
+			o[w++] = 0;
+			i += 2;
+			continue;
+		}
+		o[w++] = n[i];
+	}
+	return (w < max) ? w : -1;
+}
+
+/*
+ * Parse SPS RBSP (no NAL header, EPB already stripped).
+ * Adapted from mpegts.c:parser_h264_sps + VUI timing.
+ */
+static int sps_parse(const uint8_t *d, int len, int *w, int *h, int *fps)
+{
+	int p = 0;
+
+	*w = 0;
+	*h = 0;
+	*fps = 0;
+	if (len < 7)
+		return -1;
+
+	int prof = read_bit(d, &p, 8, len);
+
+	read_bit(d, &p, 16, len); /* constraint + level */
+	read_ue(d, &p, len);      /* sps_id */
+
+	if (prof == 100) { /* High */
+		read_ue(d, &p, len);
+		read_ue(d, &p, len);
+		read_ue(d, &p, len);
+		read_bit(d, &p, 1, len);
+		if (read_bit(d, &p, 1, len))
+			return -1;
+	}
+
+	read_ue(d, &p, len); /* log2_max_frame_num */
+	int poc = read_ue(d, &p, len);
+
+	if (poc == 0) {
+		read_ue(d, &p, len);
+	} else if (poc == 1) {
+		read_bit(d, &p, 1, len);
+		read_ue(d, &p, len);
+		read_ue(d, &p, len);
+		int n = read_ue(d, &p, len);
+
+		while (n--)
+			read_ue(d, &p, len);
+	}
+
+	read_ue(d, &p, len);     /* max_num_ref_frames */
+	read_bit(d, &p, 1, len); /* gaps */
+	int pw = read_ue(d, &p, len) + 1;
+	int ph = read_ue(d, &p, len) + 1;
+	int fm = read_bit(d, &p, 1, len);
+
+	*w = pw * 16;
+	*h = (fm ? ph : ph * 2) * 16;
+
+	if (!fm)
+		read_bit(d, &p, 1, len);
+	read_bit(d, &p, 1, len);
+
+	if (read_bit(d, &p, 1, len)) { /* crop */
+		read_ue(d, &p, len);
+		read_ue(d, &p, len);
+		read_ue(d, &p, len);
+		read_ue(d, &p, len);
+	}
+
+	/* VUI */
+	if (read_bit(d, &p, 1, len)) {
+		/* aspect_ratio */
+		if (read_bit(d, &p, 1, len)) {
+			int idc = read_bit(d, &p, 8, len);
+
+			if (idc == 255) {
+				read_bit(d, &p, 16, len);
+				read_bit(d, &p, 16, len);
+			}
+		}
+		/* overscan */
+		if (read_bit(d, &p, 1, len))
+			read_bit(d, &p, 1, len);
+		/* video_signal */
+		if (read_bit(d, &p, 1, len)) {
+			read_bit(d, &p, 3, len);
+			read_bit(d, &p, 1, len);
+			if (read_bit(d, &p, 1, len)) {
+				read_bit(d, &p, 8, len);
+				read_bit(d, &p, 8, len);
+				read_bit(d, &p, 8, len);
+			}
+		}
+		/* chroma_loc */
+		if (read_bit(d, &p, 1, len)) {
+			read_ue(d, &p, len);
+			read_ue(d, &p, len);
+		}
+		/* timing */
+		if (read_bit(d, &p, 1, len)) {
+			int nu = read_bit(d, &p, 32, len);
+			int ts = read_bit(d, &p, 32, len);
+
+			read_bit(d, &p, 1, len);
+			if (nu > 0 && ts > 0)
+				*fps = ts / (2 * nu);
+		}
+	}
+	return 0;
+}
 
 static int get_data(struct aic_raw_parser* p)
 {
@@ -80,7 +227,7 @@ s32 raw_peek(struct aic_parser *parser ,struct aic_parser_packet *pkt)
 			return -1;
 		}
 	}
-
+	pkt->flag = 0; 
 	pkt->type = MPP_MEDIA_TYPE_VIDEO;
 
 find_start_code:
@@ -182,15 +329,16 @@ s32 raw_read(struct aic_parser *parser ,struct aic_parser_packet *pkt)
 
 s32 raw_get_media_info(struct aic_parser *parser ,struct aic_parser_av_media_info *media)
 {
+	struct aic_raw_parser *p = (struct aic_raw_parser *)parser;
+
 	media->has_audio = 0;
 	media->has_video = 1;
 	media->seek_able = 0;
 	media->duration = 0;
 	media->video_stream.codec_type = MPP_CODEC_VIDEO_DECODER_H264;
-
-	// unkown width and height from raw data
-	media->video_stream.height = 0;
-	media->video_stream.width = 0;
+	media->video_stream.width  = p->width;
+	media->video_stream.height = p->height;
+	media->video_stream.frame_rate = p->fps > 0 ? p->fps : 30;
 
 	return 0;
 }
@@ -203,13 +351,67 @@ s32 raw_seek(struct aic_parser *parser , s64 time)
 
 s32 raw_init(struct aic_parser *parser)
 {
-	// do nothing
+	struct aic_raw_parser *p = (struct aic_raw_parser *)parser;
+	int n, pos = 0;
+
+	if (!p)
+		return -1;
+
+	if (p->valid_size <= 0) {
+		n = aic_stream_read(p->stream, p->stream_buf, p->buf_len);
+		if (n < 10)
+			return -1;
+		p->valid_size = n;
+	} else {
+		n = p->valid_size;
+	}
+
+	while (pos < n - 4) {
+		int sc = 0;
+		if (p->stream_buf[pos] == 0 && p->stream_buf[pos + 1] == 0) {
+			if (p->stream_buf[pos + 2] == 1)
+				sc = 3;
+			else if (p->stream_buf[pos + 2] == 0 &&
+				 p->stream_buf[pos + 3] == 1)
+				sc = 4;
+		}
+		if (sc) {
+			int t = p->stream_buf[pos + sc] & 0x1F;
+			if (t == 7) { /* SPS */
+				int end = pos + sc + 1;
+				while (end < n - 3) {
+					if (p->stream_buf[end] == 0 &&
+					    p->stream_buf[end + 1] == 0 &&
+					    (p->stream_buf[end + 2] == 1 ||
+					     (p->stream_buf[end + 2] == 0 &&
+					      p->stream_buf[end + 3] == 1)))
+						break;
+					end++;
+				}
+				/* NAL hdr at pos+sc, RBSP at pos+sc+1, len = end-pos-sc-1 */
+				int nal_len = end - pos - sc;
+				uint8_t clean[256];
+				int clen = rbsp_clean(p->stream_buf + pos + sc + 1,
+						      nal_len - 1, clean, sizeof(clean));
+				if (clen > 0)
+					sps_parse(clean, clen,
+						  &p->width, &p->height,
+						  &p->fps);
+				return 0;
+			}
+			pos += sc + 1;
+		} else {
+			pos++;
+		}
+	}
+
+	aic_stream_seek(p->stream, 0, SEEK_SET);
 	return 0;
 }
 
 s32 raw_destroy(struct aic_parser *parser)
 {
-	struct aic_raw_parser *impl = (struct aic_raw_parser*)parser;
+	struct aic_raw_parser *impl = (struct aic_raw_parser *)parser;
 	if (impl == NULL) {
 		return -1;
 	}

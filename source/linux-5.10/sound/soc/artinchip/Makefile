@@ -14,3 +14,6 @@ obj-$(CONFIG_SND_SOC_AIC_CODEC) += snd-soc-aic-codec.o
 
 snd-soc-aic-ac107-objs := aic-ac107.o
 obj-$(CONFIG_SND_SOC_AIC_AC107) += snd-soc-aic-ac107.o
+
+snd-soc-aic-dummy-objs := aic-dummy.o
+obj-$(CONFIG_SND_SOC_AIC_DUMMY) += snd-soc-aic-dummy.o

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 /*
- * Copyright (c) 2023-2024 ArtInChip Inc.
+ * Copyright (c) 2023-2026 ArtInChip Inc.
  * Authors: ArtInChip
  */
 #include <common.h>
@@ -113,7 +113,7 @@ struct aic_clks aic_clk_names[] = {
 };
 #endif /* CLK_ARTINCHIP_V1_0 */
 
-#ifdef CONFIG_CLK_ARTINCHIP_CMU_V2_0
+#ifdef CONFIG_CLK_ARTINCHIP_CMU_V2_x
 #include <dt-bindings/clock/artinchip,aic-cmu-v20.h>
 struct aic_clks aic_clk_names[] = {
 	/* Fixed rate clock */
@@ -178,7 +178,7 @@ struct aic_clks aic_clk_names[] = {
 };
 #endif	/*CLK_ARTINCHIP_V2_0*/
 
-#ifdef CONFIG_CLK_ARTINCHIP_CMU_V3_0
+#ifdef CONFIG_CLK_ARTINCHIP_CMU_V3_x
 #include <dt-bindings/clock/artinchip,aic-cmu-v30.h>
 struct aic_clks aic_clk_names[] = {
 	/* Fixed rate clock */
@@ -191,11 +191,16 @@ struct aic_clks aic_clk_names[] = {
 	CLK_NAME(CLK_PLL_INT0),
 	CLK_NAME(CLK_PLL_INT1),
 	/* system clock */
+	CLK_NAME(CLK_CPU_SRC),
 	CLK_NAME(CLK_CPU0),
 	CLK_NAME(CLK_CPU1),
 	CLK_NAME(CLK_AHB),
 	CLK_NAME(CLK_AXI),
 	CLK_NAME(CLK_APB),
+	CLK_NAME(CLK_PRE_DIV1),
+	CLK_NAME(CLK_PRE_DIV2),
+	CLK_NAME(CLK_PRE_DIV4),
+	CLK_NAME(CLK_AUD_SCLK),
 	/* Peripheral clock */
 	CLK_NAME(CLK_SYSCFG),
 	CLK_NAME(CLK_DMA0),
@@ -226,9 +231,9 @@ struct aic_clks aic_clk_names[] = {
 	CLK_NAME(CLK_UART6),
 	CLK_NAME(CLK_UART7),
 	CLK_NAME(CLK_LCD0),
-	CLK_NAME(CLK_LVDS0),
+	CLK_NAME(CLK_LVDS_TX0),
 	CLK_NAME(CLK_LCD1),
-	CLK_NAME(CLK_LVDS1),
+	CLK_NAME(CLK_LVDS_TX1),
 	CLK_NAME(CLK_DE),
 	CLK_NAME(CLK_SID),
 	CLK_NAME(CLK_I2C0),

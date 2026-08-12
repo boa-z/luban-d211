@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 /*
- * Copyright (C) 2020-2025 ArtInChip Technology Co., Ltd.
+ * Copyright (C) 2020-2026 ArtInChip Technology Co., Ltd.
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -15,13 +15,16 @@
 #include <sys/time.h>
 
 #include <video/artinchip_fb.h>
-#include <artinchip/sample_base.h>
+
+#include "artinchip/sample_base.h"
 
 #ifdef SUPPORT_ROTATION
 #include "mpp_ge.h"
 #endif
 
 /* Global macro and variables */
+
+#define DVP_DEBUG_NO_SIGNAL
 
 #define VID_BUF_NUM		3
 #define DVP_PLANE_NUM		2
@@ -49,11 +52,10 @@ struct video_plane {
 	int fd;
 	int buf;
 	int len;
+	char *vaddr;
 };
 
 struct video_buf_info {
-	char *vaddr;
-	u32 len;
 	u32 offset;
 	struct video_plane planes[DVP_PLANE_NUM];
 };
@@ -63,6 +65,7 @@ struct aic_video_data {
 	int h;
 	int frame_size;
 	int fmt;  // output format
+	bool sfield_mode;
 	struct v4l2_subdev_format src_fmt;
 	struct video_buf_info binfo[VID_BUF_NUM + 1];
 };
@@ -86,6 +89,7 @@ struct aic_media_dev {
 	int fb_fd;
 	int fb_xres;
 	int fb_yres;
+	struct aicfb_layer_data cached_layer;
 };
 
 static struct aic_media_dev g_mdev = {0};
@@ -120,7 +124,7 @@ int device_open(char *_fname, int _flag)
 	if (fd < 0) {
 		ERR("Failed to open %s errno: %d[%s]\n",
 			_fname, errno, strerror(errno));
-		exit(0);
+		return -1;
 	}
 	return fd;
 }
@@ -280,6 +284,66 @@ int dvp_cfg(int width, int height, int format)
 	return 0;
 }
 
+#ifdef DVP_DEBUG_NO_SIGNAL
+static void dvp_fill_buf(struct video_buf_info *binfo)
+{
+	struct dma_buf_sync flag = {DMA_BUF_SYNC_WRITE | DMA_BUF_SYNC_END};
+	u32 height = g_vdata.h;
+	u32 width = g_vdata.w;
+	char *y = binfo->planes[0].vaddr;
+	u32 block_height = 100;
+	u32 r, c;
+
+	if (!width || !height || !y)
+		return;
+
+	if (g_vdata.sfield_mode)
+		block_height /= 2;
+
+	for (r = 0; r < height; r++)
+		for (c = 0; c < width; c++)
+			y[r * width + c] = ((r / block_height + c / 100) & 1) ? 0x1C : 0xA1;
+
+	if (ioctl(binfo->planes[0].fd, DMA_BUF_IOCTL_SYNC, &flag) < 0)
+		ERR("plane 0: DMA sync failed! err %d[%s]\n", errno, strerror(errno));
+
+	if (binfo->planes[1].vaddr) {
+		memset(binfo->planes[1].vaddr, 0x80, binfo->planes[1].len);
+		if (ioctl(binfo->planes[1].fd, DMA_BUF_IOCTL_SYNC, &flag) < 0)
+			ERR("plane 1: DMA sync failed! err %d[%s]\n", errno, strerror(errno));
+	}
+}
+
+static int dvp_mmap_buf(int index, u32 plane_num, struct v4l2_plane *vplane,
+			struct video_buf_info *binfo)
+{
+	struct video_plane *plane = binfo->planes;
+	int i, sum = 0;
+
+	for (i = 0; i < plane_num; i++, plane++) {
+		if (!plane->fd)
+			continue;
+
+		plane->vaddr = mmap(NULL, vplane[i].length,
+				    PROT_READ | PROT_WRITE, MAP_SHARED,
+				    g_mdev.video_fd, vplane[i].m.mem_offset);
+		if (plane->vaddr == MAP_FAILED) {
+			ERR("buf %d-%d: Failed to mmap %d for fd %d! err %d[%s]\n",
+			    index, i, vplane[i].length, g_mdev.video_fd,
+			    errno, strerror(errno));
+			plane->vaddr = NULL;
+			return -1;
+		}
+
+		plane->len = vplane[i].length;
+		sum += plane->len;
+	}
+
+	dvp_fill_buf(binfo);
+	return sum;
+}
+#endif
+
 int dvp_expbuf(int index)
 {
 	int i;
@@ -320,21 +384,30 @@ int dvp_request_buf(int num)
 	}
 
 	for (i = 0; i < num; i++) {
+#ifdef DVP_DEBUG_NO_SIGNAL
+		struct video_buf_info *binfo = &g_vdata.binfo[i];
+#endif
 	        if (dvp_expbuf(i) < 0)
 			return -1;
 
 	        memset(&buf, 0, sizeof(struct v4l2_buffer));
-	        memset(planes, 0, sizeof(struct v4l2_plane) * DVP_PLANE_NUM);
-	        buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
-	        buf.index = i;
-	        buf.length = DVP_PLANE_NUM;
-	        buf.memory = V4L2_MEMORY_DMABUF;
-	        buf.m.planes = planes;
+		memset(planes, 0, sizeof(struct v4l2_plane) * DVP_PLANE_NUM);
+		buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
+		buf.index = i;
+		buf.length = DVP_PLANE_NUM;
+		buf.memory = V4L2_MEMORY_DMABUF;
+		buf.m.planes = planes;
 	        if (ioctl(g_mdev.video_fd, VIDIOC_QUERYBUF, &buf) < 0) {
 			ERR("ioctl() failed! err %d[%s]\n",
 				errno, strerror(errno));
 			return -1;
 	        }
+
+#ifdef DVP_DEBUG_NO_SIGNAL
+		/* mmap and fill all buffers with black-white pattern */
+		if (dvp_mmap_buf(i, DVP_PLANE_NUM, planes, binfo) < 0)
+			return -1;
+#endif
 	}
 
 	return 0;
@@ -342,14 +415,16 @@ int dvp_request_buf(int num)
 
 void dvp_release_buf(int num)
 {
-	int i;
+	int i, j;
 	struct video_buf_info *binfo = NULL;
 
 	for (i = 0; i < num; i++) {
 		binfo = &g_vdata.binfo[i];
-		if (binfo->vaddr) {
-			munmap(binfo->vaddr, binfo->len);
-			binfo->vaddr = NULL;
+		for (j = 0; j < DVP_PLANE_NUM; j++) {
+			if (binfo->planes[j].vaddr) {
+				munmap(binfo->planes[j].vaddr, binfo->planes[j].len);
+				binfo->planes[j].vaddr = NULL;
+			}
 		}
 	}
 }
@@ -482,16 +557,73 @@ int do_rotate(struct aic_video_data *vdata, int index)
 }
 #endif
 
-#define DVP_SCALE_OFFSET	10
-
-int video_layer_set(struct aic_video_data *vdata, int index)
+bool dvp_sfield_mode_get(void)
 {
-	struct aicfb_layer_data layer = {0};
-	struct video_buf_info *binfo = &vdata->binfo[index];
-	u32 video_w, video_h, fb_xres, fb_yres;
+	char *param_file = "/sys/module/aic_dvp/parameters/sfield";
+	char buf[8] = {0};
+	int fd = -1;
 
-	layer.layer_id = 0;
-	layer.enable = 1;
+	fd = open(param_file, O_RDONLY);
+	if (fd < 0) {
+		ERR("open %s failed\n", param_file);
+		return false;
+	}
+
+	if (read(fd, buf, sizeof(buf)) < 0) {
+		ERR("read %s failed\n", param_file);
+		close(fd);
+		return false;
+	}
+	close(fd);
+
+	if (!strncmp(buf, "1", 1)) {
+		printf("Enable sfield mode\n");
+		return true;
+	}
+
+	return false;
+}
+
+static void dvp_show_fmt(struct aic_video_data *vdata)
+{
+	printf("\nThe stream format:\n");
+	printf("\t[Sensor] (0x%x)\n"
+	       "\t\t└─> [DVP] (0x%x)\n"
+	       "\t\t\t└─>[Panel] (0x%x)\n",
+	       vdata->src_fmt.format.code, vdata->fmt, vdata->fmt);
+}
+
+static void dvp_show_size(struct aic_video_data *vdata)
+{
+	struct aicfb_layer_data *layer = &g_mdev.cached_layer;
+
+	printf("The stream size:\n");
+	printf("\t[Sensor] %d x %d\n"
+	       "\t\t└─> [DVP] %d x %d\n",
+	       g_mdev.sensor_width, g_mdev.sensor_height,
+	       vdata->w, vdata->h);
+
+	printf("\t\t\t└─>[Panel] %d x %d (Pos: [%d, %d] Scale: %d x %d)\n\n",
+	       g_mdev.fb_xres, g_mdev.fb_yres,
+	       layer->pos.x, layer->pos.y,
+	       layer->scale_size.width, layer->scale_size.height);
+}
+
+#define DVP_SCALE_OFFSET	0
+
+/*
+ * Static init: compute layer size, position, format, and stride.
+ * Only needs to be called once before streaming starts.
+ */
+int video_layer_init(struct aic_video_data *vdata)
+{
+	struct aicfb_layer_data *layer = &g_mdev.cached_layer;
+	u32 video_w, video_h, fb_xres, fb_yres;
+	float scale_w, scale_h, scale;
+
+	memset(layer, 0, sizeof(*layer));
+	layer->layer_id = 0;
+	layer->enable = 1;
 
 	if (g_mdev.rotation == MPP_ROTATION_90
 		|| g_mdev.rotation == MPP_ROTATION_270) {
@@ -506,31 +638,59 @@ int video_layer_set(struct aic_video_data *vdata, int index)
 		fb_yres = g_mdev.fb_yres;
 	}
 
-	if ((video_w < fb_xres - 2 * DVP_SCALE_OFFSET) &&
-	    (video_h < fb_yres - 2 * DVP_SCALE_OFFSET)) {
-		layer.scale_size.width  = video_w;
-		layer.scale_size.height = video_h;
+	/* Proportional scaling to display window */
+	fb_xres -= 2 * DVP_SCALE_OFFSET;
+	fb_yres -= 2 * DVP_SCALE_OFFSET;
+
+	if ((video_w < fb_xres) && (video_h < fb_yres)) {
+		/* Case 1. Video is smaller than display window, centered display */
+		layer->scale_size.width  = video_w;
+		layer->scale_size.height = video_h;
+		layer->pos.x = (fb_xres - video_w) / 2 + DVP_SCALE_OFFSET;
+		layer->pos.y = (fb_yres - video_h) / 2 + DVP_SCALE_OFFSET;
 	} else {
-		layer.scale_size.width  = fb_xres - 2 * DVP_SCALE_OFFSET;
-		layer.scale_size.height = fb_yres - 2 * DVP_SCALE_OFFSET;
+		/* Case 2. Scale proportionally to fit display window */
+		scale_w = (float)video_w / (float)fb_xres;
+		scale_h = (float)video_h / (float)fb_yres;
+		scale = (scale_w > scale_h) ? scale_w : scale_h;
+
+		layer->scale_size.width  = ALIGN_DOWN((u32)((float)video_w / scale), 4);
+		layer->scale_size.height = ALIGN_DOWN((u32)((float)video_h / scale), 4);
+		layer->pos.x = (fb_xres - layer->scale_size.width) / 2 + DVP_SCALE_OFFSET;
+		layer->pos.y = (fb_yres - layer->scale_size.height) / 2 + DVP_SCALE_OFFSET;
 	}
 
-	layer.pos.x = DVP_SCALE_OFFSET;
-	layer.pos.y = DVP_SCALE_OFFSET;
-	layer.buf.size.width  = video_w;
-	layer.buf.size.height = video_h;
-	if (g_vdata.fmt == V4L2_PIX_FMT_NV16)
-		layer.buf.format = MPP_FMT_NV16;
+	layer->buf.size.width  = video_w;
+	if (g_vdata.sfield_mode)
+		layer->buf.size.height = vdata->h / 2;
 	else
-		layer.buf.format = MPP_FMT_NV12;
+		layer->buf.size.height = vdata->h;
 
-	layer.buf.buf_type = MPP_DMA_BUF_FD;
-	layer.buf.fd[0] = binfo->planes[0].fd;
-	layer.buf.fd[1] = binfo->planes[1].fd;
-	layer.buf.stride[0] = video_w;
-	layer.buf.stride[1] = video_w;
+	if (g_vdata.fmt == V4L2_PIX_FMT_NV16)
+		layer->buf.format = MPP_FMT_NV16;
+	else
+		layer->buf.format = MPP_FMT_NV12;
 
-	if (ioctl(g_mdev.fb_fd, AICFB_UPDATE_LAYER_CONFIG, &layer) < 0) {
+	layer->buf.buf_type = MPP_DMA_BUF_FD;
+	layer->buf.stride[0] = video_w;
+	layer->buf.stride[1] = video_w;
+
+	return 0;
+}
+
+/*
+ * Per-frame update: only refresh buffer file descriptors and push to FB.
+ * Must be called after video_layer_init().
+ */
+int video_layer_update_buf(struct aic_video_data *vdata, int index)
+{
+	struct video_buf_info *binfo = &vdata->binfo[index];
+	struct aicfb_layer_data *layer = &g_mdev.cached_layer;
+
+	layer->buf.fd[0] = binfo->planes[0].fd;
+	layer->buf.fd[1] = binfo->planes[1].fd;
+
+	if (ioctl(g_mdev.fb_fd, AICFB_UPDATE_LAYER_CONFIG, layer) < 0) {
 		ERR("ioctl() failed! err %d[%s]\n", errno, strerror(errno));
 		return -1;
 	}
@@ -567,11 +727,11 @@ int dvp_capture(u32 cnt)
 			if (do_rotate(&g_vdata, index) < 0)
 				return -1;
 
-			if (video_layer_set(&g_vdata, VID_BUF_NUM) < 0)
+			if (video_layer_update_buf(&g_vdata, VID_BUF_NUM) < 0)
 				return -1;
 #endif
 		} else {
-			if (video_layer_set(&g_vdata, index) < 0)
+			if (video_layer_update_buf(&g_vdata, index) < 0)
 				return -1;
 		}
 
@@ -636,7 +796,7 @@ void media_dev_close(void)
 
 int main(int argc, char **argv)
 {
-	int c, i, frame_cnt = 1;
+	int c, i, frame_cnt = 1, ret = 0;
 
 	g_mdev.sensor_width = 640;
 	g_mdev.sensor_height = 480;
@@ -683,10 +843,12 @@ int main(int argc, char **argv)
 	if (media_dev_open())
 		goto end;
 
-	if (sensor_set_fmt() < 0)
-		return -1;
-	if (dvp_subdev_set_fmt() < 0)
-		return -1;
+	ret = sensor_set_fmt();
+	if (ret < 0)
+		goto end;
+	ret = dvp_subdev_set_fmt();
+	if (ret < 0)
+		goto end;
 
 	if (g_vdata.fmt == V4L2_PIX_FMT_NV16)
 		g_vdata.frame_size = g_vdata.w * g_vdata.h * 2;
@@ -700,6 +862,9 @@ int main(int argc, char **argv)
 
 	if (dvp_cfg(g_vdata.w, g_vdata.h, g_vdata.fmt) < 0)
 		goto end;
+
+	g_vdata.sfield_mode = dvp_sfield_mode_get();
+
 	if (g_mdev.rotation) {
 		printf("Rotate %d by GE\n", g_mdev.rotation * 90);
 		/* Use the last buf connect GE and Video layer */
@@ -716,6 +881,22 @@ int main(int argc, char **argv)
 	for (i = 0; i < VID_BUF_NUM; i++)
 		if (dvp_queue_buf(i) < 0)
 			goto end;
+
+	video_layer_init(&g_vdata);
+
+	dvp_show_fmt(&g_vdata);
+	dvp_show_size(&g_vdata);
+
+#ifdef DVP_DEBUG_NO_SIGNAL
+	/* Display the black-white pattern buffer before stream start */
+	if (g_mdev.rotation) {
+		if (video_layer_update_buf(&g_vdata, VID_BUF_NUM) < 0)
+			goto end;
+	} else {
+		if (video_layer_update_buf(&g_vdata, VID_BUF_NUM - 1) < 0)
+			goto end;
+	}
+#endif
 
 	if (dvp_start() < 0)
 		goto end;

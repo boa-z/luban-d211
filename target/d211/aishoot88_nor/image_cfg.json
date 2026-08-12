@@ -9,8 +9,8 @@
 			"env_r":  { "size": "64k" },
 			"falcon": { "size": "64k" },
 			"logo":   { "size": "512k" },
-			"kernel": { "size": "5m" },
-			"rootfs": { "size": "9m" },
+			"kernel": { "size": "5312K" },
+			"rootfs": { "size": "9344K" },
 			"user":   { "size": "-" },
 		}
 	},

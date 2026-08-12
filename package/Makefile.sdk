@@ -398,6 +398,10 @@ export TARGET_USERFS2_DIR
 export TARGET_USERFS3_DIR
 export UNIQUE_BUILD_NAME
 
+ifneq ($(wildcard target/configs/sdk.version),)
+export BR2_VERSION_FULL=$(shell cat target/configs/sdk.version)
+endif
+
 ################################################################################
 #
 # You should probably leave this stuff alone unless you know
@@ -578,17 +582,11 @@ ifneq ($(BR2_ENABLE_DEBUG):$(BR2_STRIP_strip),y:)
 endif
 	$(STRIP_FIND_CMD) | xargs -0 -I {} sh -c ' \
 		if file {} | grep -q "not stripped"; then \
-			@echo "Stripping {}"; \
 			$(STRIPCMD) {}; \
-		else \
-			@echo "Skipping {} (already stripped)"; \
-			fi' 2>/dev/null || true
+		fi' 2>/dev/null || true
 	$(STRIP_FIND_SPECIAL_LIBS_CMD) | xargs -0 -I {} sh -c ' \
 		if file {} | grep -q "not stripped"; then \
-			@echo "Stripping special library {}"; \
 			$(STRIPCMD) $(STRIP_STRIP_DEBUG) {}; \
-		else \
-			@echo "Skipping special libary {} (already stripped)"; \
 		fi' 2>/dev/null || true
 
 	$(Q)test -f $(TARGET_DIR)/etc/ld.so.conf && \

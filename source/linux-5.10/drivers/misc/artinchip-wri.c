@@ -73,9 +73,10 @@ static void __iomem *g_rtc_wr_base;
 static enum aic_reboot_reason g_prev_reason = REBOOT_REASON_INVALID;
 
 static char *reason[] = {"Cold Reboot", "CMD Reboot", "CMD Shutdown",
-			 "Suspend", "Upgrade", "U-Boot Upgrade", "", "",
+			 "Suspend", "Upgrade", "U-Boot Upgrade",
+			 "", "", "", "",
 			 "SW Lockup", "Hw Lockup", "Panic", "Ramdump",
-			 "", "", "", ""};
+			 "", ""};
 
 static DEFINE_SPINLOCK(user_lock);
 

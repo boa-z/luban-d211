@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 /*
- * PSADC driver of Artinchip SoC
+ * PSADC driver of ArtInChip SoC
  *
- * Copyright (C) 2020-2023 Artinchip Technology Co., Ltd.
+ * Copyright (C) 2020-2025 ArtInChip Technology Co., Ltd.
  * Authors:  Siyao.Li <siyao.li@artinchip.com>
  */
 
@@ -48,6 +48,8 @@ enum aic_psadc_mode {
 #define PSADC_MCR_QUE_COMB		BIT(1)
 #define PSADC_MCR_EN			BIT(0)
 
+#define PSADC_NODEO_MASK		GENMASK(3, 0)
+
 #define PSADC_MSR_Q1_FERR		BIT(2)
 #define PSADC_MSR_Q1_INT		BIT(0)
 
@@ -59,7 +61,6 @@ enum aic_psadc_mode {
 
 #define PSADC_Q1FDR_CHNUM_SHIFT		12
 #define PSADC_Q1FDR_DATA_MASK		GENMASK(11, 0)
-#define PSADC_Q1FDR_DATA		BIT(0)
 #define PSADC_INVALID_DATA		0xFFF
 #define PSADC_ADC_DATA_MIN		0x0
 #define PSADC_ADC_DATA_STEP		0x1
@@ -117,9 +118,11 @@ static void psadc_reg_enable(void __iomem *base, int offset, int bit, int enable
 
 static void psadc_enable(void __iomem *regs, int enable)
 {
-	spin_lock(&user_lock);
+	unsigned long flags;
+
+	spin_lock_irqsave(&user_lock, flags);
 	psadc_reg_enable(regs, PSADC_MCR, PSADC_MCR_EN, enable);
-	spin_unlock(&user_lock);
+	spin_unlock_irqrestore(&user_lock, flags);
 }
 
 static void psadc_single_queue_mode(void __iomem *regs, int enable)
@@ -171,13 +174,11 @@ static int psadc_ch_init(struct aic_psadc_dev *psadc, u32 ch)
 	return 0;
 }
 
-static int aic_psadc_read_dat(struct aic_psadc_dev *psadc, u32 ch)
+static int aic_psadc_read_dat(struct aic_psadc_dev *psadc, struct aic_psadc_ch *chan)
 {
 	void __iomem *regs = psadc->regs;
-	struct aic_psadc_ch *chan = &psadc->chan[ch];
 
 	chan->latest_data = readl(regs + PSADC_Q1FDR) & PSADC_Q1FDR_DATA_MASK;
-
 	return 0;
 }
 
@@ -190,6 +191,7 @@ static int aic_psadc_read_raw(struct iio_dev *iodev,
 	struct aic_psadc_ch *psadc_ch = NULL;
 	void __iomem *regs = psadc->regs;
 	u32 ch = chan->channel;
+	unsigned long flags;
 
 	if (unlikely(chan->channel < 0 || chan->channel >= AIC_PSADC_MAX_CH)) {
 		dev_err(dev, "Invalid channel No.%d", chan->channel);
@@ -204,11 +206,11 @@ static int aic_psadc_read_raw(struct iio_dev *iodev,
 	dev_dbg(&psadc->pdev->dev, "ch %d, mask %#lx\n", ch, mask);
 	switch (mask) {
 	case IIO_CHAN_INFO_RAW:
-		psadc_ch_init(psadc, ch);
-		spin_lock(&user_lock);
+		spin_lock_irqsave(&user_lock, flags);
 		reinit_completion(&psadc_ch->complete);
-		spin_unlock(&user_lock);
+		spin_unlock_irqrestore(&user_lock, flags);
 
+		psadc_ch_init(psadc, ch);
 		if (!wait_for_completion_timeout(&psadc_ch->complete,
 						 AIC_PSADC_TIMEOUT)) {
 			dev_err(dev, "Ch%d read timeout!\n", ch);
@@ -243,27 +245,35 @@ static const struct iio_event_spec aic_psadc_event[] = {
 
 static irqreturn_t aic_psadc_isr(int irq, void *dev_id)
 {
-	unsigned long flags;
 	u32 q_flag = 0, chan_flag = 0;
 	struct aic_psadc_ch *chan = NULL;
 	struct aic_psadc_dev *psadc = dev_id;
+	struct device *dev = &psadc->pdev->dev;
 	void __iomem *regs = psadc->regs;
 
-	spin_lock_irqsave(&user_lock, flags);
+	spin_lock(&user_lock);
 
-	chan_flag = readl(regs + PSADC_NODE1);
+	chan_flag = readl(regs + PSADC_NODE1) & PSADC_NODEO_MASK;
 	q_flag = readl(regs + PSADC_MSR);
 	writel(q_flag, regs + PSADC_MSR);
+
+	dev_dbg(dev, "Q status: %#x, chan status: %#x\n", q_flag, chan_flag);
+
+	if (unlikely(chan_flag >= AIC_PSADC_MAX_CH)) {
+		dev_err(&psadc->pdev->dev, "Invalid channel number: %#x\n", chan_flag);
+		spin_unlock(&user_lock);
+		return IRQ_HANDLED;
+	}
 	chan = &psadc->chan[chan_flag];
 
-	if (q_flag | PSADC_MSR_Q1_INT) {
-		aic_psadc_read_dat(psadc, chan_flag);
+	if (q_flag & PSADC_MSR_Q1_INT) {
+		aic_psadc_read_dat(psadc, chan);
 		complete(&chan->complete);
 	}
-	if (q_flag | PSADC_MSR_Q1_FERR)
+	if (q_flag & PSADC_MSR_Q1_FERR)
 		psadc_fifo_flush(psadc, chan_flag);
 
-	spin_unlock_irqrestore(&user_lock, flags);
+	spin_unlock(&user_lock);
 	return IRQ_HANDLED;
 }
 

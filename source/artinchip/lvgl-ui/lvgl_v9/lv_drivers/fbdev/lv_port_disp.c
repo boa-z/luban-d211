@@ -25,6 +25,7 @@
 #include "lvgl.h"
 #include "lv_port_disp.h"
 #include "lv_ge2d/lv_draw_ge2d.h"
+#include "lv_ge2d/lv_draw_buf_ge2d.h"
 #include "lv_mpp_dec/lv_mpp_dec.h"
 #include "frame_allocator.h"
 #include "dma_allocator.h"
@@ -108,6 +109,14 @@ static inline void disp_do_blit(aic_disp_t *aic_disp, lv_display_t *disp, lv_dra
     int32_t src_stride = lv_draw_buf_width_to_stride(hor_res, cf);
     int32_t dst_stride = (int32_t)aic_disp->finfo.line_length;
     lv_display_rotation_t rotation = lv_display_get_rotation(disp);
+
+#if (LV_INVALIDATE_CACHE_BEFORE_GE2D == 1) && (LV_USE_DRAW_GE2D == 1)
+    uint32_t bpp = lv_color_format_get_size(cf);
+    if (aic_disp->draw_addr)
+        lv_dmabuf_sync_range(aic_disp->fd, aic_disp->draw_addr, hor_res * bpp, ver_res, dst_stride);
+
+#endif
+
 #if LV_USE_DRAW_GE2D
     lv_draw_ge2d_rotate(disp_buf->data, dest_buf, hor_res, ver_res,
                         src_stride, dst_stride, rotation, cf);
@@ -224,7 +233,7 @@ static void aic_display_thread(void *ptr)
         }
 
         aic_disp->flush_act = false;
-        
+
         // wait vsync
         int zero = 0;
         ioctl(aic_disp->fb, AICFB_WAIT_FOR_VSYNC, &zero);
@@ -256,6 +265,7 @@ static uint8_t *create_draw_buf(aic_disp_t *aic_disp, int w, int h, lv_color_for
         if (aic_disp->buf == MAP_FAILED) {
             goto alloc_error;
         }
+        ioctl(aic_disp->fd, DMA_BUF_IOCTL_GET_PHY_ADDR, &aic_disp->draw_addr);
     }
 
     dmabuf_device_close(dma_fd);
@@ -272,6 +282,58 @@ alloc_error:
 
     return NULL;
 }
+
+#if LV_USE_PROFILER
+
+#include <sys/syscall.h>
+#include <sys/types.h>
+#include <time.h>
+
+static uint32_t lv_get_tick_us_cb(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return ts.tv_sec * 1000000 + ts.tv_nsec / 1000;
+}
+
+static int lv_get_tid_cb(void)
+{
+    return (int)syscall(SYS_gettid);
+}
+
+static int lv_get_cpu_cb(void)
+{
+    int cpu_id = 0;
+    syscall(SYS_getcpu, &cpu_id, NULL);
+    return cpu_id;
+}
+
+static FILE *f_trace = NULL;
+
+static void lv_log_print_cb(const char * buf)
+{
+    fprintf(f_trace, "%s", buf);
+    // fflush(f_trace);
+}
+
+static void lv_profiler_init(void)
+{
+    f_trace = fopen(LV_PROFILER_OUTPUT_PATH, "w");
+    if (f_trace == NULL) {
+        fprintf(stderr, "failed to open lvgl_trace file\n");
+        return;
+    }
+
+    lv_profiler_builtin_config_t config;
+    lv_profiler_builtin_config_init(&config);
+    config.tick_per_sec = 1000000; /* One second is equal to 1000000 microseconds */
+    config.tick_get_cb = lv_get_tick_us_cb;
+    config.tid_get_cb = lv_get_tid_cb;
+    config.cpu_get_cb = lv_get_cpu_cb;
+    config.flush_cb = lv_log_print_cb;
+    lv_profiler_builtin_init(&config);
+}
+#endif
 
 void lv_port_disp_init(void)
 {
@@ -377,6 +439,10 @@ void lv_port_disp_init(void)
     lv_display_set_user_data(disp, aic_disp);
     lv_display_set_buffers(disp, buf1, buf2, fb_size, LV_DISPLAY_RENDER_MODE_DIRECT);
     lv_display_set_rotation(disp, aic_disp->rotate_degree);
+
+#if LV_USE_PROFILER
+    lv_profiler_init();
+#endif
 
     if (aic_disp->rotate_en && aic_disp->double_buf) {
         aic_disp->sync_ready = true;

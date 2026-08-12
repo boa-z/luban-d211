@@ -10,6 +10,7 @@ obj-$(CONFIG_VIDEO_M5MOLS)	+= m5mols/
 
 obj-$(CONFIG_VIDEO_APTINA_PLL) += aptina-pll.o
 obj-$(CONFIG_VIDEO_GM7150)	+= gm7150.o
+obj-$(CONFIG_VIDEO_XS9950)	+= xs9950.o
 obj-$(CONFIG_VIDEO_TVAUDIO) += tvaudio.o
 obj-$(CONFIG_VIDEO_TDA7432) += tda7432.o
 obj-$(CONFIG_VIDEO_SAA6588) += saa6588.o

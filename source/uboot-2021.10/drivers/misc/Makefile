@@ -85,3 +85,4 @@ obj-$(CONFIG_ESM_PMIC) += esm_pmic.o
 obj-$(CONFIG_ARTINCHIP_SPIENC) += artinchip_spienc.o
 obj-$(CONFIG_ARTINCHIP_SYSCFG) += artinchip-syscfg.o
 obj-$(CONFIG_ARTINCHIP_SID) += artinchip-sid.o
+obj-$(CONFIG_ARTINCHIP_ADCIM) += artinchip-adcim.o

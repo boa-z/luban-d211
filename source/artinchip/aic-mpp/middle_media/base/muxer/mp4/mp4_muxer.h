@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2023 ArtInChip Technology Co. Ltd
+ * Copyright (C) 2020-2026 ArtInChip Technology Co. Ltd
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -14,11 +14,6 @@
 #include "aic_muxer.h"
 #include "aic_stream.h"
 #include "aic_tag.h"
-
-struct mov_stts {
-	unsigned int count;
-	int duration;
-};
 
 #define MOV_SYNC_SAMPLE         0x0001
 #define MOV_PARTIAL_SYNC_SAMPLE 0x0002

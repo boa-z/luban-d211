@@ -786,6 +786,7 @@
 
 &adcim {
 	status = "okay";
+	u-boot,dm-pre-reloc;
 };
 
 &gpai {
@@ -837,14 +838,38 @@
 	status = "disabled";
 };
 
-&tsen {
+&sid {
+	u-boot,dm-pre-reloc;
 	status = "okay";
 
+	t0_low: t01@2c {
+		u-boot,dm-pre-reloc;
+	};
+	t1_low: t11@2c {
+		u-boot,dm-pre-reloc;
+	};
+	envtemp_low: envtemp1@26 {
+		u-boot,dm-pre-reloc;
+	};
+	ldo30_bg_ctrl: ldobg@28 {
+		u-boot,dm-pre-reloc;
+	};
+	cp_version: cpversion@1e {
+		u-boot,dm-pre-reloc;
+	};
+};
+
+&tsen {
+	status = "okay";
+	u-boot,dm-pre-reloc;
+
 	tsen0 {
+		u-boot,dm-pre-reloc;
 		status = "okay";
 	};
 
 	tsen1 {
+		u-boot,dm-pre-reloc;
 		status = "okay";
 	};
 };

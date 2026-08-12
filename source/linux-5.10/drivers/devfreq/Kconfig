@@ -143,15 +143,6 @@ config ARM_RK3399_DMC_DEVFREQ
 	  It sets the frequency for the memory controller and reads the usage counts
 	  from hardware.
 
-config ARTINCHIP_BUS_DEVFREQ
-	tristate "ArtInChip system bus DEVFREQ Driver"
-	depends on ARCH_ARTINCHIP
-	select DEVFREQ_GOV_SIMPLE_ONDEMAND
-	select DEVFREQ_GOV_USERSPACE
-	help
-	  This adds the generic DEVFREQ driver for ArtInChip system bus.
-	  It sets the frequency of the axi0/ahb0/apb0 bus according to cpu frequency.
-
 source "drivers/devfreq/event/Kconfig"
 
 endif # PM_DEVFREQ

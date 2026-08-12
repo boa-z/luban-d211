@@ -329,6 +329,8 @@ static int aicmac_rx(struct aicmac_priv *priv, int limit, u32 queue)
 		rx_q->rx_skbuff[entry] = NULL;
 
 		if (unlikely(error)) {
+			dev_kfree_skb_any(skb);
+			skb = NULL;
 			count++;
 			error = 0;
 			continue;

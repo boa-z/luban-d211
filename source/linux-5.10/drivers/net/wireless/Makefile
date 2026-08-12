@@ -22,7 +22,8 @@ obj-$(CONFIG_WLAN_VENDOR_ZYDAS) += zydas/
 obj-$(CONFIG_WLAN_VENDOR_QUANTENNA) += quantenna/
 obj-$(CONFIG_WLAN_VENDOR_ASR) += asr/
 obj-$(CONFIG_WLAN_VENDOR_ICOMMSEMI) += icommsemi/
-obj-$(CONFIG_AIC_WLAN_SUPPORT) += aic8800/
+obj-$(CONFIG_AIC_SDIO_WLAN_SUPPORT) += aic8800/
+obj-$(CONFIG_AIC_USB_WLAN_SUPPORT) += aic8800_usb/
 
 # 16-bit wireless PCMCIA client drivers
 obj-$(CONFIG_PCMCIA_RAYCS)	+= ray_cs.o

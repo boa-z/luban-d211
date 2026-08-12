@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2022 Artinchip Technology Co. Ltd
+ * Copyright (C) 2020-2026 Artinchip Technology Co. Ltd
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -11,6 +11,7 @@
 
 #include <string.h>
 #include <stdlib.h>
+#include <stdbool.h>
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/mman.h>
@@ -21,11 +22,41 @@
 #include "dma_allocator.h"
 #include "mpp_log.h"
 
-#ifdef LINUX_VERSION_6
-	#define DMABUF_DEV  "/dev/dma_heap/reserved"
-#else
-	#define DMABUF_DEV  "/dev/dma_heap/mpp"
-#endif
+#define DMABUF_DEV  "/dev/dma_heap/mpp"
+#define ALIGN_8B(x) (((x) + (7)) & ~(7))
+#define ARRAY_SIZE(arr) (sizeof(arr) / sizeof((arr)[0]))
+
+struct mpp_fmt_info{
+	unsigned int format;
+	unsigned int plane_num;
+	unsigned int y_stride_shift;
+	unsigned int uv_stride_shift;
+	unsigned int uv_mem_shift;
+	bool is_rgb;
+};
+
+static const struct mpp_fmt_info formats_info[] = {
+	{MPP_FMT_YUV420P, 3, 0, 1, 2, false},
+	{MPP_FMT_YUV422P, 3, 0, 1, 1, false},
+	{MPP_FMT_YUV444P, 3, 0, 0, 0, false},
+	{MPP_FMT_NV12, 2, 0, 1, 1, false},
+	{MPP_FMT_NV21, 2, 0, 1, 1, false},
+	{MPP_FMT_NV16, 2, 0, 1, 0, false},
+	{MPP_FMT_NV61, 2, 0, 1, 0, false},
+
+	{MPP_FMT_YUV400, 1, 0, 0, 0, false},
+
+	{MPP_FMT_ABGR_8888, 1, 4, 0, 0, true},
+	{MPP_FMT_ARGB_8888, 1, 4, 0, 0, true},
+	{MPP_FMT_RGBA_8888, 1, 4, 0, 0, true},
+	{MPP_FMT_BGRA_8888, 1, 4, 0, 0, true},
+	{MPP_FMT_BGR_888, 1, 3, 0, 0, true},
+	{MPP_FMT_RGB_888, 1, 3, 0, 0, true},
+	{MPP_FMT_BGR_565, 1, 2, 0, 0, true},
+	{MPP_FMT_RGB_565, 1, 2, 0, 0, true},
+
+	{MPP_FMT_MAX, 0, 0, 0, 0, false},
+};
 
 int dmabuf_device_open()
 {
@@ -133,7 +164,11 @@ int dmabuf_sync(int buf_fd, enum dma_buf_sync_flag flag)
 
 int dmabuf_sync_range(int buf_fd, unsigned char* start, int size, enum dma_buf_sync_flag flag)
 {
-#ifndef LINUX_VERSION_6
+#ifdef LINUX_VERSION_6
+	(void)start;
+	(void)size;
+	dmabuf_sync(buf_fd, flag);
+#else
 	struct dma_buf_range sync = {0};
 
 	sync.start = (unsigned long)start;
@@ -209,18 +244,23 @@ int mpp_buf_alloc(int dma_fd, struct mpp_buf* buf)
 
 	get_info(buf, &comp, mem_size);
 
-	for(i=0; i<comp; i++) {
+	for (i = 0; i < comp; i++) {
 		buf->fd[i] = dmabuf_alloc(dma_fd, mem_size[i]);
 		if(buf->fd[i] < 0) {
 			loge("dmabuf(%d) alloc failed, need %d bytes", i, mem_size[i]);
 			goto failed;
 		}
+
+		if (ioctl(buf->fd[i], DMA_BUF_IOCTL_GET_PHY_ADDR, &buf->phy_addr[i]) < 0)
+			loge("dmabuf(%d) get phy addr failed, use fd type", buf->fd[i]);
+		else
+			buf->buf_type = MPP_PHY_ADDR;
 	}
 
 	return 0;
 
 failed:
-	for(i=0; i<comp; i++) {
+	for (i = 0; i < comp; i++) {
 		if(buf->fd[i] != -1) {
 			dmabuf_free(buf->fd[i]);
 		}
@@ -235,7 +275,66 @@ void mpp_buf_free(struct mpp_buf* buf)
 	int mem_size[3] = {0, 0, 0};
 	get_info(buf, &comp, mem_size);
 
-	for(i=0; i<comp; i++) {
+	for (i = 0; i < comp; i++) {
 		dmabuf_free(buf->fd[i]);
 	}
+}
+
+int dmabuf_alloc_planar(int dma_fd, unsigned int width, unsigned int height,
+			enum mpp_pixel_format format, unsigned int stride[3],
+			int fd[3], unsigned int phy_addr[3])
+{
+	const struct mpp_fmt_info *mpp_fmt = NULL;
+	unsigned int mem_size[3] = {0, 0, 0};
+	unsigned int i;
+
+	for (i = 0; i < ARRAY_SIZE(formats_info); i++) {
+		if (formats_info[i].format == format) {
+			mpp_fmt = &formats_info[i];
+			break;
+		}
+	}
+
+	if (!mpp_fmt) {
+		loge("unsupported format %d", format);
+		return -1;
+	}
+
+	fd[0] = fd[1] = fd[2] = -1;
+	phy_addr[0] = phy_addr[1] = phy_addr[2] = 0;
+
+	stride[0] = mpp_fmt->is_rgb ? ALIGN_8B(width * mpp_fmt->y_stride_shift)
+				    : ALIGN_8B(width >> mpp_fmt->y_stride_shift);
+	mem_size[0] = stride[0] * height;
+
+	for (i = 0; i < mpp_fmt->plane_num; i++) {
+		if(i != 0) {
+			stride[i] = stride[0] >> mpp_fmt->uv_stride_shift;
+			mem_size[i] = mem_size[0] >> mpp_fmt->uv_mem_shift;
+		}
+
+		fd[i] = dmabuf_alloc(dma_fd, mem_size[i]);
+		if(fd[i] < 0) {
+			loge("dmabuf(%d) alloc failed, need %d bytes", i, mem_size[i]);
+			goto failed;
+		}
+
+		if (ioctl(fd[i], DMA_BUF_IOCTL_GET_PHY_ADDR, &phy_addr[i]) < 0) {
+			loge("dmabuf(%d) get phy addr failed", fd[i]);
+			goto failed;
+		}
+	}
+
+	logd("dmabuf format(%d) %d plane (%d, %d, %d) bytes",
+		format, mpp_fmt->plane_num, mem_size[0], mem_size[1], mem_size[2]);
+
+	return 0;
+
+failed:
+	for (i = 0; i < mpp_fmt->plane_num; i++) {
+		if(fd[i] != -1)
+			dmabuf_free(fd[i]);
+	}
+
+	return -1;
 }

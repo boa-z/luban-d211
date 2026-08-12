@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2025 ArtInChip Technology Co. Ltd
+ * Copyright (C) 2020-2026 ArtInChip Technology Co. Ltd
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -29,7 +29,7 @@
 #include "dma_allocator.h"
 #include "mpp_encoder.h"
 #include "mpp_ge.h"
-
+#include "aic_middle_media_common.h"
 
 #define VIDEO_RENDER_INPORT_SEND_ALL_FRAME_FLAG 0x02
 #define VIDEO_RENDER_WAIT_FRAME_INTERVAL (10 * 1000 * 1000)
@@ -96,6 +96,8 @@ typedef struct mm_video_render_data {
     MM_BOOL frame_end_flag;
     MM_BOOL flags;
     MM_BOOL wait_ready_frame_flag;
+    MM_BOOL debug_en;
+    MM_BOOL bypass_time_sync;
 
     u32 receive_frame_num;
     u32 show_frame_ok_num;
@@ -112,10 +114,14 @@ typedef struct mm_video_render_data {
     s64 pause_time_durtion;
     s64 pre_frame_pts;
     s32 dump_index;
+    s64 tm_vrender_start;
+    s64 tm_vrender_end;
+    s64 tm_rot_start;
+    s64 tm_rot_end;
 } mm_video_render_data;
 
 static void *mm_video_render_component_thread(void *p_thread_data);
-
+static void mm_video_render_show_debug_info(mm_video_render_data *p_video_render_data);
 
 static int mm_video_render_free_dma_buffer(struct mpp_frame* p_frame,int dma_fd)
 {
@@ -522,8 +528,101 @@ static int mm_video_render_remove_dma_fd(mm_video_render_data *p_video_render_da
 }
 
 
-static int
-mm_video_render_free_frame_buffer(mm_video_render_data *p_video_render_data,
+static int mm_video_render_calloc_frame_buffer(struct mpp_frame *p_frame, int dma_fd)
+{
+    int i = 0;
+    int comp = 1;
+    int mem_size[3] = {0, 0, 0};
+
+    for (i = 0; i < 3; i++) {
+        p_frame->buf.stride[i] = 0;
+    }
+
+    switch (p_frame->buf.format) {
+        case MPP_FMT_YUV420P:
+            p_frame->buf.stride[0] = p_frame->buf.size.width;
+            p_frame->buf.stride[1] = p_frame->buf.stride[0] >> 1;
+            p_frame->buf.stride[2] = p_frame->buf.stride[0] >> 1;
+            mem_size[0] = p_frame->buf.size.height * p_frame->buf.stride[0];
+            mem_size[1] = mem_size[2] = mem_size[0] >> 2;
+            comp = 3;
+            break;
+
+        case MPP_FMT_YUV444P:
+            p_frame->buf.stride[0] = p_frame->buf.size.width;
+            p_frame->buf.stride[1] = p_frame->buf.stride[0];
+            p_frame->buf.stride[2] = p_frame->buf.stride[0];
+            mem_size[0] = p_frame->buf.size.height * p_frame->buf.stride[0];
+            mem_size[1] = mem_size[2] = mem_size[0];
+            comp = 3;
+            break;
+
+        case MPP_FMT_YUV422P:
+            p_frame->buf.stride[0] = p_frame->buf.size.width;
+            p_frame->buf.stride[1] = p_frame->buf.stride[0] >> 1;
+            p_frame->buf.stride[2] = p_frame->buf.stride[0] >> 1;
+            mem_size[0] = p_frame->buf.size.height * p_frame->buf.stride[0];
+            mem_size[1] = mem_size[2] = mem_size[0] >> 1;
+            comp = 3;
+            break;
+
+        case MPP_FMT_NV12:
+        case MPP_FMT_NV21:
+            p_frame->buf.stride[0] = p_frame->buf.size.width;
+            p_frame->buf.stride[1] = p_frame->buf.stride[0];
+            mem_size[0] = p_frame->buf.size.height * p_frame->buf.stride[0];
+            mem_size[1] = mem_size[0] >> 1;
+            comp = 2;
+            break;
+
+        case MPP_FMT_ABGR_8888:
+        case MPP_FMT_ARGB_8888:
+        case MPP_FMT_RGBA_8888:
+        case MPP_FMT_BGRA_8888:
+            p_frame->buf.stride[0] = p_frame->buf.size.width * 4;
+            mem_size[0] = p_frame->buf.size.height * p_frame->buf.stride[0];
+            break;
+
+        case MPP_FMT_BGR_888:
+        case MPP_FMT_RGB_888:
+            p_frame->buf.stride[0] = p_frame->buf.size.width * 3;
+            mem_size[0] = p_frame->buf.size.height * p_frame->buf.stride[0];
+            break;
+
+        case MPP_FMT_BGR_565:
+        case MPP_FMT_RGB_565:
+            p_frame->buf.stride[0] = p_frame->buf.size.width * 2;
+            mem_size[0] = p_frame->buf.size.height * p_frame->buf.stride[0];
+            break;
+
+        default:
+            loge("unsupport format:%d.", p_frame->buf.format);
+            return -1;
+    }
+
+    for (i = 0; i < comp; i++) {
+        p_frame->buf.fd[i] = dmabuf_alloc(dma_fd, mem_size[i]);
+        if (p_frame->buf.fd[i] <= 0) {
+            loge("rotate frame(%d) alloc failed, need %d bytes", i, mem_size[i]);
+            goto failed;
+        }
+    }
+
+    return 0;
+
+failed:
+    for (i = 0; i < comp; i++) {
+        p_frame->buf.fd[i] = dmabuf_alloc(dma_fd, mem_size[i]);
+        if (p_frame->buf.fd[i] > 0) {
+            dmabuf_free(p_frame->buf.fd[i]);
+            p_frame->buf.fd[i] = 0;
+        }
+    }
+    return -1;
+}
+
+
+static int mm_video_render_free_frame_buffer(mm_video_render_data *p_video_render_data,
                                   struct mpp_frame *p_frame)
 {
     int i = 0;
@@ -539,13 +638,13 @@ mm_video_render_free_frame_buffer(mm_video_render_data *p_video_render_data,
     if (mm_video_render_is_exist_dma_fd(p_video_render_data, p_frame)) {
         mm_video_render_remove_dma_fd(p_video_render_data, p_frame);
         for (i = 0; i < comp; i++) {
-            mpp_ge_rm_dmabuf(p_video_render_data->ge_handle, p_frame->buf.fd[i]);
-            printf("[%s:%d]:%d\n", __FUNCTION__, __LINE__, p_frame->buf.fd[i]);
+            if (p_video_render_data->ge_handle)
+                mpp_ge_rm_dmabuf(p_video_render_data->ge_handle, p_frame->buf.fd[i]);
         }
     }
 
     for (i = 0; i < comp; i++) {
-        if (p_frame->buf.fd[i]) {
+        if (p_frame->buf.fd[i] > 0) {
             dmabuf_free(p_frame->buf.fd[i]);
             p_frame->buf.fd[i] = 0;
         }
@@ -587,16 +686,7 @@ static int mm_video_render_set_rotation_frame_info(
     mm_video_render_data *p_video_render_data, struct mpp_frame *p_frame)
 {
     int i = 0;
-    int cnt;
-	int buf_size;
-
-	int dma_fd = p_video_render_data->dma_fd;
-	if (dma_fd < 0) {
-		return -1;
-	}
-
-    cnt = sizeof(p_video_render_data->rotation_frames) /
-          sizeof(p_video_render_data->rotation_frames[0]);
+    int cnt = MPP_ARRAY_ELEMS(p_video_render_data->rotation_frames);
 
     for (i = 0; i < cnt; i++) {
         p_video_render_data->rotation_frames[i].id = p_video_render_data->rotation_index++;
@@ -631,162 +721,6 @@ static int mm_video_render_set_rotation_frame_info(
         }
     }
 
-    buf_size = p_video_render_data->rotation_frames[0].buf.size.width *
-               p_video_render_data->rotation_frames[0].buf.size.height;
-
-    for (i = 0; i < cnt; i++) {
-        switch (p_frame->buf.format) {
-            case MPP_FMT_YUV420P:
-                p_video_render_data->rotation_frames[i].buf.stride[0] =
-                    (p_video_render_data->rotation_frames[i].buf.size.width + 15) / 16 * 16;
-                p_video_render_data->rotation_frames[i].buf.stride[1] =
-                    p_video_render_data->rotation_frames[i].buf.stride[0] >> 1;
-                p_video_render_data->rotation_frames[i].buf.stride[2] =
-                    p_video_render_data->rotation_frames[i].buf.stride[0] >> 1;
-
-                if (p_video_render_data->rotation_frames[i].buf.fd[0] <= 0 &&
-                    p_video_render_data->rotation_frames[i].buf.fd[1] <= 0 &&
-                    p_video_render_data->rotation_frames[i].buf.fd[2] <= 0) {
-                    p_video_render_data->rotation_frames[i].buf.fd[0] = dmabuf_alloc(dma_fd,buf_size);
-                    p_video_render_data->rotation_frames[i].buf.fd[1] = dmabuf_alloc(dma_fd,(buf_size >> 2));
-                    p_video_render_data->rotation_frames[i].buf.fd[2] = dmabuf_alloc(dma_fd,(buf_size >> 2));
-			    }
-
-                if (p_video_render_data->rotation_frames[i].buf.fd[0] <= 0 ||
-				    p_video_render_data->rotation_frames[i].buf.fd[1] <= 0 ||
-				    p_video_render_data->rotation_frames[i].buf.fd[2] <= 0) {
-				    loge("%d-%d-%d\n",p_video_render_data->rotation_frames[i].buf.fd[0],
-					    p_video_render_data->rotation_frames[i].buf.fd[1],
-					    p_video_render_data->rotation_frames[i].buf.fd[2]);
-				    return -1;
-			    }
-                break;
-            case MPP_FMT_YUV444P:
-                p_video_render_data->rotation_frames[i].buf.stride[0] =
-                    (p_video_render_data->rotation_frames[i].buf.size.width + 15) / 16 * 16;
-                p_video_render_data->rotation_frames[i].buf.stride[1] =
-                    p_video_render_data->rotation_frames[i].buf.stride[0];
-                p_video_render_data->rotation_frames[i].buf.stride[2] =
-                    p_video_render_data->rotation_frames[i].buf.stride[0];
-                if (p_video_render_data->rotation_frames[i].buf.fd[0] <= 0 &&
-                    p_video_render_data->rotation_frames[i].buf.fd[1] <= 0 &&
-                    p_video_render_data->rotation_frames[i].buf.fd[2] <= 0) {
-                    p_video_render_data->rotation_frames[i].buf.fd[0] = dmabuf_alloc(dma_fd,buf_size);
-                    p_video_render_data->rotation_frames[i].buf.fd[1] = dmabuf_alloc(dma_fd,buf_size);
-                    p_video_render_data->rotation_frames[i].buf.fd[2] = dmabuf_alloc(dma_fd,buf_size);
-                }
-                if (p_video_render_data->rotation_frames[i].buf.fd[0] <= 0 ||
-                    p_video_render_data->rotation_frames[i].buf.fd[1] <= 0 ||
-                    p_video_render_data->rotation_frames[i].buf.fd[2] <= 0) {
-                    loge("%d-%d-%d\n",p_video_render_data->rotation_frames[i].buf.fd[0],
-                        p_video_render_data->rotation_frames[i].buf.fd[1],
-                        p_video_render_data->rotation_frames[i].buf.fd[2]);
-                    return -1;
-                }
-                break;
-            case MPP_FMT_YUV422P:
-                p_video_render_data->rotation_frames[i].buf.stride[0] =
-                    (p_video_render_data->rotation_frames[i].buf.size.width + 15) / 16 * 16;
-                p_video_render_data->rotation_frames[i].buf.stride[1] =
-                    p_video_render_data->rotation_frames[i].buf.stride[0] >> 1;
-                p_video_render_data->rotation_frames[i].buf.stride[2] =
-                    p_video_render_data->rotation_frames[i].buf.stride[0] >> 1;
-                buf_size = p_video_render_data->rotation_frames[i].buf.stride[0] *
-                    p_video_render_data->rotation_frames[i].buf.size.height;
-                if (p_video_render_data->rotation_frames[i].buf.fd[0] <= 0 &&
-                    p_video_render_data->rotation_frames[i].buf.fd[1] <= 0 &&
-                    p_video_render_data->rotation_frames[i].buf.fd[2] <= 0) {
-                    p_video_render_data->rotation_frames[i].buf.fd[0] = dmabuf_alloc(dma_fd,buf_size);
-                    p_video_render_data->rotation_frames[i].buf.fd[1] = dmabuf_alloc(dma_fd,buf_size >> 1);
-                    p_video_render_data->rotation_frames[i].buf.fd[2] = dmabuf_alloc(dma_fd,buf_size >> 1);
-                }
-                if (p_video_render_data->rotation_frames[i].buf.fd[0] <= 0 ||
-                    p_video_render_data->rotation_frames[i].buf.fd[1] <= 0 ||
-                    p_video_render_data->rotation_frames[i].buf.fd[2] <= 0) {
-                    loge("%d-%d-%d\n",p_video_render_data->rotation_frames[i].buf.fd[0],
-                        p_video_render_data->rotation_frames[i].buf.fd[1],
-                        p_video_render_data->rotation_frames[i].buf.fd[2]);
-                    return -1;
-                }
-                break;
-            case MPP_FMT_NV12:
-            case MPP_FMT_NV21:
-                p_video_render_data->rotation_frames[i].buf.stride[0] =
-                    (p_video_render_data->rotation_frames[i].buf.size.width +
-                     15) /
-                    16 * 16;
-                p_video_render_data->rotation_frames[i].buf.stride[1] =
-                    p_video_render_data->rotation_frames[i].buf.stride[0] >> 1;
-                p_video_render_data->rotation_frames[i].buf.stride[2] = 0;
-
-                if (p_video_render_data->rotation_frames[i].buf.fd[0] <= 0 &&
-                    p_video_render_data->rotation_frames[i].buf.fd[1] <= 0) {
-                    p_video_render_data->rotation_frames[i].buf.fd[0] = dmabuf_alloc(dma_fd,buf_size);
-                    p_video_render_data->rotation_frames[i].buf.fd[1] = dmabuf_alloc(dma_fd,buf_size >> 1);
-                    p_video_render_data->rotation_frames[i].buf.fd[2] = 0;
-                }
-                if (p_video_render_data->rotation_frames[i].buf.fd[0] <= 0 ||
-                    p_video_render_data->rotation_frames[i].buf.fd[1] <= 0) {
-                    loge("%d-%d-%d\n",p_video_render_data->rotation_frames[i].buf.fd[0],
-                        p_video_render_data->rotation_frames[i].buf.fd[1],
-                        p_video_render_data->rotation_frames[i].buf.fd[2]);
-                    return -1;
-                }
-                break;
-            case MPP_FMT_YUV400:
-            case MPP_FMT_ABGR_8888:
-            case MPP_FMT_ARGB_8888:
-            case MPP_FMT_RGBA_8888:
-            case MPP_FMT_BGRA_8888:
-                p_video_render_data->rotation_frames[i].buf.stride[0] =
-                    (p_video_render_data->rotation_frames[i].buf.size.width +
-                     15) /
-                    16 * 16;
-                p_video_render_data->rotation_frames[i].buf.stride[1] = 0;
-                p_video_render_data->rotation_frames[i].buf.stride[2] = 0;
-                if (p_video_render_data->rotation_frames[i].buf.fd[0] <= 0) {
-                    p_video_render_data->rotation_frames[i].buf.fd[0] = dmabuf_alloc(dma_fd,buf_size*4);
-                }
-                if (p_video_render_data->rotation_frames[i].buf.fd[0] <= 0) {
-                    loge("%d\n",p_video_render_data->rotation_frames[i].buf.fd[0]);
-                    return -1;
-                }
-                break;
-
-            case MPP_FMT_BGR_888:
-            case MPP_FMT_RGB_888:
-                p_video_render_data->rotation_frames[i].buf.stride[0] =
-                    p_video_render_data->rotation_frames[i].buf.size.width;
-                p_video_render_data->rotation_frames[i].buf.stride[1] = 0;
-                p_video_render_data->rotation_frames[i].buf.stride[2] = 0;
-                if (p_video_render_data->rotation_frames[i].buf.fd[0] <= 0) {
-                    p_video_render_data->rotation_frames[i].buf.fd[0] = dmabuf_alloc(dma_fd,buf_size*3);
-                }
-                if (p_video_render_data->rotation_frames[i].buf.fd[0] <= 0) {
-                    loge("%d\n",p_video_render_data->rotation_frames[i].buf.fd[0]);
-                    return -1;
-                }
-                break;
-            case MPP_FMT_BGR_565:
-            case MPP_FMT_RGB_565:
-                p_video_render_data->rotation_frames[i].buf.stride[0] =
-                    p_video_render_data->rotation_frames[i].buf.size.width;
-                p_video_render_data->rotation_frames[i].buf.stride[1] = 0;
-                p_video_render_data->rotation_frames[i].buf.stride[2] = 0;
-                if (p_video_render_data->rotation_frames[i].buf.fd[0] <= 0) {
-                    p_video_render_data->rotation_frames[i].buf.fd[0] = dmabuf_alloc(dma_fd,buf_size*2);
-                }
-                if (p_video_render_data->rotation_frames[i].buf.fd[0] <= 0) {
-                    loge("%d\n",p_video_render_data->rotation_frames[i].buf.fd[0]);
-                    return -1;
-                }
-                break;
-
-            default:
-                loge("unsup_port format");
-                return -1;
-        }
-    }
     return 0;
 }
 
@@ -795,8 +729,10 @@ static int
 mm_video_render_init_rotation_param(mm_video_render_data *p_video_render_data,
                                     struct mpp_frame *p_frame)
 {
-    int i = 0;
+    struct mpp_frame *p_rot_frame = NULL;
     int cnt = 0;
+    int ret = 0;
+    int i = 0;
 
     p_video_render_data->init_rotation_param = 0;
     if (p_video_render_data->rotation_angle == MPP_ROTATION_0) {
@@ -814,6 +750,8 @@ mm_video_render_init_rotation_param(mm_video_render_data *p_video_render_data,
         }
     }
 
+    cnt = MPP_ARRAY_ELEMS(p_video_render_data->rotation_frames);
+
     // open DMA  device
     if (p_video_render_data->dma_fd <= 0) {
         p_video_render_data->dma_fd = dmabuf_device_open();
@@ -826,18 +764,23 @@ mm_video_render_init_rotation_param(mm_video_render_data *p_video_render_data,
     //set rotation frame info
     if (mm_video_render_set_rotation_frame_info(p_video_render_data, p_frame) != 0) {
         loge("mm_video_render_set_rotation_frame_info\n");
-        p_video_render_data->init_rotation_param = -1;
         goto _exit;
     }
-
+    for (i = 0; i < cnt; i++) {
+        p_rot_frame = &p_video_render_data->rotation_frames[i];
+        ret = mm_video_render_calloc_frame_buffer(p_rot_frame, p_video_render_data->dma_fd);
+        if(ret != 0) {
+            loge("mm_video_render_calloc_frame_buffer i:%d failed\n", i);
+            goto _exit;
+        }
+    }
     p_video_render_data->init_rotation_param = 1;
     return 0;
 
 _exit:
-    cnt = sizeof(p_video_render_data->rotation_frames) / sizeof(p_video_render_data->rotation_frames[0]);
     for (i = 0; i < cnt; i++) {
-        mm_video_render_free_frame_buffer(
-            p_video_render_data, &p_video_render_data->rotation_frames[i]);
+        p_rot_frame = &p_video_render_data->rotation_frames[i];
+        mm_video_render_free_frame_buffer(p_video_render_data, p_rot_frame);
     }
 
     if (p_video_render_data->dma_fd > 0) {
@@ -863,8 +806,7 @@ mm_video_render_deinit_rotation_param(mm_video_render_data *p_video_render_data)
     if (p_video_render_data->init_rotation_param != 1) {
         return 0;
     }
-    cnt = sizeof(p_video_render_data->rotation_frames) /
-          sizeof(p_video_render_data->rotation_frames[0]);
+    cnt = MPP_ARRAY_ELEMS(p_video_render_data->rotation_frames);
 
     for (i = 0; i < cnt; i++) {
         mm_video_render_free_frame_buffer(
@@ -924,7 +866,7 @@ mm_video_render_rotate_frame(mm_video_render_data *p_video_render_data,
 
     if (p_video_render_data->init_rotation_param != 1) {
         p_video_render_data->p_cur_display_frame = p_frame;
-        loge("RotationParam do not init ok !!!\n");
+        logd("RotationParam do not init ok !!!\n");
         return -1;
     }
 
@@ -1046,7 +988,6 @@ static void mm_video_render_wait_frame_timeout(mm_video_render_data *p_video_ren
     mm_bind_info *p_bind_vdec;
 
     if (p_video_render_data->frame_end_flag) {
-        printf("[%s:%d]:receive video frame end flag\n", __FUNCTION__, __LINE__);
         p_video_render_data->flags |= VIDEO_RENDER_INPORT_SEND_ALL_FRAME_FLAG;
         return;
     }
@@ -1223,6 +1164,11 @@ static s32 mm_video_render_set_parameter(mm_handle h_component,
 
             break;
 
+        case MM_INDEX_PARAM_PRINT_DEBUG_INFO:
+            p_video_render_data->debug_en = ((mm_param_u32 *)p_param)->u32;
+            mm_video_render_show_debug_info(p_video_render_data);
+            break;
+
         default:
             break;
     }
@@ -1275,8 +1221,6 @@ static s32 mm_video_render_set_config(mm_handle h_component,
             mm_time_config_clock_state *p_state =
                 (mm_time_config_clock_state *)p_config;
             p_video_render_data->clock_state = p_state->state;
-            printf("[%s:%d]p_video_render_data->clock_state:%d\n", __FUNCTION__,
-                   __LINE__, p_video_render_data->clock_state);
             break;
         }
 
@@ -1292,8 +1236,6 @@ static s32 mm_video_render_set_config(mm_handle h_component,
                     p_video_render_data->render, p_video_render_data->layer_id,
                     p_video_render_data->dev_id);
                 if (!ret) {
-                    printf("[%s:%d]p_video_render_data->render->init ok\n",
-                           __FUNCTION__, __LINE__);
                     p_video_render_data->video_render_init_flag = 1;
                 } else {
                     loge("p_video_render_data->render->init fail\n");
@@ -1310,14 +1252,20 @@ static s32 mm_video_render_set_config(mm_handle h_component,
 
         case MM_INDEX_CONFIG_COMMON_ROTATE: {
             mm_config_rotation *p_rotation = (mm_config_rotation *)p_config;
-            if (p_video_render_data->rotation_angle !=
-                p_rotation
-                    ->rotation) { //MPP_ROTATION_0 MPP_ROTATION_90 MPP_ROTATION_180 MPP_ROTATION_270
+            if (p_video_render_data->rotation_angle != p_rotation->rotation) {
                 p_video_render_data->rotation_angle = p_rotation->rotation;
                 p_video_render_data->rotation_angle_change = 1;
             }
             break;
         }
+
+        case MM_INDEX_CONFIG_BYPASS_TIME_SYNC:
+            p_video_render_data->bypass_time_sync = MM_TRUE;
+            break;
+
+        case MM_INDEX_CONFIG_GIVEBACK_ALL_FRAME:
+            mm_video_render_giveback_all_frames(p_video_render_data);
+            break;
 
         default:
             break;
@@ -1674,12 +1622,12 @@ mm_video_render_state_change_to_pause(mm_video_render_data *p_video_render_data)
         if (p_bind_clock->flag) {
             mm_get_config(p_bind_clock->p_bind_comp,
                           MM_INDEX_CONFIG_TIME_CUR_MEDIA_TIME, &timestamp);
-            printf("[%s:%d]Excuting--->Pause,timestamp:" FMT_d64 "\n",
+            logd("[%s:%d]Excuting--->Pause,timestamp:" FMT_d64 "\n",
                    __FUNCTION__, __LINE__, timestamp.timestamp);
         } else {
             p_video_render_data->pause_time_point =
                 mm_video_render_clock_get_sys_time();
-            printf("[%s:%d]Excuting--->Pause,pause_time_point:" FMT_d64 "\n",
+            logd("[%s:%d]Excuting--->Pause,pause_time_point:" FMT_d64 "\n",
                    __FUNCTION__, __LINE__,
                    p_video_render_data->pause_time_point);
         }
@@ -1713,13 +1661,13 @@ static void mm_video_render_state_change_to_executing(
         if (p_bind_clock->flag) {
             mm_get_config(p_bind_clock->p_bind_comp,
                           MM_INDEX_CONFIG_TIME_CUR_MEDIA_TIME, &timestamp);
-            printf("[%s:%d]Pause--->Excuting,timestamp:" FMT_d64 "\n",
+            logd("[%s:%d]Pause--->Excuting,timestamp:" FMT_d64 "\n",
                    __FUNCTION__, __LINE__, timestamp.timestamp);
         } else {
             p_video_render_data->pause_time_durtion +=
                 (mm_video_render_clock_get_sys_time() -
                  p_video_render_data->pause_time_point);
-            printf("[%s:%d]Pause--->Excuting,pause_time_point:" FMT_d64
+            logd("[%s:%d]Pause--->Excuting,pause_time_point:" FMT_d64
                    ",curTime:" FMT_d64 ",pauseDura:" FMT_d64 "\n",
                    __FUNCTION__, __LINE__,
                    p_video_render_data->pause_time_point,
@@ -1770,6 +1718,7 @@ mm_vdieo_render_process_video_sync(mm_video_render_data *p_video_render_data,
                                    struct mpp_frame *p_frame_info, s64 *delay)
 {
     s64 delay_time = 0;
+    s64 video_delay_time = 0;
     mm_time_config_timestamp timestamp = { 0 };
     MM_VIDEO_SYNC_TYPE sync_type = MM_VIDEO_SYNC_INVAILD;
     mm_bind_info *p_bind_clock =
@@ -1787,25 +1736,24 @@ mm_vdieo_render_process_video_sync(mm_video_render_data *p_video_render_data,
                          mm_vdieo_render_get_media_time(p_video_render_data);
             if (delay_time > 10 * 1000 * 1000 ||
                 delay_time < -10 * 1000 * 1000) {
-                loge(
-                    "tunneld clock ,but audio do not come ,vidoe pts jump event!!!\n");
+                loge("tunneld clock ,but audio do not come ,vidoe pts jump event!!!\n");
                 delay_time = 40 * 1000;
                 mm_vdieo_render_set_media_clock(p_video_render_data,
                                                 p_frame_info);
             }
         } else {
             delay_time = p_frame_info->pts - timestamp.timestamp;
-            if (delay_time > 10 * 1000 * 1000 ||
-                delay_time < -10 * 1000 * 1000) {
-                if (p_frame_info->pts - p_video_render_data->pre_frame_pts >
-                        10 * 1000 * 1000 ||
-                    p_frame_info->pts - p_video_render_data->pre_frame_pts <
-                        -10 * 1000 * 1000) { // case by video pts jump event
-
-                    loge("video pts jump event!!!\n");
+            video_delay_time = p_frame_info->pts - p_video_render_data->pre_frame_pts;
+            if (delay_time > 10 * 1000 * 1000 || delay_time < -10 * 1000 * 1000) {
+                if (video_delay_time > 10 * 1000 * 1000 || video_delay_time < -10 * 1000 * 1000) {
+                    printf("video pts jump event, video_pts:%lld, pre_pts:%ld\n",
+                        p_frame_info->pts, p_video_render_data->pre_frame_pts);
+                    mm_vdieo_render_set_media_clock(p_video_render_data, p_frame_info);
                 } else {
-                    loge("audio pts jump event!!!\n");
+                    printf("audio pts jump event, video_pts:%lld, basetime:%ld\n",
+                        p_frame_info->pts, timestamp.timestamp);
                 }
+                mm_set_config(p_bind_clock->p_bind_comp, MM_INDEX_CONFIG_TIME_FORCE_SYNC_AUDIO_REFERENCE, NULL);
             }
         }
     } else {
@@ -1820,8 +1768,7 @@ mm_vdieo_render_process_video_sync(mm_video_render_data *p_video_render_data,
     }
 
     if (p_frame_info->flags & FRAME_FLAG_EOS) {
-        printf("[%s:%d]pts:%lld,delay_time:" FMT_d64 "\n", __FUNCTION__,
-               __LINE__, p_frame_info->pts, delay_time);
+        logi("pts:%lld,delay_time:" FMT_d64 "\n", p_frame_info->pts, delay_time);
     }
 
     if (delay_time > 2 * MAX_VIDEO_SYNC_DIFF_TIME) {
@@ -1830,6 +1777,8 @@ mm_vdieo_render_process_video_sync(mm_video_render_data *p_video_render_data,
         sync_type = MM_VIDEO_SYNC_SHOW;
     } else {
         sync_type = MM_VIDEO_SYNC_DROP;
+        if (!p_bind_clock->flag)
+            mm_vdieo_render_set_media_clock(p_video_render_data, p_frame_info);
     }
     *delay = delay_time;
 
@@ -1964,26 +1913,27 @@ CMD_EXIT:
     return cmd;
 }
 
-void mm_video_render_print_frame_count(mm_video_render_data *p_video_render_data)
+
+static void mm_video_render_show_debug_info(mm_video_render_data *p_video_render_data)
 {
-    printf("[%s:%d]receive_frame_num:%u,"
-           "show_frame_ok_num:%u,"
-           "show_frame_fail_num:%u,"
-           "giveback_frame_ok_num:%u,"
-           "giveback_frame_fail_num:%u,"
-           "drop_frame_num:%u\n",
-           __FUNCTION__, __LINE__, p_video_render_data->receive_frame_num,
-           p_video_render_data->show_frame_ok_num,
-           p_video_render_data->show_frame_fail_num,
-           p_video_render_data->giveback_frame_ok_num,
-           p_video_render_data->giveback_frame_fail_num,
-           p_video_render_data->drop_frame_num);
+    if (!p_video_render_data->debug_en)
+        return;
+    printf("************************Video_render comp info************************\n");
+    printf("receive    show_ok    show_fail    give_ok    give_fail    drop\n");
+    printf("%7u    %7u    %9u    %7u    %9u    %4u\n",
+            p_video_render_data->receive_frame_num,
+            p_video_render_data->show_frame_ok_num,
+            p_video_render_data->show_frame_fail_num,
+            p_video_render_data->giveback_frame_ok_num,
+            p_video_render_data->giveback_frame_fail_num,
+            p_video_render_data->drop_frame_num);
+    printf("\ntime_sync: %s", p_video_render_data->bypass_time_sync ? "Disabled" : "Enabled");
+    printf("\nstate: %s\n\n", mm_component_sta_to_str(p_video_render_data->state));
 }
 
 void mm_video_render_print_frame(struct mpp_frame *p_frame)
 {
-    printf(
-        "[%s:%d]stride[0]:%d,stride[1]:%d,stride[2]:%d,format:%d,width:%d,height:%d,"
+    logd("[%s:%d]stride[0]:%d,stride[1]:%d,stride[2]:%d,format:%d,width:%d,height:%d,"
         "crop_en:%d,crop.x:%d,crop.y:%d,crop.width:%d,crop.height:%d\n",
         __FUNCTION__, __LINE__, p_frame->buf.stride[0], p_frame->buf.stride[1],
         p_frame->buf.stride[2], p_frame->buf.format, p_frame->buf.size.width,
@@ -1991,7 +1941,8 @@ void mm_video_render_print_frame(struct mpp_frame *p_frame)
         p_frame->buf.crop.y, p_frame->buf.crop.width, p_frame->buf.crop.height);
 }
 
-void mm_video_render_calc_fps(mm_video_render_data *p_video_render_data)
+
+void mm_video_render_calc_drop_fps(mm_video_render_data *p_video_render_data)
 {
     static struct timespec pev = { 0 }, cur = { 0 };
 
@@ -2004,10 +1955,46 @@ void mm_video_render_calc_fps(mm_video_render_data *p_video_render_data)
                (cur.tv_nsec - pev.tv_nsec) / 1000;
 
         if (diff > 1000 * 1000) {
-            logd("frame_rate:%d\n", p_video_render_data->calc_frame_rate);
-            p_video_render_data->calc_frame_rate = 0;
+            logi("drop_frame_num:%d in time %ld ms\n",
+                p_video_render_data->drop_frame_num, diff / 1000);
+            p_video_render_data->drop_frame_num = 0;
             pev = cur;
         }
+    }
+}
+
+void mm_video_render_show_perf(mm_video_render_data *p_video_render_data)
+{
+    static s64 total_vrender_tm = 0;
+    static s64 total_rot_tm = 0;
+    static u64 last_vrender_tm = 0;
+    static u32 total_cnt = 0;
+    s64 time_diff;
+
+    if (!p_video_render_data->debug_en)
+        return;
+
+    time_diff = p_video_render_data->tm_vrender_end - p_video_render_data->tm_vrender_start;
+    total_vrender_tm += time_diff;
+    time_diff = p_video_render_data->tm_rot_end - p_video_render_data->tm_rot_start;
+    total_rot_tm += time_diff;
+    total_cnt++;
+    if (total_vrender_tm + total_rot_tm >= MM_MEDIA_PERF_PERIOD_TIME) {
+        time_diff = p_video_render_data->tm_vrender_start - last_vrender_tm;
+        if (time_diff > 0) {
+            printf("video render perf info:\n");
+            printf("\tAvgTm(ms)    RotateTm(ms)    RenderTm(ms)    FPS    Count    Period(ms)\n");
+            printf("\t%9ld    %12ld    %12ld    %3ld   %5u    %10ld\n\n",
+                (total_vrender_tm + total_rot_tm) / (total_cnt * 1000),
+                total_rot_tm / (total_cnt * 1000),
+                total_vrender_tm / (total_cnt * 1000),
+                (total_cnt * 1000000 / time_diff), total_cnt,
+                (total_vrender_tm + total_rot_tm) / 1000);
+        }
+
+        total_cnt = 0;
+        total_vrender_tm = total_rot_tm = 0;
+        last_vrender_tm = p_video_render_data->tm_vrender_start;
     }
 }
 
@@ -2045,15 +2032,18 @@ static s32 mm_video_render_rend_frame(mm_video_render_data *p_video_render_data,
             p_video_render_data, p_frame);
         p_video_render_data->rotation_angle_change = 0;
     }
+    p_video_render_data->tm_rot_start = mm_get_time_us();
     mm_video_render_rotate_frame(p_video_render_data, p_frame);
+    p_video_render_data->tm_rot_end = mm_get_time_us();
 
 #ifdef MM_VIDEO_RENDER_ENABLE_DUMP_PIC
     mm_video_render_dump_pic(&p_video_render_data->p_cur_display_frame->buf,
                              p_video_render_data->dump_index++);
 #endif
+    p_video_render_data->tm_vrender_start = mm_get_time_us();
     ret = p_video_render_data->render->rend(
         p_video_render_data->render, p_video_render_data->p_cur_display_frame);
-
+    p_video_render_data->tm_vrender_end = mm_get_time_us();
     if (ret == 0) {
         p_video_render_data->show_frame_ok_num++;
     } else {
@@ -2089,8 +2079,7 @@ _AIC_SHOW_DIRECT_:
                 FRAME_FLAG_EOS) {
                 p_video_render_data->flags |=
                     VIDEO_RENDER_INPORT_SEND_ALL_FRAME_FLAG;
-                printf("[%s:%d]receive frame_end_flag\n", __FUNCTION__,
-                       __LINE__);
+                logi("receive frame_end_flag\n");
             }
         } else {
             // how to do ,now deal with  same success
@@ -2122,22 +2111,11 @@ _AIC_SHOW_DIRECT_:
             p_video_render_data, MM_EVENT_VIDEO_RENDER_PTS, data1, data2, NULL);
 
     } else if (sync_type == MM_VIDEO_SYNC_DROP) {
-        static int drop_num = 0;
-        if (p_video_render_data->disp_frames[cur_frame_id].flags &
-            FRAME_FLAG_EOS) {
-            p_video_render_data->flags |=
-                VIDEO_RENDER_INPORT_SEND_ALL_FRAME_FLAG;
-            printf("[%s:%d]receive frame_end_flag\n", __FUNCTION__, __LINE__);
-        }
+        if (p_video_render_data->disp_frames[cur_frame_id].flags & FRAME_FLAG_EOS)
+            p_video_render_data->flags |= VIDEO_RENDER_INPORT_SEND_ALL_FRAME_FLAG;
 
         p_video_render_data->drop_frame_num++;
-        drop_num++;
-        if (drop_num > 50) {
-            drop_num = 0;
-            printf("MM_VIDEO_SYNC_DROP:drop_frame_num:%u"
-                   ",delay_time:" FMT_d64 "\n",
-                   p_video_render_data->drop_frame_num, delay_time);
-        }
+        mm_video_render_calc_drop_fps(p_video_render_data);
     } else if (sync_type == MM_VIDEO_SYNC_DEALY) {
         struct timespec delay_before = {0}, delay_after = {0};
         long  delay = 0;
@@ -2264,8 +2242,7 @@ static void *mm_video_render_component_thread(void *p_thread_data)
                                          10 * 1000);
                     goto _AIC_MSG_GET_;
                 }
-                printf("[%s:%d]audio start time arrive\n", __FUNCTION__,
-                       __LINE__);
+                logd("audio start time arrive\n");
             } else { //if it does not tunneld with clock ,it need calcuaute media time by self for control frame rate
                 mm_vdieo_render_set_media_clock(
                     p_video_render_data,
@@ -2289,8 +2266,7 @@ static void *mm_video_render_component_thread(void *p_thread_data)
                     FRAME_FLAG_EOS) {
                     p_video_render_data->flags |=
                         VIDEO_RENDER_INPORT_SEND_ALL_FRAME_FLAG;
-                    printf("[%s:%d]receive frame_end_flag\n", __FUNCTION__,
-                           __LINE__);
+                    logd("receive frame_end_flag\n");
                 }
             } else {
                 // how to do ,now deal with  same success
@@ -2321,15 +2297,13 @@ static void *mm_video_render_component_thread(void *p_thread_data)
                 p_video_render_data,
                 &p_video_render_data->disp_frames[cur_frame_id], &delay_time);
 
-            mm_video_render_calc_fps(p_video_render_data);
-
             /* process render show diffrent strategy*/
             ret = mm_video_render_process_sync_show(p_video_render_data,
                                                     sync_type, delay_time);
             if (ret != 0) {
                 goto _AIC_MSG_GET_;
             }
-
+            mm_video_render_show_perf(p_video_render_data);
             if (p_video_render_data->disp_frame_num) {
                 ret = mm_video_render_put_frame(
                     p_bind_vdec->p_bind_comp,
@@ -2355,8 +2329,6 @@ static void *mm_video_render_component_thread(void *p_thread_data)
     }
 
 _EXIT:
-    mm_video_render_print_frame_count(p_video_render_data);
-    printf("[%s:%d]mm_video_render_component_thread exit\n", __FUNCTION__,
-           __LINE__);
+    mm_video_render_show_debug_info(p_video_render_data);
     return (void *)MM_ERROR_NONE;
 }

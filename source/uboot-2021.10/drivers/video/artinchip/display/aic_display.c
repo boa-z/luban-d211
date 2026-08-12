@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0+
 /*
- * Copyright (c) 2021 ArtInChip Technology Co.,Ltd
+ * Copyright (C) 2021-2026 ArtInChip Technology Co.,Ltd
  * Huahui Mai <huahui.mai@artinchip.com>
  */
 
@@ -27,7 +27,6 @@
 #include "aic_com.h"
 
 #define IMAGE_HEADER_SIZE	(4 << 10)
-#define CONFIG_LOGO_ITB_ADDRESS	0x42400000
 #define BOOTCFG_FILE_SIZE	1024
 
 /* font color */
@@ -88,7 +87,7 @@ void aicfb_draw_rect(struct udevice *dev,
 	uchar *fb;
 	int i, j;
 
-	fb = (uchar *)(priv->fb + y * priv->line_length + x * pbytes);
+	fb = (uchar *)((uchar *)priv->fb + y * priv->line_length + x * pbytes);
 
 	switch (dt->format->format) {
 	case AIC_FMT_RGB_888:
@@ -138,7 +137,9 @@ int aic_bmp_display(struct udevice *dev, ulong bmp_image)
 	struct video_uc_plat *uplat = dev_get_uclass_plat(dev);
 	uchar *fb, *bmap;
 	struct bmp_image *bmp = (struct bmp_image *)bmp_image;
-	int width, height, line_length;
+	int width, line_length;
+	int height_signed, height_abs;
+	int step;
 	unsigned int bpix, bmp_bpix, byte_width, padded_byte;
 	int i, x, y;
 
@@ -150,40 +151,47 @@ int aic_bmp_display(struct udevice *dev, ulong bmp_image)
 	}
 
 	width = get_unaligned_le32(&bmp->header.width);
-	height = get_unaligned_le32(&bmp->header.height);
+	height_signed = (int)get_unaligned_le32(&bmp->header.height);
+	height_abs = height_signed < 0 ? -height_signed : height_signed;
 	bmp_bpix = get_unaligned_le16(&bmp->header.bit_count);
 
 	bpix = plat->format->bits_per_pixel;
 	if (bpix != bmp_bpix) {
-		dev_err(dev, "%d bit/pixel mode, but BMP has %d bit/pixel\n",
+		dev_err(dev, "%u bit/pixel mode, but BMP has %u bit/pixel\n",
 				bpix, bmp_bpix);
 		return -EINVAL;
 	}
 
-	if (width > plat->width || height > plat->height) {
+	if (width > plat->width || height_abs > plat->height) {
 		dev_err(dev, "Video buffer %d x %d y"
 			" but BMP has %d x %d y\n",
 			plat->width, plat->height,
-			width, height);
+			width, height_abs);
 		return -EINVAL;
 	}
 
 	line_length = plat->stride;
 	x = (plat->width - width) / 2;
-	y = (plat->height - height) / 2;
+	y = (plat->height - height_abs) / 2;
 
 	byte_width = width * (bmp_bpix / 8);
 	padded_byte = (byte_width & 0x3 ? 4 - (byte_width & 0x3) : 0);
 
 	bmap = (uchar *)bmp + get_unaligned_le32(&bmp->header.data_offset);
-	fb = (uchar *)(uplat->base +
-			(y + height) * line_length + x * bpix / 8);
+	if (height_signed > 0) {
+		fb = (uchar *)(uplat->base +
+				(y + height_abs) * line_length + x * bpix / 8);
+		step = -line_length;
+	} else {
+		fb = (uchar *)(uplat->base + y * line_length + x * bpix / 8);
+		step = line_length;
+	}
 
-	for (i = 0; i < height; ++i) {
+	for (i = 0; i < height_abs; ++i) {
 		memcpy(fb, bmap, byte_width);
 
 		bmap += byte_width + padded_byte;
-		fb -= line_length;
+		fb += step;
 	}
 
 	video_sync(dev, false);
@@ -196,8 +204,13 @@ void draw_progress_bar(int value)
 	struct udevice *dev = NULL;
 	unsigned int x, y, width, height, ret;
 	unsigned int text_x_pos, text_y_pos;
-	ret = uclass_first_device(UCLASS_VIDEO, &dev);
 	struct video_priv *priv = dev_get_uclass_priv(dev);
+
+	ret = uclass_first_device(UCLASS_VIDEO, &dev);
+	if (ret) {
+		pr_err("Failed to find aicfb udevice\n");
+		return;
+	}
 
 	width  = SPLIT_WIDTH(priv->xsize);
 	height = BAR_HEIGHT;
@@ -229,8 +242,21 @@ void draw_progress_bar(int value)
 	flush_dcache_range((uintptr_t)&priv->fb, (uintptr_t)(&priv->fb+priv->fb_size));
 }
 
-static int aic_logo_decode(unsigned char *dst, unsigned int size)
+int aic_logo_decode(unsigned char *dst, unsigned int size)
 {
+	struct udevice *dev;
+	int ret;
+
+	if (dst[0] == 'B' && dst[1] == 'M') {
+		pr_debug("Loaded a BMP logo image\n");
+		ret = uclass_first_device_err(UCLASS_VIDEO, &dev);
+		if (ret) {
+			pr_err("Failed to find video device for BMP logo\n");
+			return ret;
+		}
+		return aic_bmp_display(dev, (ulong)dst);
+	}
+
 	if (dst[0] == 0xff || dst[1] == 0xd8) {
 		pr_debug("Loaded a JPEG logo image\n");
 		return aic_jpeg_decode(dst, size);
@@ -241,8 +267,8 @@ static int aic_logo_decode(unsigned char *dst, unsigned int size)
 		return aic_png_decode(dst, size);
 	}
 
-	pr_err("not support logo file format, need a png/jpg image\n");
-	return 0;
+	pr_err("not support logo file format, need a bmp/png/jpg image\n");
+	return -EINVAL;
 }
 
 static int fit_image_get_node_prop(const void *fit, const char *name,
@@ -267,8 +293,10 @@ static int fit_image_get_node_prop(const void *fit, const char *name,
 	return 0;
 }
 
-static int fat_load_logo(const char *name)
+int aic_fat_load_logo(const char *name)
 {
+	int ret = -1;
+#ifdef CONFIG_FS_FAT
 	char *file_buf = NULL, *logo_itb = NULL;
 	ulong offset, maxsize = 0;
 	char imgname[IMG_NAME_MAX_SIZ];
@@ -277,7 +305,6 @@ static int fat_load_logo(const char *name)
 	const void *data;
 	unsigned char *dst;
 	struct udevice *dev;
-	int ret = -1;
 
 	file_buf = (char *)malloc(BOOTCFG_FILE_SIZE);
 	if (!file_buf) {
@@ -343,11 +370,11 @@ out:
 		free(logo_itb);
 	if (dst)
 		free(dst);
-
+#endif
 	return ret;
 }
 
-static int spinand_load_logo(const char *name)
+int aic_spinand_load_logo(const char *name)
 {
 	int ret = 0;
 #ifdef CONFIG_MTD
@@ -440,8 +467,9 @@ out:
 	return ret;
 }
 
-static int mmc_load_logo(const char *name, int id)
+int aic_mmc_load_logo(const char *name, int id)
 {
+	int ret = -EINVAL;
 #ifdef CONFIG_MMC
 	struct mmc *mmc = find_mmc_device(id);
 	struct disk_partition part_info;
@@ -449,7 +477,6 @@ static int mmc_load_logo(const char *name, int id)
 	unsigned char *fit, *dst;
 	size_t data_size;
 	const void *data;
-	int ret;
 
 	ret = uclass_first_device(UCLASS_VIDEO, &dev);
 	if (ret) {
@@ -503,7 +530,7 @@ out:
 	return ret;
 }
 
-static int bootrom_load_logo(const char *name)
+int aic_bootrom_load_logo(const char *name)
 {
 	const void *fit = (void *)CONFIG_LOGO_ITB_ADDRESS;
 	const void *data;
@@ -528,7 +555,7 @@ static int bootrom_load_logo(const char *name)
 	return 0;
 }
 
-static int spinor_load_logo(const char *name)
+int aic_spinor_load_logo(const char *name)
 {
 #ifdef CONFIG_DM_SPI_FLASH
 	unsigned int bus = CONFIG_SF_DEFAULT_BUS;
@@ -584,35 +611,4 @@ out:
 		free(dst);
 #endif
 	return 0;
-}
-
-int aic_disp_logo(const char *name, int boot_param)
-{
-	int ret = 0;
-
-	switch (boot_param) {
-	case BD_SDMC0:
-		ret = mmc_load_logo(name, 0);
-		break;
-	case BD_SDMC1:
-		ret = mmc_load_logo(name, 1);
-		break;
-	case BD_SPINAND:
-		ret = spinand_load_logo(name);
-		break;
-	case BD_SPINOR:
-		ret = spinor_load_logo(name);
-		break;
-	case BD_SDFAT32:
-		ret = fat_load_logo(name);
-		break;
-	case BD_BOOTROM:
-		ret = bootrom_load_logo(name);
-		break;
-	default:
-		pr_err("Do not support boot device id: %d\n", boot_param);
-		return -EINVAL;
-	}
-
-	return ret;
 }

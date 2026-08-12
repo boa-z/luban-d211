@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2024 ArtInChip Technology Co. Ltd
+ * Copyright (C) 2020-2025 ArtInChip Technology Co. Ltd
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -1406,6 +1406,7 @@ static int matroska_parse_tracks(struct aic_matroska_parser *s)
     int i, j;
     int k;
 
+    matroska->nb_audio_track = 0;
     for (i = 0; i < matroska->tracks.nb_elem; i++) {
         matroska_track *track = (matroska_track *)&tracks[i];
         enum CodecID codec_id = CODEC_ID_NONE;
@@ -1429,6 +1430,12 @@ static int matroska_parse_tracks(struct aic_matroska_parser *s)
         }
         if (!track->codec_id)
             continue;
+
+        logi("i:%d type:%"PRIu64" num:%"PRIu64" uid:%"PRIu64" codec_id:%s\n", i, track->type, track->num, track->uid, track->codec_id);
+        if (MPP_MEDIA_TYPE_AUDIO == track->type) {
+            track->audio_track_id = matroska->nb_audio_track;
+            matroska->nb_audio_track++;
+        }
 
         if (   (track->type == MATROSKA_TRACK_TYPE_AUDIO && track->codec_id[0] != 'A')
             || (track->type == MATROSKA_TRACK_TYPE_VIDEO && track->codec_id[0] != 'V')
@@ -1635,6 +1642,7 @@ static int matroska_parse_tracks(struct aic_matroska_parser *s)
             if (!st->codecpar.bits_per_coded_sample)
                 st->codecpar.bits_per_coded_sample = track->audio.bitdepth;
             st->duration = matroska->duration * matroska->time_scale * 1000 / MPP_TIME_BASE;
+            st->codecpar.audio_track_id = track->audio_track_id;
         }
     }
 
@@ -1919,6 +1927,7 @@ static int matroska_parse_block(struct matroska_demux_context *matroska, struct 
         pkt->duration     = lace_duration * 1000;
         pkt->type         = st->codecpar.codec_type;
         pkt->flag         = 0;
+        pkt->stream_index = track->audio_track_id;
         logd("type %d cur_pos 0x%lx, eos_pos 0x%lx size 0x%x",
             pkt->type, matroska->cur_pos, matroska->eos_pos, out_size);
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2024 ArtInChip Technology Co. Ltd
+ * Copyright (C) 2020-2026 ArtInChip Technology Co. Ltd
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -27,6 +27,7 @@ struct aic_flv_parser {
     struct aic_stream *stream;
     void *priv_data;
     int64_t duration;
+    int live_stream;
     int nb_streams;
     struct flv_stream_ctx *streams[FLV_MAX_TRACK_NUM];
 };

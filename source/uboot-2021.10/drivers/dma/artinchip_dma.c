@@ -2,7 +2,7 @@
 /*
  * Direct Memory Access ArtInChip driver
  *
- * Copyright (C) 2020 ArtInChip Technology Co.,Ltd.
+ * Copyright (C) 2020-2026 ArtInChip Technology Co.,Ltd.
  */
 
 #include <common.h>
@@ -565,7 +565,7 @@ static int aic_dma_probe(struct udevice *dev)
 	writel(0xFFFFFFFF, DMA_REG_IRQ_STS(ud));
 	writel(0xFFFFFFFF, DMA_REG_IRQ_EN(ud));
 
-	pr_info("%s done.\n", __func__);
+	dev_dbg(dev, "%s done.\n", __func__);
 	return ret;
 }
 

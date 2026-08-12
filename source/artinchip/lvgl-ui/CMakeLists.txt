@@ -12,6 +12,8 @@ if(DEFINED LVGL_FBDEV)
         set(APP_FOLDER ${DEMO_FOLDER}/base_demo)
         #set(APP_FOLDER ${DEMO_FOLDER}/hub_demo)
         #set(APP_FOLDER ${DEMO_FOLDER}/lyrics_demo)
+        #set(APP_FOLDER ${DEMO_FOLDER}/aic_player_demo)
+        #set(APP_FOLDER ${DEMO_FOLDER}/dashcam_demo)
     endif()
 endif()
 
@@ -96,6 +98,15 @@ file(GLOB_RECURSE DRIVER_SOURCE_FILES
 file(GLOB_RECURSE APP_SOURCE_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/${APP_FOLDER}/*.c)
 
+if (APP_FOLDER STREQUAL aic_demo/aishoot_demo)
+    option(ENABLE_BT_YC8628 "Enable Bluetooth YC8628 support" OFF)
+    if(ENABLE_BT_YC8628)
+        add_definitions(-DENABLE_BT_YC8628)
+    else()
+        add_definitions(-DENABLE_BT_AP2029)
+    endif()
+endif()
+
 if  (NOT APP_FOLDER STREQUAL aic_demo/lv_perf)
     file(GLOB APP_SOURCE_FILES_MAIN
         ${CMAKE_CURRENT_SOURCE_DIR}/main.c)
@@ -127,14 +138,13 @@ if(DEFINED LVGL_V_9)
     endif()
 endif()
 
-if(DEFINED LVGL_FBDEV)
-    if(${LVGL_FBDEV} STREQUAL "yes")
-        target_link_libraries(${APP_OUT_NAME} media_player)
-        target_link_libraries(${APP_OUT_NAME} m)
-        target_link_libraries(${APP_OUT_NAME} mpp_base mpp_ve mpp_ge mpp_decoder)
-    endif()
+if (APP_FOLDER STREQUAL aic_demo/aishoot_demo)
+    target_link_libraries(${APP_OUT_NAME} tffcastserver native tffmediaplayer)
+else()
+    target_link_libraries(${APP_OUT_NAME} media_player)
 endif()
-
+target_link_libraries(${APP_OUT_NAME} m)
+target_link_libraries(${APP_OUT_NAME} mpp_base mpp_ve mpp_ge mpp_decoder)
 target_link_libraries(${APP_OUT_NAME} pthread)
 
 if(DEFINED LVGL_DRM)
@@ -151,6 +161,14 @@ if (APP_FOLDER STREQUAL aic_demo/qc_test OR APP_FOLDER STREQUAL aic_demo/hub_dem
     if(use_mirror STREQUAL "use_screen_mirror")
         target_link_libraries(${APP_OUT_NAME} LinkSupport LinkUtils MSNUtils mpp_decoder asound)
         add_definitions(-DUSE_MSNLINK)
+    endif()
+endif()
+
+if (APP_FOLDER STREQUAL aic_demo/dashcam_demo)
+    if(DEFINED USE_RECORDER)
+        if(${USE_RECORDER} STREQUAL "yes")
+            target_link_libraries(${APP_OUT_NAME} media_recorder media_player)
+        endif()
     endif()
 endif()
 

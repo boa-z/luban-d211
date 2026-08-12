@@ -31,8 +31,6 @@
 #include <linux/dcache.h>
 #include <linux/in.h>
 #include <net/sock.h>
-#include <asm/unaligned.h>
-
 #include <linux/interrupt.h>
 #include <linux/module.h>
 #include <linux/slab.h>
@@ -41,16 +39,31 @@
 #include <linux/skbuff.h>
 #include <linux/errno.h>
 #include <linux/usb.h>
-#include <linux/cdev.h>
 #include <linux/device.h>
 #include <linux/poll.h>
 #include <linux/vmalloc.h>
 
 #include <linux/version.h>
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 32)
-#include <linux/pm_runtime.h>
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 12, 0)
+#include <asm/unaligned.h>
+#else
+#include <linux/unaligned.h>
 #endif
+
+
+/* #if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 32)
+ * #include <linux/pm_runtime.h>
+ * #endif
+ */
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 12, 0)
+#include <linux/unaligned.h>
+#else
+#include <asm/unaligned.h>
+#endif
+
+#include <linux/rcupdate.h>
 
 #include <linux/firmware.h>
 #include <linux/suspend.h>
@@ -65,6 +78,8 @@
 #define BDADDR_STRING_LEN	17
 #define BDADDR_FILE		"/opt/bdaddr"
 
+struct hci_dev __rcu *controller = NULL;
+
 struct cfg_list_item {
 	struct list_head list;
 	u16 offset;
@@ -76,6 +91,10 @@ static struct list_head list_configs;
 
 #define EXTRA_CONFIG_FILE	"/opt/rtk_btconfig.txt"
 static struct list_head list_extracfgs;
+
+static LIST_HEAD(apcf_filters);
+static LIST_HEAD(apcf_wakeups);
+static DEFINE_MUTEX(cfg_lock);
 
 #define CMD_CMP_EVT		    0x0e
 #define PKT_LEN			    300
@@ -97,9 +116,16 @@ static struct list_head list_extracfgs;
 #define HCI_CMD_READ_BD_ADDR                0x1009
 #define HCI_VENDOR_CHANGE_BDRATE            0xfc17
 #define HCI_VENDOR_READ_RTK_ROM_VERISION    0xfc6d
-#define HCI_VENDOR_READ_LMP_VERISION        0x1001
+#ifndef HCI_OP_READ_LOCAL_VERSION
+#define HCI_OP_READ_LOCAL_VERSION           0x1001
+#endif
 #define HCI_VENDOR_READ_CMD                 0xfc61
 #define HCI_VENDOR_WRITE_CMD                0xfc62
+#define HCI_VENDOR_READ_PATCH_VERSION       0xfdce
+#define HCI_VENDOR_READ_CHIP_ID             0xfc6f
+#define HCI_VENDOR_WDG_RESET                0xfc8e
+#define HCI_VENDOR_WRITE_TB                 0xfdcf
+#define HCI_VENDOR_ENHANCED_DOWNLOAD_MODE   0xfc1f
 
 #define ROM_LMP_NONE                0x0000
 #define ROM_LMP_8723a               0x1200
@@ -112,11 +138,57 @@ static struct list_head list_extracfgs;
 #define ROM_LMP_8922a               0x8922
 #define ROM_LMP_8723c               0x8703
 
+#define FW_TYPE_V0		0
+#define FW_TYPE_V1		1
+#define FW_TYPE_V2		2
+#define FW_TYPE_V3_1		3
+#define FW_TYPE_V3_2		4
+#define is_v3_fw(type)	(type == FW_TYPE_V3_1 || type == FW_TYPE_V3_2)
+
 #define PATCH_SNIPPETS		0x01
 #define PATCH_DUMMY_HEADER	0x02
 #define PATCH_SECURITY_HEADER	0x03
 #define PATCH_OTA_FLAG		0x04
 #define SECTION_HEADER_SIZE	8
+
+struct hci_rp_read_eco {
+	u8 status;
+	u8 eco;
+} __attribute__((packed));
+
+struct hci_rp_read_sec {
+	u8 status;
+	u8 key_id;
+} __attribute__((packed));
+
+struct hci_rp_read_chip_id {
+	u8 status;
+	u8 chip_id;
+} __attribute__((packed));
+
+struct hci_rp_enhanced_download_mode {
+	u8 status;
+	u8 rom_patched;
+	__le16 handle;
+	__le16 acldata_pkt_len;
+	u8 acl_cnt;
+} __attribute__((packed));
+
+struct hci_ev_patch_status_evt {
+	u8 evt;
+	u8 len;
+	u8 reserved;
+	u8 index;
+	__le16 handle;
+	__le32 loaded_len;
+} __attribute__((packed));
+
+struct image_match_info {
+	u16 chip_id;
+	u8  ic_cut;
+	u8  key_id;
+	u8  ota_enable;
+};
 
 struct rtk_eversion_evt {
 	uint8_t status;
@@ -179,8 +251,88 @@ static const uint8_t RTK_EPATCH_SIGNATURE[8] =
 static const uint8_t RTK_EPATCH_SIGNATURE_NEW[8] =
     { 0x52, 0x54, 0x42, 0x54, 0x43, 0x6F, 0x72, 0x65 };
 
+#define RTK_EPATCH_SIGNATURE_V3 "BTNIC003"
+#define RTL_PATCH_V3_1			0x01
+#define RTL_PATCH_V3_PATCH_IMAGE	0x02
+
+#define DL_FIX_CI_ID		0
+#define DL_FIX_CI_ADDR		1
+#define DL_FIX_PATCH_ADDR	2
+#define DL_FIX_SEC_HDR_ADDR	3
+#define DL_FIX_ADDR_MAX		4
+
+#define IMAGE_ID_F000		0xf000
+#define IMAGE_ID_F001		0xf001
+#define IMAGE_ID_F002		0xf002
+
+struct rtl_epatch_header_v3 {
+	__u8 signature[8];
+	__u8 timestamp[8];
+	__le32 ver_rsvd;
+	__le32 num_sections;
+} __packed;
+
+struct rtl_section_v3 {
+	__le32 opcode;
+	__le64 len;
+	u8 data[];
+} __packed;
+
+struct rtl_addr_fix {
+	u32 addr;
+	u32 value;
+};
+
+struct rtl_subsection_v3 {
+	u16 image_id;
+	u8 index;
+	u8 config_rule;
+	u8 need_config;
+
+	struct rtl_addr_fix fix[DL_FIX_ADDR_MAX];
+
+	u32 patch_image_len;
+	u8 *patch_image_buf;
+	u32 image_ver;
+
+	u8  *cfg_buf;
+	u16 cfg_len;
+
+	struct list_head list;
+};
+
+struct rtl_sec_hdr_v3 {
+	__le16 chip_id;
+	u8 ic_cut;
+	u8 key_id;
+	u8 enable_ota;
+	__le16 image_id;
+	u8 config_rule;
+	u8 need_config;
+	u8 rsv[950];
+
+	__le64 addr_fix[DL_FIX_ADDR_MAX * 2];
+	u8 index;
+
+	__le64 patch_image_len;
+	__u8 data[];
+} __packed;
+
+struct rtl_iovec {
+	u8 *data;
+	u32 len;
+};
+
+struct rtl_vendor_write_cmd {
+	u8 type;
+	u32 addr;
+	u32 val;
+} __packed;
+
 //Extension Section IGNATURE:0x77FD0451
 static const uint8_t Extension_Section_SIGNATURE[4] = { 0x51, 0x04, 0xFD, 0x77 };
+
+static LIST_HEAD(list_secs);
 
 static const struct {
 	__u16 lmp_subver;
@@ -233,22 +385,7 @@ enum rtk_endpoit {
 #define RTL8852BTU	0x7D
 #define RTL8761CU	0x80
 #define RTL8723CU	0x81
-
-typedef struct {
-	uint16_t prod_id;
-	uint16_t lmp_sub;
-	char *	 mp_patch_name;
-	char *	 patch_name;
-	char *	 config_name;
-	u8       chip_type;
-} patch_info;
-
-typedef struct {
-	struct list_head list_node;
-	struct usb_interface *intf;
-	struct usb_device *udev;
-	patch_info *patch_entry;
-} dev_data;
+#define RTL8922DU	0x82
 
 typedef struct {
 	dev_data *dev_entry;
@@ -261,6 +398,11 @@ typedef struct {
 	uint8_t *req_para, *rsp_para;
 	uint8_t *fw_data;
 	int pkt_len, fw_len;
+	u8 enhanced_download;
+	u8 acl_cnt;
+	u16 handle;
+	u16 acldata_pkt_len;
+	bool bulk_mode;
 } xchange_data;
 
 typedef struct {
@@ -294,13 +436,15 @@ static uint8_t g_key_id = 0;
 static dev_data *dev_data_find(struct usb_interface *intf);
 static patch_info *get_patch_entry(struct usb_device *udev);
 static int load_firmware(dev_data *dev_entry, xchange_data *xdata);
-static void init_xdata(xchange_data * xdata, dev_data * dev_entry);
-static int check_fw_version(xchange_data * xdata);
+static int init_xdata(xchange_data * xdata, dev_data * dev_entry);
+static int check_fw_version(xchange_data *xdata, dev_data *dev_entry);
 static int download_data(xchange_data * xdata);
 static int send_hci_cmd(xchange_data * xdata);
 static int rcv_hci_evt(xchange_data * xdata);
 static uint8_t rtk_get_eversion(dev_data * dev_entry);
 static int rtk_vendor_read(dev_data * dev_entry, uint8_t class);
+static u8 *load_config(dev_data *dev_entry, int *length);
+static int check_fw_version_v3(dev_data *dev_entry, xchange_data *xdata);
 
 static patch_info fw_patch_table[] = {
 /* { pid, lmp_sub, mp_fw_name, fw_name, config_name, chip_type } */
@@ -478,13 +622,17 @@ static patch_info fw_patch_table[] = {
 	{0x886c, 0x8852, "mp_rtl8852cu_fw", "rtl8852cu_fw", "rtl8852cu_config", RTL8852CU}, /* RTL8852CE */
 	{0x887c, 0x8852, "mp_rtl8852cu_fw", "rtl8852cu_fw", "rtl8852cu_config", RTL8852CU}, /* RTL8852CE */
 	{0x4007, 0x8852, "mp_rtl8852cu_fw", "rtl8852cu_fw", "rtl8852cu_config", RTL8852CU}, /* RTL8852CE */
+	{0x1675, 0x8852, "mp_rtl8852cu_fw", "rtl8852cu_fw", "rtl8852cu_config", RTL8852CU}, /* RTL8852CE */
 
 	{0xe822, 0x8822, "mp_rtl8822eu_fw", "rtl8822eu_fw", "rtl8822eu_config", RTL8822EU}, /* RTL8822EU */
 	{0xa82a, 0x8822, "mp_rtl8822eu_fw", "rtl8822eu_fw", "rtl8822eu_config", RTL8822EU}, /* RTL8822EU */
+	{0x20f5, 0x8822, "mp_rtl8822eu_fw", "rtl8822eu_fw", "rtl8822eu_config", RTL8822EU}, /* RTL8822EU */
 
+	{0xb850, 0x8851, "mp_rtl8851bu_fw", "rtl8851bu_fw", "rtl8851bu_config", RTL8851BU}, /* RTL8851BE */
 	{0xb851, 0x8851, "mp_rtl8851bu_fw", "rtl8851bu_fw", "rtl8851bu_config", RTL8851BU}, /* RTL8851BU */
 
 	{0xd85a, 0x8852, "mp_rtl8852du_fw", "rtl8852du_fw", "rtl8852du_config", RTL8852DU}, /* RTL8852DU */
+	{0xd85b, 0x8852, "mp_rtl8852du_fw", "rtl8852du_fw", "rtl8852du_config", RTL8852DU}, /* RTL8852DU */
 
 	{0x892a, 0x8922, "mp_rtl8922au_fw", "rtl8922au_fw", "rtl8922au_config", RTL8922AU}, /* RTL8922AU */
 	{0x8922, 0x8922, "mp_rtl8922au_fw", "rtl8922au_fw", "rtl8922au_config", RTL8922AU}, /* RTL8922AE */
@@ -495,9 +643,15 @@ static patch_info fw_patch_table[] = {
 	{0xb85f, 0x8922, "mp_rtl8922au_fw", "rtl8922au_fw", "rtl8922au_config", RTL8922AU}, /* RTL8922AE */
 
 	{0xc852, 0x8852, "mp_rtl8852btu_fw", "rtl8852btu_fw", "rtl8852btu_config", RTL8852BTU}, /* RTL8852BTU */
+	{0xc853, 0x8852, "mp_rtl8852btu_fw", "rtl8852btu_fw", "rtl8852btu_config", RTL8852BTU}, /* RTL8852BTU */
 	{0x8520, 0x8852, "mp_rtl8852btu_fw", "rtl8852btu_fw", "rtl8852btu_config", RTL8852BTU}, /* RTL8852BTE */
 
 	{0xc761, 0x8761, "mp_rtl8761cu_fw", "rtl8761cu_mx_fw", "rtl8761cu_mx_config", RTL8761CU}, /* RTL8761CU */
+	{0x892d, 0x8922, "mp_rtl8922du_fw", "rtl8922du_fw", "rtl8922du_config", RTL8922DU}, /* RTL8922DU */
+	{0x2850, 0x8922, "mp_rtl8922du_fw", "rtl8922du_fw", "rtl8922du_config", RTL8922DU}, /* RTL8922DU */
+	{0xa82d, 0x8922, "mp_rtl8922du_fw", "rtl8922du_fw", "rtl8922du_config", RTL8922DU}, /* RTL8922DU */
+	{0x882d, 0x8922, "mp_rtl8922du_fw", "rtl8922du_fw", "rtl8922du_config", RTL8922DU}, /* RTL8922DU */
+	//{0x20f5, 0x8922, "mp_rtl8922du_fw", "rtl8922du_fw", "rtl8922du_config", RTL8922DU}, /* RTL8922DU */
 
 /* NOTE: must append patch entries above the null entry */
 	{0, 0, NULL, NULL, NULL, 0}
@@ -530,11 +684,46 @@ static void util_hexdump(const u8 *buf, size_t len)
 	}
 }
 
-#if defined RTKBT_SWITCH_PATCH || defined RTKBT_TV_POWERON_WHITELIST
+static int __send_hci_cmd_bulk_mode(struct usb_device *udev, u8 *data, int len)
+{
+	unsigned int pipe;
+	int err = -EINVAL;
+	u8 *mem;
+	int length;
+	u16 opcode;
+
+	length = len + 1;
+	mem = kzalloc(length, GFP_ATOMIC);
+	if (!mem)
+		return -ENOMEM;
+	opcode = get_unaligned_le16(data);
+	mem[0] = 0x01; /* HCI_COMMAND_PKT (0x01) */
+	memcpy(mem + 1, data, len);
+	pipe = usb_sndbulkpipe(udev, BULK_EP);
+	err = usb_bulk_msg(udev, pipe, mem, length, NULL, 1000);
+	kfree(mem);
+
+	if (err < 0)
+		RTKBT_ERR("%s: send cmd (%04x) err (%d)", __func__, opcode, err);
+	else
+		RTKBT_INFO("%s: succeed to send cmd (%04x)", __func__, opcode);
+
+	return err;
+}
+
 int __rtk_send_hci_cmd(struct usb_device *udev, u8 *buf, u16 size)
 {
 	int result;
 	unsigned int pipe = usb_sndctrlpipe(udev, 0);
+	struct usb_interface *intf;
+
+	util_hexdump(buf, size);
+
+	if (udev->actconfig) {
+		intf = udev->actconfig->interface[0];
+		if (intf->cur_altsetting->desc.bAlternateSetting != 0)
+			return __send_hci_cmd_bulk_mode(udev, buf, size);
+	}
 
 	result = usb_control_msg(udev, pipe, 0, USB_TYPE_CLASS, 0, 0,
 				 buf, size, 1000); /* 1000 msecs */
@@ -545,7 +734,6 @@ int __rtk_send_hci_cmd(struct usb_device *udev, u8 *buf, u16 size)
 
 	return result;
 }
-#endif
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(3, 9, 0)
 static inline struct inode *file_inode(const struct file *f)
@@ -582,6 +770,27 @@ static void config_lists_free(void)
 
 	INIT_LIST_HEAD(&list_configs);
 	INIT_LIST_HEAD(&list_extracfgs);
+}
+
+static void list_secs_free(xchange_data *xdata)
+{
+	//struct rtl_subsection_v3 *entry, *tmp;
+	struct list_head *pos;
+	struct list_head *next;
+	struct rtl_subsection_v3 *entry;
+
+	if (xdata && is_v3_fw(xdata->dev_entry->fw_type)) {
+		//list_for_each_entry_safe(entry, tmp, &list_secs, list) {
+		list_for_each_safe(pos, next, &list_secs) {
+			entry = list_entry(pos, struct rtl_subsection_v3, list);
+			list_del(&entry->list);
+			if (entry->patch_image_buf)
+				vfree(entry->patch_image_buf);
+			if (entry->cfg_buf)
+				vfree(entry->cfg_buf);
+			kfree(entry);
+		}
+	}
 }
 
 static void line_process(char *buf, int len)
@@ -632,7 +841,80 @@ static void line_process(char *buf, int len)
 	list_add_tail(&item->list, &list_extracfgs);
 }
 
-static void config_process(u8 *buff, int len)
+static void store_apcf_cfg(u8 *buf, int len, struct list_head *head)
+{
+	u8 *p = NULL;
+	struct cfg_apcf_item *n = NULL;
+
+	if (!buf || !len || !head)
+		return;
+
+	p = vmalloc(sizeof(*n) + len);
+	if (!p)
+		return;
+	n = (struct cfg_apcf_item *)p;
+	INIT_LIST_HEAD(&n->list);
+	memcpy(n->data, buf, len);
+	n->len = len;
+
+	mutex_lock(&cfg_lock);
+	list_add_tail(&n->list, head);
+	mutex_unlock(&cfg_lock);
+}
+
+void drain_apcf_cfg(struct list_head *head, int type)
+{
+	struct list_head *pos = NULL;
+	struct list_head *next = NULL;
+	struct list_head *hl = NULL;
+	struct cfg_apcf_item *c;
+
+	switch (type) {
+	case CFG_TYPE_APCF_FILTER:
+		hl = &apcf_filters;
+		break;
+	case CFG_TYPE_APCF_WAKEUP:
+		hl = &apcf_wakeups;
+		break;
+	default:
+		mutex_lock(&cfg_lock);
+		list_for_each_safe(pos, next, &apcf_filters) {
+			c = list_entry(pos, struct cfg_apcf_item, list);
+			list_del(&c->list);
+			vfree(c);
+		}
+		list_for_each_safe(pos, next, &apcf_wakeups) {
+			c = list_entry(pos, struct cfg_apcf_item, list);
+			list_del(&c->list);
+			vfree(c);
+		}
+		mutex_unlock(&cfg_lock);
+		return;
+	}
+
+	mutex_lock(&cfg_lock);
+	list_for_each_safe(pos, next, hl) {
+		c = list_entry(pos, struct cfg_apcf_item, list);
+		list_del(&c->list);
+		if (head)
+			list_add_tail(&c->list, head);
+		else
+			vfree(c);
+	}
+	mutex_unlock(&cfg_lock);
+}
+
+static void line_process_apcf_filter(u8 *buf, int len)
+{
+	store_apcf_cfg(buf, len, &apcf_filters);
+}
+
+static void line_process_apcf_wakeup(u8 *buf, int len)
+{
+	store_apcf_cfg(buf, len, &apcf_wakeups);
+}
+
+static void config_process(u8 *buff, int len, int type)
 {
 	char *head = (void *)buff;
 	char *ptr = (void *)buff;
@@ -640,11 +922,21 @@ static void config_process(u8 *buff, int len)
 	while ((ptr = strsep(&head, "\n\r")) != NULL) {
 		if (!ptr[0])
 			continue;
-		line_process(ptr, strlen(ptr) + 1);
+		switch (type) {
+		case CFG_TYPE_BT:
+			line_process(ptr, strlen(ptr) + 1);
+			break;
+		case CFG_TYPE_APCF_FILTER:
+			line_process_apcf_filter(ptr, strlen(ptr) + 1);
+			break;
+		case CFG_TYPE_APCF_WAKEUP:
+			line_process_apcf_wakeup(ptr, strlen(ptr) + 1);
+			break;
+		}
 	}
 }
 
-static void config_file_proc(const char *path)
+void config_file_proc(const char *path, int type)
 {
 	int size;
 	int rc;
@@ -679,7 +971,7 @@ static void config_file_proc(const char *path)
 
 	tbuf[rc++] = '\n';
 	tbuf[rc++] = '\0';
-	config_process(tbuf, rc);
+	config_process(tbuf, rc, type);
 }
 
 int patch_add(struct usb_interface *intf)
@@ -704,6 +996,8 @@ int patch_add(struct usb_interface *intf)
 #endif
 
 	dev_entry = kzalloc(sizeof(dev_data), GFP_KERNEL);
+	if (!dev_entry)
+		return -1;
 	dev_entry->intf = intf;
 	dev_entry->udev = udev;
 	dev_entry->patch_entry = get_patch_entry(udev);
@@ -833,12 +1127,15 @@ static int rtk_vendor_write(dev_data * dev_entry)
 
 	xdata = kzalloc(sizeof(xchange_data), GFP_KERNEL);
 	if (NULL == xdata) {
-		ret_val = 0xFE;
 		RTKBT_DBG("NULL == xdata");
 		return -1;
 	}
 
-	init_xdata(xdata, dev_entry);
+	ret_val = init_xdata(xdata, dev_entry);
+	if (ret_val) {
+		RTKBT_ERR("failed to init xdata");
+		goto end;
+	}
 
 	xdata->cmd_hdr->opcode = cpu_to_le16(HCI_VENDOR_WRITE_CMD);
 	xdata->cmd_hdr->plen = 9;
@@ -873,6 +1170,22 @@ end:
 	return ret_val;
 }
 
+static int rtl_send_hci_cmd_by_ctrl(struct usb_device *udev, u8 *buf, u16 size)
+{
+	int ret;
+	unsigned int pipe = usb_sndctrlpipe(udev, 0);
+
+	util_hexdump(buf, size);
+
+	ret = usb_control_msg(udev, pipe, 0, USB_TYPE_CLASS, 0, 0, buf, size,
+			      1000); /* 1000 msecs */
+	if (ret < 0)
+		RTKBT_ERR("%s: Couldn't send hci cmd by ctrl, err %d",
+			  __func__, ret);
+
+	return ret;
+}
+
 static int check_fw_chip_ver(dev_data * dev_entry, xchange_data * xdata)
 {
 	int ret_val;
@@ -881,6 +1194,29 @@ static int check_fw_chip_ver(dev_data * dev_entry, xchange_data * xdata)
 	uint16_t lmp_subver, hci_rev;
 	patch_info *patch_entry;
 	struct hci_rp_read_local_version *read_ver_rsp;
+	struct sk_buff *skb = NULL;
+	u16 opcode;
+	u8 cmd[3] = { 0x01, 0x10, 0x00 };
+
+	if (!dev_entry || !xdata)
+		return -EINVAL;
+
+	patch_entry = dev_entry->patch_entry;
+	if (!patch_entry)
+		return -ENODEV;
+
+	rtl_send_hci_cmd_by_ctrl(dev_entry->udev, cmd, sizeof(cmd));
+
+	opcode = HCI_VENDOR_READ_CHIP_ID;
+	skb = rtk_hci_cmd_sync(xdata->dev_entry, opcode, 0, NULL, 1000);
+	if (IS_ERR(skb) || !skb) {
+		RTKBT_ERR("send %04x error (%lu)", opcode, PTR_ERR(skb));
+		return -EIO;
+	}
+
+	/* The ID for 8922D is 0x37 */
+	if (!skb->data[0] && skb->data[1] >= 0x37)
+		goto check_ver;
 
 	chip = rtk_vendor_read(dev_entry, READ_CHIP_TYPE);
 	if(chip == 0x8822) {
@@ -890,7 +1226,8 @@ static int check_fw_chip_ver(dev_data * dev_entry, xchange_data * xdata)
 		}
 	}
 
-	ret_val = check_fw_version(xdata);
+check_ver:
+	ret_val = check_fw_version(xdata, dev_entry);
 	if (ret_val < 0) {
 		RTKBT_ERR("Failed to get Local Version Information");
 		return ret_val;
@@ -904,7 +1241,6 @@ static int check_fw_chip_ver(dev_data * dev_entry, xchange_data * xdata)
 		}
 		return ret_val;
 	} else {
-		patch_entry = xdata->dev_entry->patch_entry;
 		read_ver_rsp = (struct hci_rp_read_local_version *)(xdata->rsp_para);
 		lmp_subver = le16_to_cpu(read_ver_rsp->lmp_subver);
 		hci_rev = le16_to_cpu(read_ver_rsp->hci_rev);
@@ -915,13 +1251,457 @@ static int check_fw_chip_ver(dev_data * dev_entry, xchange_data * xdata)
 	return ret_val;
 }
 
+static void *rtl_iov_pull_data(struct rtl_iovec *iov, u32 len)
+{
+	void *data = iov->data;
+
+	if (iov->len < len)
+		return NULL;
+
+	iov->data += len;
+	iov->len  -= len;
+
+	return data;
+}
+
+static int btrtl_vendor_write_mem(dev_data * dev_entry, u32 addr, u32 val)
+{
+	int ret_val;
+	xchange_data *xdata = NULL;
+	struct rtl_vendor_write_cmd cp;
+
+	xdata = kzalloc(sizeof(xchange_data), GFP_KERNEL);
+	if (!xdata) {
+		RTKBT_ERR("failed to init xdata");
+		return -ENOMEM;
+	}
+
+	cp.type = 0x21;
+	cp.addr = cpu_to_le32(addr);
+	cp.val = cpu_to_le32(val);
+
+	ret_val = init_xdata(xdata, dev_entry);
+	if (ret_val) {
+		RTKBT_ERR("%s: failed to init xdata", __func__);
+		goto end;
+	}
+
+	xdata->cmd_hdr->opcode = cpu_to_le16(HCI_VENDOR_WRITE_CMD);
+	xdata->cmd_hdr->plen = sizeof(cp);
+	memcpy(xdata->req_para, &cp, sizeof(cp));
+	xdata->pkt_len = CMD_HDR_LEN + sizeof(cp);
+
+	ret_val = send_hci_cmd(xdata);
+	if (ret_val < 0) {
+		RTKBT_ERR("%s: Failed to send HCI command.", __func__);
+		goto end;
+	}
+
+	ret_val = rcv_hci_evt(xdata);
+	if (ret_val < 0) {
+		RTKBT_ERR("%s: Failed to receive HCI event.", __func__);
+		goto end;
+	}
+
+	ret_val = 0;
+end:
+	if (xdata != NULL) {
+		if (xdata->send_pkt)
+			kfree(xdata->send_pkt);
+		if (xdata->rcv_pkt)
+			kfree(xdata->rcv_pkt);
+		kfree(xdata);
+	}
+	return ret_val;
+}
+
+static void btrtl_insert_ordered_subsec_v3(struct rtl_subsection_v3 *image)
+{
+	struct list_head *pos;
+	struct list_head *next;
+	struct rtl_subsection_v3 *node;
+
+	list_for_each_safe(pos, next, &list_secs) {
+		node = list_entry(pos, struct rtl_subsection_v3, list);
+
+		if (node->image_id > image->image_id) {
+			__list_add(&image->list, pos->prev, pos);
+			return;
+		}
+
+		if (node->image_id == image->image_id &&
+		    node->index > image->index) {
+			__list_add(&image->list, pos->prev, pos);
+			return;
+		}
+	}
+	__list_add(&image->list, pos->prev, pos);
+}
+
+static struct rtl_subsection_v3 *btrtl_reverse_search_subsec(void)
+{
+	struct rtl_subsection_v3 *sec = NULL;
+
+	list_for_each_entry_reverse(sec, &list_secs, list) {
+		RTKBT_DBG("addr: 0x%08x, value: 0x%08x",
+			  sec->fix[DL_FIX_SEC_HDR_ADDR].addr,
+			  sec->fix[DL_FIX_SEC_HDR_ADDR].value);
+		/* Check sec hdr in section */
+		if (!sec->fix[DL_FIX_SEC_HDR_ADDR].value ||
+		    !sec->fix[DL_FIX_SEC_HDR_ADDR].addr ||
+		    sec->fix[DL_FIX_SEC_HDR_ADDR].addr == 0xffffffff)
+			continue;
+		return sec;
+	}
+
+	return NULL;
+}
+
+static int rtk_enhanced_download_mode_enable(xchange_data *xdata)
+{
+	u16 opcode = HCI_VENDOR_ENHANCED_DOWNLOAD_MODE;
+	struct hci_rp_enhanced_download_mode *ev;
+	struct sk_buff *skb;
+	u8 val = 1;
+	int ret = -EINVAL;
+
+	skb = rtk_hci_cmd_sync(xdata->dev_entry, opcode, 1, &val, 1000);
+	if (IS_ERR(skb) || !skb) {
+		RTKBT_ERR("send %04x error (%lu)", opcode, PTR_ERR(skb));
+		return -EIO;
+	}
+	if (skb->len != sizeof(*ev)) {
+		RTKBT_ERR("got invalid cmd complete, %u %lu", skb->len,
+				sizeof(*ev));
+		goto err;
+	}
+	ev = (struct hci_rp_enhanced_download_mode *)skb->data;
+	if (ev->status) {
+		RTKBT_ERR("%s: status 0x%02x", __func__, ev->status);
+		goto err;
+	}
+	if (ev->rom_patched) {
+		RTKBT_INFO("%s: rom has been patched", __func__);
+		/* FIXME: On FPGA, the rom_patched is true, but we
+		 * continue the acl download
+		 */
+	}
+	xdata->handle = le16_to_cpu(ev->handle);
+	xdata->acl_cnt = ev->acl_cnt;
+	xdata->acldata_pkt_len = le16_to_cpu(ev->acldata_pkt_len);
+	kfree_skb(skb);
+
+	xdata->dev_entry->enh_dl_enabled = 1;
+
+	RTKBT_INFO("Enhanced download mode enabled, handle %04x, acl %u*%u",
+		   xdata->handle, xdata->acl_cnt, xdata->acldata_pkt_len);
+
+	return 0;
+err:
+	kfree_skb(skb);
+	return ret;
+}
+
+static int download_patch_sections(dev_data *dev_entry, xchange_data *xdata)
+{
+	struct rtl_subsection_v3 *sec, *tmp;
+	u8 *buf = NULL;
+	u8 *fw_data;
+	u8 i;
+	int patch_size = 0;
+	int ret_val = -1;
+	struct sk_buff *skb = NULL;
+	struct hci_dl_rsp {
+		u8 status;
+		u8 index;
+		u8 error;
+	} __packed *rp;
+
+	switch (dev_entry->patch_entry->chip_type) {
+	case RTL8922DU:
+	case RTL8852CU:
+		rtk_enhanced_download_mode_enable(xdata);
+		break;
+	default:
+		break;
+	}
+
+	list_for_each_entry_safe(sec, tmp, &list_secs, list) {
+		RTKBT_DBG("RTL: image (%04x:%02x)", sec->image_id, sec->index);
+
+		for (i = DL_FIX_CI_ID; i < DL_FIX_ADDR_MAX; i++) {
+			if (!sec->fix[i].addr ||
+			    sec->fix[i].addr == 0xffffffff) {
+				RTKBT_WARN("%s: no need to write addr 0x%08x",
+					   __func__, sec->fix[i].addr);
+				continue;
+			}
+			RTKBT_DBG("%s: write addr and val, 0x%08x, 0x%08x",
+				  __func__, sec->fix[i].addr,
+				  sec->fix[i].value);
+			if (btrtl_vendor_write_mem(dev_entry, sec->fix[i].addr,
+						   sec->fix[i].value)) {
+				RTKBT_ERR("RTL: write reg failed");
+				goto exit_fail;
+			}
+			continue;
+		}
+
+		xdata->fw_len = sec->patch_image_len + sec->cfg_len;
+		/* if (&tmp->list == &list_secs) {
+		 * 	if (config_len)
+		 * 		xdata->fw_len = sec->patch_image_len + config_len;
+		 * }
+		 */
+
+		buf = vzalloc(xdata->fw_len);
+		if (!buf) {
+			RTKBT_ERR("Couldn't alloc buf for image data");
+			goto exit_fail;
+		}
+		memcpy(buf, sec->patch_image_buf, sec->patch_image_len);
+		if (sec->cfg_len > 0)
+			memcpy(buf + sec->patch_image_len, sec->cfg_buf,
+			       sec->cfg_len);
+
+		fw_data = xdata->fw_data;
+		xdata->fw_data = buf;
+
+		RTKBT_DBG("patch image (%04x:%02x). len: %d",
+			  sec->image_id, sec->index, xdata->fw_len);
+		RTKBT_DBG("buf %p, image buf %p, len %u", buf,
+			  sec->patch_image_buf, sec->patch_image_len);
+
+		/* FIXME: What if length is uncertain ? */
+		patch_size += xdata->fw_len;
+
+		ret_val = download_data(xdata);
+
+		vfree(buf);
+		xdata->fw_data = fw_data;
+		if (ret_val < 0) {
+			RTKBT_ERR("download_data failed, err %d", ret_val);
+			goto exit_fail;
+		}
+
+		if (sec->list.next != &list_secs &&
+		    sec->image_id == tmp->image_id)
+			continue;
+
+		if (dev_entry->fw_type == FW_TYPE_V3_1)
+			continue;
+
+		i = 0x80;
+		skb = rtk_hci_cmd_sync(xdata->dev_entry, DOWNLOAD_OPCODE,
+				       1, &i, 200);
+		if (IS_ERR(skb) || !skb) {
+			ret_val = -EIO;
+			RTKBT_ERR("%s: failed to issue last %04x, %ld",
+				  __func__, DOWNLOAD_OPCODE, PTR_ERR(skb));
+			skb = NULL;
+			goto exit_fail;
+		}
+		rp = (void *)skb->data;
+		if (rp->error == 0x02) {
+			/* verification failure */
+			ret_val = -EFAULT;
+			goto exit_fail;
+		}
+
+		kfree_skb(skb);
+		skb = NULL;
+	}
+	ret_val = 0;
+
+ exit_fail:
+	if (skb)
+		kfree_skb(skb);
+	return ret_val;
+}
+
+static int btrtl_finalize_download(dev_data *dev_entry)
+{
+	u8 params[2] = {
+		0x03, 0xb2
+	};
+	struct sk_buff *skb;
+	u16 opcode;
+	u32 len;
+	const struct firmware *fw;
+	int ret;
+	char *str;
+	char *p;
+	char tmp_name[32];
+	char filename[64];
+	u8 *buf;
+
+	opcode = HCI_VENDOR_WDG_RESET;
+	len = 2;
+	if (dev_entry->opcode == RTL_PATCH_V3_1) {
+		opcode = 0xfc20;
+		params[0] = 0x80;
+		len = 1;
+	}
+	skb = rtk_hci_cmd_sync(dev_entry, opcode, len,
+			       params, 1000);
+	if (IS_ERR(skb) || !skb) {
+		RTKBT_ERR("%s: watchdog reset error %lu", __func__,
+			  PTR_ERR(skb));
+		return -EIO;
+	}
+	RTKBT_INFO("%s: status %02x", __func__, skb->data[0]);
+	kfree_skb(skb);
+
+	if (dev_entry->opcode == RTL_PATCH_V3_1)
+		goto done;
+
+	str = dev_entry->patch_entry->patch_name;
+	len = strlen(str);
+	if (len > sizeof(tmp_name) - 1)
+		len = sizeof(tmp_name) - 1;
+	memcpy(tmp_name, str, len);
+	tmp_name[len] = '\0';
+
+	str = tmp_name;
+	p = strsep(&str, ".");
+	ret = snprintf(filename, sizeof(filename), "%s_pta", p);
+	if (str)
+		snprintf(filename + ret, sizeof(filename) - ret, ".%s", str);
+
+	ret = request_firmware(&fw, filename, &dev_entry->udev->dev);
+	if (ret < 0) {
+		RTKBT_WARN("%s: no PTA file", filename);
+		goto done;
+	}
+
+	buf = kzalloc(fw->size + 1, GFP_KERNEL);
+	if (!buf) {
+		RTKBT_ERR("%s: failed to alloc buf for PTA file", __func__);
+		release_firmware(fw);
+		goto done;
+	}
+	buf[0] = 0x07;
+	memcpy(buf + 1, fw->data, fw->size);
+	skb = rtk_hci_cmd_sync(dev_entry, 0xfd82, fw->size + 1, buf, 1000);
+	kfree(buf);
+	release_firmware(fw);
+	if (IS_ERR(skb) || !skb) {
+		RTKBT_ERR("%s: failed to load PTA", __func__);
+		goto done;
+	}
+	RTKBT_INFO("%s: succeed to load PTA, (%u)", __func__, skb->data[0]);
+	kfree_skb(skb);
+
+done:
+	return 0;
+}
+
+static int rtl_wait_fw_ready_evt(xchange_data *xdata)
+{
+	int ret;
+	int rcv_len;
+	int count = 5;
+	u8 *p;
+	struct usb_device *udev = xdata->dev_entry->udev;
+
+	if (!udev)
+		return -EINVAL;
+
+	while (count-- > 0) {
+		if (xdata->bulk_mode)
+			ret = usb_bulk_msg(udev, usb_rcvbulkpipe(udev, 0x02),
+					   (void *)(xdata->rcv_pkt), PKT_LEN,
+					   &rcv_len, 8000);
+		else
+			ret = usb_interrupt_msg(udev, xdata->pipe_in,
+						(void *)(xdata->rcv_pkt), PKT_LEN,
+						&rcv_len, 8000);
+		if (ret < 0) {
+			RTKBT_ERR("%s; no usb intr msg for hci event, err %d",
+				  __func__, ret);
+			return ret;
+		}
+		if (xdata->bulk_mode && rcv_len > 1)
+			/* Remove the first byte (pkt type) */
+			memmove(xdata->rcv_pkt, xdata->rcv_pkt + 1,
+				rcv_len - 1);
+		p = xdata->rcv_pkt + EVT_HDR_LEN;
+		if (!ret && xdata->evt_hdr->evt == 0xff && *p == 0x77)
+			return 0;
+	}
+
+	return -ETIMEDOUT;
+}
+
+static int rtl_download_firmware_v3(dev_data * dev_entry, xchange_data *xdata)
+{
+	struct rtl_subsection_v3 *subsec;
+	int ret = -1;
+	u32 fix_value;
+	struct sk_buff *skb;
+
+	if (dev_entry->fw_type == FW_TYPE_V3_2) {
+		skb = rtk_hci_cmd_sync(dev_entry, HCI_VENDOR_WRITE_TB, 0,
+				       NULL, 1000);
+		if (IS_ERR(skb) || !skb) {
+			RTKBT_ERR("%s: write tb error %lu", __func__,
+				  PTR_ERR(skb));
+			return -EIO;
+		}
+		RTKBT_INFO("%s: status %02x", __func__, skb->data[0]);
+		if (skb->data[0] == 0x03) {
+			kfree_skb(skb);
+			ret = rtl_wait_fw_ready_evt(xdata);
+			goto done;
+		}
+		kfree_skb(skb);
+	}
+
+	/* Download each patch section */
+	ret = download_patch_sections(dev_entry, xdata);
+	if(ret < 0)
+		goto exit_fail;
+
+	/* Security check, there is no need for new v3 fw */
+	if (dev_entry->fw_type == FW_TYPE_V3_1) {
+		subsec = btrtl_reverse_search_subsec();
+		if (subsec) {
+			fix_value = subsec->fix[DL_FIX_PATCH_ADDR].value +
+					subsec->patch_image_len -
+					subsec->fix[DL_FIX_SEC_HDR_ADDR].value;
+			RTKBT_DBG("image_id %04x, index %02x, fix value %08x",
+				  subsec->image_id, subsec->index, fix_value);
+			ret = btrtl_vendor_write_mem(dev_entry,
+					subsec->fix[DL_FIX_PATCH_ADDR].addr,
+					fix_value);
+			if (ret) {
+				RTKBT_ERR("security check failed");
+				goto exit_fail;
+
+			}
+		}
+	}
+
+	ret = btrtl_finalize_download(dev_entry);
+	if(ret < 0)
+		goto exit_fail;
+
+done:
+	RTKBT_DBG("firmware download success");
+	return ret;
+
+exit_fail:
+	RTKBT_DBG("firmware download failure");
+	return ret;
+}
+
 int download_patch(struct usb_interface *intf)
 {
 	dev_data *dev_entry;
 	patch_info *pinfo;
 	xchange_data *xdata = NULL;
 	uint8_t *fw_buf;
-	int ret_val;
+	int ret_val = 0;
 	int max_patch_size = 0;
 
 	RTKBT_DBG("download_patch start");
@@ -939,7 +1719,11 @@ int download_patch(struct usb_interface *intf)
 		goto patch_end;
 	}
 
-	init_xdata(xdata, dev_entry);
+	ret_val = init_xdata(xdata, dev_entry);
+	if (ret_val) {
+		RTKBT_ERR("failed to init xdata");
+		goto patch_end;
+	}
 
 	ret_val = check_fw_chip_ver(dev_entry, xdata);
 	if (ret_val != 0 )
@@ -950,6 +1734,22 @@ int download_patch(struct usb_interface *intf)
 		RTKBT_ERR("load firmware failed!");
 		ret_val = -1;
 		goto patch_end;
+	}
+
+	if (is_v3_fw(dev_entry->fw_type)) {
+		/* FIXME: What is the maximum patch size */
+		if (xdata->fw_len <= 1000000) {
+			ret_val = rtl_download_firmware_v3(dev_entry, xdata);
+			if (ret_val < 0) {
+				RTKBT_ERR("download firmware v3 err %d",
+					  ret_val);
+				goto patch_end;
+			}
+			if (dev_entry->fw_type == FW_TYPE_V3_2)
+				ret_val = check_fw_version_v3(dev_entry, xdata);
+			goto patch_end;
+		} else
+			goto patch_end;
 	}
 
 	fw_buf = xdata->fw_data;
@@ -974,7 +1774,7 @@ int download_patch(struct usb_interface *intf)
 		goto patch_fail;
 	}
 
-	ret_val = check_fw_version(xdata);
+	ret_val = check_fw_version(xdata, dev_entry);
 	if (ret_val <= 0) {
 		RTKBT_ERR("%s: Read Local Version Info failure after download",
 			  __func__);
@@ -986,6 +1786,8 @@ int download_patch(struct usb_interface *intf)
 patch_fail:
 	vfree(fw_buf);
 patch_end:
+	/* Make sure all the section nodes freed */
+	list_secs_free(xdata);
 	if (xdata != NULL) {
 		if (xdata->send_pkt)
 			kfree(xdata->send_pkt);
@@ -1028,9 +1830,13 @@ int download_special_patch(struct usb_interface *intf, const char *special_name)
 		return -1;
 	}
 
-	init_xdata(xdata, dev_entry);
+	result = init_xdata(xdata, dev_entry);
+	if (result) {
+		RTKBT_ERR("failed to init xdata");
+		goto patch_end;
+	}
 
-	result = check_fw_version(xdata);
+	result = check_fw_version(xdata, dev_entry);
 	if (result < 0) {
 		RTKBT_ERR("Failed to get Local Version Information");
 		goto patch_end;
@@ -1088,7 +1894,7 @@ int download_special_patch(struct usb_interface *intf, const char *special_name)
 		goto patch_fail;
 	}
 
-	result = check_fw_version(xdata);
+	result = check_fw_version(xdata, dev_entry);
 	if (result <= 0) {
 		RTKBT_ERR("%s: Read Local Version Info failure after download",
 			  __func__);
@@ -1163,10 +1969,9 @@ int set_scan(struct usb_interface *intf)
 		return -1;
 	}
 
-	init_xdata(xdata, dev_entry);
-
-	if ( !xdata->send_pkt || !xdata->rcv_pkt ){
-		result = -1;
+	result = init_xdata(xdata, dev_entry);
+	if (result) {
+		RTKBT_ERR("failed to init xdata");
 		goto end;
 	}
 
@@ -1509,6 +2314,10 @@ static int insert_patch(struct patch_node *patch_node_hdr, uint8_t *section_pos,
 		RTKBT_DBG("eco 0x%02x, Eversion:%02x", eco, gEVersion);
 		if (eco == gEVersion + 1) {
 			tmp = (struct patch_node*)kzalloc(sizeof(struct patch_node), GFP_KERNEL);
+			if (!tmp) {
+				RTKBT_ERR("Cannot alloc mem for patch node");
+				continue;
+			}
 			tmp->pri = (uint8_t)*(pos + 1);
 			if(opcode == PATCH_SECURITY_HEADER)
 				tmp->key_id = (uint8_t)*(pos + 1);
@@ -1793,7 +2602,7 @@ static u8 *load_config(dev_data *dev_entry, int *length)
 	buf = (u8 *)fw->data;
 
 	/* Load extra configs */
-	config_file_proc(EXTRA_CONFIG_FILE);
+	config_file_proc(EXTRA_CONFIG_FILE, CFG_TYPE_BT);
 	list_for_each_safe(pos, next, &list_extracfgs) {
 		n = list_entry(pos, struct cfg_list_item, list);
 		RTKBT_INFO("extra cfg: ofs %04x, len %u", n->offset, n->len);
@@ -1891,6 +2700,71 @@ done:
 	return buf;
 }
 
+static int rtl_vendor_read(dev_data *dev_entry, u8 type, u32 addr, u8 *rp)
+{
+	int ret_val = 0;
+	xchange_data *xdata = NULL;
+	u8 param[5];
+	u8 rp_len = 0;
+
+	xdata = kzalloc(sizeof(xchange_data), GFP_KERNEL);
+	if (!xdata) {
+		RTKBT_ERR("failed to alloc xdata");
+		return -ENOMEM;
+	}
+
+	switch (type) {
+	case 0x21:
+		rp_len = 4;
+		break;
+	case 0x10:
+		rp_len = 2;
+		break;
+	default:
+		RTKBT_ERR("Unknown read type 0x%02x", type);
+		goto read_end;
+	}
+	param[0] = type;
+
+	put_unaligned_le32(addr, &param[1]);
+
+	ret_val = init_xdata(xdata, dev_entry);
+	if (ret_val < 0) {
+		RTKBT_ERR("Failed to init xdata");
+		goto read_end;
+	}
+
+	xdata->cmd_hdr->opcode = cpu_to_le16(HCI_VENDOR_READ_CMD);
+	xdata->cmd_hdr->plen = sizeof(param);
+	memcpy(xdata->req_para, param, sizeof(param));
+	xdata->pkt_len = CMD_HDR_LEN + sizeof(param);
+
+	ret_val = send_hci_cmd(xdata);
+	if (ret_val < 0) {
+		RTKBT_ERR("Failed to send read RTK chip_type cmd.");
+		goto read_end;
+	}
+
+	ret_val = rcv_hci_evt(xdata);
+	if (ret_val < 0) {
+		RTKBT_ERR("Failed to receive HCI event for chip type.");
+		goto read_end;
+	}
+
+	if (rp_len)
+		memcpy(rp, xdata->rsp_para + 1, rp_len);
+
+read_end:
+	if (xdata != NULL) {
+		if (xdata->send_pkt)
+			kfree(xdata->send_pkt);
+		if (xdata->rcv_pkt)
+			kfree(xdata->rcv_pkt);
+		kfree(xdata);
+	}
+	return ret_val;
+}
+
 static int rtk_vendor_read(dev_data * dev_entry, uint8_t class)
 {
 	struct rtk_chip_type_evt *chip_type;
@@ -1909,7 +2783,12 @@ static int rtk_vendor_read(dev_data * dev_entry, uint8_t class)
 		return ret_val;
 	}
 
-	init_xdata(xdata, dev_entry);
+	ret_val = init_xdata(xdata, dev_entry);
+	if (ret_val) {
+		ret_val = 0xFE;
+		RTKBT_ERR("failed to init xdata");
+		goto read_end;
+	}
 
 	xdata->cmd_hdr->opcode = cpu_to_le16(HCI_VENDOR_READ_CMD);
 	xdata->cmd_hdr->plen = 5;
@@ -1979,6 +2858,16 @@ read_end:
 	return ret_val;
 }
 
+static int rtk_vendor_read_reg32(dev_data *dev_entry, u32 addr, u8 *rp)
+{
+	return rtl_vendor_read(dev_entry, 0x21, addr, rp);
+}
+
+static int rtk_vendor_read_reg16(dev_data *dev_entry, u32 addr, u8 *rp)
+{
+	return rtl_vendor_read(dev_entry, 0x10, addr, rp);
+}
+
 static int needs_hci_upgrade(xchange_data *xdata, u8 *buf, u32 buf_len)
 {
 	struct {
@@ -2024,6 +2913,345 @@ static int needs_hci_upgrade(xchange_data *xdata, u8 *buf, u32 buf_len)
 	RTKBT_INFO("needs_hci_upgrade: state %02x", evt_params->ota);
 
 	return evt_params->ota;
+}
+
+static int btrtl_parse_config(struct rtl_subsection_v3 *subsec,
+			      dev_data *dev_entry)
+{
+	char tmp_name[32];
+	char filename[64];
+	int len;
+	char *str;
+	char *p;
+	int ret = 0;
+	u8 *cfg_buf = NULL;
+	const struct firmware *fw;
+
+	if (!subsec || !dev_entry || !dev_entry->patch_entry ||
+	    !dev_entry->udev)
+		return -EINVAL;
+
+	str = dev_entry->patch_entry->config_name;
+
+	if (dev_entry->fw_type == FW_TYPE_V3_1) {
+		if (!subsec->image_id && !subsec->index) {
+			if (!dev_entry->cfg_len)
+				goto done;
+			cfg_buf = vmalloc(dev_entry->cfg_len);
+			if (!cfg_buf)
+				return -ENOMEM;
+			memcpy(cfg_buf, dev_entry->cfg_buf, dev_entry->cfg_len);
+
+			subsec->cfg_buf = cfg_buf;
+			subsec->cfg_len = dev_entry->cfg_len;
+
+			dev_entry->cfg_len = 0;
+			/* This buffer will be released at the end of the
+			 * load_firmware()
+			 */
+			dev_entry->cfg_buf = NULL;
+		}
+		goto done;
+	}
+
+	len = strlen(str);
+	if (len > sizeof(tmp_name) - 1)
+		len = sizeof(tmp_name) - 1;
+	memcpy(tmp_name, str, len);
+	tmp_name[len] = '\0';
+
+	str = tmp_name;
+	p = strsep(&str, ".");
+
+	ret = snprintf(filename, sizeof(filename), "%s", p);
+	if (subsec->config_rule && subsec->need_config) {
+		switch (subsec->image_id) {
+		case IMAGE_ID_F000:
+		case IMAGE_ID_F001:
+		case IMAGE_ID_F002:
+			ret += snprintf(filename + ret, sizeof(filename) - ret,
+					"_%04x_%02x", subsec->image_id,
+					subsec->index);
+			break;
+		default:
+			goto done;
+		}
+	} else {
+		goto done;
+	}
+
+	if (str)
+		snprintf(filename + ret, sizeof(filename) - ret, ".%s", str);
+
+	RTKBT_INFO("config file: %s", filename);
+	ret = request_firmware(&fw, filename, &dev_entry->udev->dev);
+	if (ret < 0) {
+		RTKBT_ERR("request_firmware [%s] error", filename);
+		len = 4;
+		cfg_buf = vmalloc(len);
+		if (!cfg_buf) {
+			RTKBT_ERR("alloc cfg buf error");
+			return -ENOMEM;
+		}
+		memset(cfg_buf, 0xff, len);
+		subsec->cfg_buf = cfg_buf;
+		subsec->cfg_len = len;
+
+		return 0;
+	}
+	cfg_buf = vmalloc(fw->size);
+	if (!cfg_buf) {
+		ret = -ENOMEM;
+		goto err;
+	}
+	memcpy(cfg_buf, fw->data, fw->size);
+	len = fw->size;
+	release_firmware(fw);
+
+	subsec->cfg_buf = cfg_buf;
+	subsec->cfg_len = len;
+done:
+	return 0;
+err:
+	release_firmware(fw);
+	return ret;
+}
+
+static int rtlbt_parse_section_v3(u32 opcode, u8 *data, u32 len,
+				  dev_data *dev_entry,
+				  struct image_match_info *info)
+{
+	struct rtl_subsection_v3 *subsec;
+	struct rtl_sec_hdr_v3 *sec_hdr;
+	u8 *ptr;
+	u32 sec_len;
+	int rc = 0;
+	struct rtl_iovec iov = {
+		.data = data,
+		.len  = len,
+	};
+	u8 i;
+	u16 chip_id;
+	u16 image_id;
+
+	if (!data || !len || !info)
+		return -EINVAL;
+
+	sec_hdr = rtl_iov_pull_data(&iov, sizeof(*sec_hdr));
+	if (!sec_hdr) {
+		RTKBT_ERR("get section header failed");
+		return -1;
+	}
+
+	if (dev_entry->opcode && dev_entry->opcode != opcode) {
+		RTKBT_ERR("invalid opcode 0x%02x", opcode);
+		return -EINVAL;
+	}
+
+	if (!dev_entry->opcode) {
+		dev_entry->opcode = opcode;
+		switch (dev_entry->opcode) {
+		case RTL_PATCH_V3_1:
+			dev_entry->fw_type = FW_TYPE_V3_1;
+			break;
+		case RTL_PATCH_V3_PATCH_IMAGE:
+			dev_entry->fw_type = FW_TYPE_V3_2;
+			break;
+		default:
+			return -EINVAL;
+		}
+		RTKBT_INFO("fw_type %u", dev_entry->fw_type);
+	}
+
+	sec_len = le64_to_cpu(sec_hdr->patch_image_len);
+
+	chip_id = le16_to_cpu(sec_hdr->chip_id);
+	image_id = le16_to_cpu(sec_hdr->image_id);
+	RTKBT_DBG("image (%04x:%02x), chip id %u, ic cut 0x%02x, len %08x",
+		  image_id, sec_hdr->index, chip_id, sec_hdr->ic_cut, sec_len);
+
+	if (info->key_id && info->key_id != sec_hdr->key_id) {
+		RTKBT_ERR("invalid key_id (%u, %u)", sec_hdr->key_id,
+			  info->key_id);
+		return -EINVAL;
+	}
+
+	if (sec_hdr->ic_cut != info->ic_cut) {
+		RTKBT_INFO("unused chip_id (%u, %u), ic_cut (%u, %u)",
+			   chip_id, info->chip_id, sec_hdr->ic_cut,
+			   info->ic_cut);
+		return -EINVAL;
+	}
+
+	if (dev_entry->fw_type == FW_TYPE_V3_2 &&
+	    (u8)chip_id != info->chip_id) {
+		RTKBT_ERR("invalid chip_id (%u, %u)", chip_id, info->chip_id);
+		return -EINVAL;
+	}
+
+	ptr = rtl_iov_pull_data(&iov, sec_len);
+	if (!ptr)
+		return -1;
+
+	subsec = kzalloc(sizeof(*subsec), GFP_KERNEL);
+	if (!subsec)
+		return -ENOMEM;
+	subsec->index = sec_hdr->index;
+	subsec->image_id = image_id;
+	subsec->config_rule = sec_hdr->config_rule;
+	subsec->need_config = sec_hdr->need_config;
+
+	for (i = 0; i < DL_FIX_ADDR_MAX; i++) {
+		subsec->fix[i].addr =
+			(u32)le64_to_cpu(sec_hdr->addr_fix[i * 2]);
+		subsec->fix[i].value =
+			(u32)le64_to_cpu(sec_hdr->addr_fix[i * 2 + 1]);
+	}
+
+	subsec->patch_image_len = (u32)le64_to_cpu(sec_hdr->patch_image_len);
+	subsec->patch_image_buf = vmalloc(subsec->patch_image_len);
+	if (!subsec->patch_image_buf) {
+		rc = -ENOMEM;
+		goto err;
+	}
+	memcpy(subsec->patch_image_buf, ptr, subsec->patch_image_len);
+	subsec->image_ver =
+		get_unaligned_le32(ptr + subsec->patch_image_len - 4);
+	RTKBT_DBG("image version: %08x", subsec->image_ver);
+
+	btrtl_parse_config(subsec, dev_entry);
+
+	rc = subsec->patch_image_len;
+
+	btrtl_insert_ordered_subsec_v3(subsec);
+
+	return rc;
+err:
+	kfree(subsec);
+	return rc;
+}
+
+static int rtlbt_parse_firmware_v3(dev_data *dev_entry, uint8_t *fw_data,
+				   int fw_size)
+{
+	struct rtl_epatch_header_v3 *hdr;
+	int rc;
+	u32 num_sections;
+	struct rtl_section_v3 *section;
+	u32 section_len;
+	u32 opcode;
+	int len = 0;
+	int i;
+	u8 *ptr;
+	struct rtl_iovec iov = {
+		.data = fw_data,
+		.len = fw_size,	/* Cut the tail */
+	};
+	struct image_match_info info;
+	struct sk_buff *skb = NULL;
+	struct hci_rp_read_eco *rp_eco;
+	struct hci_rp_read_chip_id *rp_chip_id;
+	u16 cmd_opc;
+	u32 addr = 0xb000ada4;
+	u8 reg_val[2];
+
+	/* For old combochips running in ROM code, they return unknown hci cmd
+	 * when received hci vendor cmd 0xfc6f.
+	 * The comparison of the chip id between image section and the read chip
+	 * id would be ignored.
+	 */
+	memset(&info, 0, sizeof(info));
+
+	cmd_opc = HCI_VENDOR_READ_RTK_ROM_VERISION;
+	skb = rtk_hci_cmd_sync(dev_entry, cmd_opc, 0, NULL, 1000);
+	if (IS_ERR(skb) || !skb) {
+		RTKBT_ERR("%s: read ECO version error %lu", __func__,
+			  PTR_ERR(skb));
+		return -EIO;
+	}
+
+	rp_eco = (void *)skb->data;
+	if (rp_eco->status) {
+		RTKBT_ERR("%s: status of cc (%04x) is %02x", __func__,
+			  cmd_opc, rp_eco->status);
+		kfree_skb(skb);
+		return -EINVAL;
+	}
+	info.ic_cut = rp_eco->eco + 1;
+	kfree_skb(skb);
+
+	cmd_opc = HCI_VENDOR_READ_CHIP_ID;
+	skb = rtk_hci_cmd_sync(dev_entry, cmd_opc, 0, NULL, 1000);
+	if (IS_ERR(skb) || !skb) {
+		RTKBT_ERR("%s: read chip id error %lu", __func__,
+			  PTR_ERR(skb));
+		return -EIO;
+	}
+	rp_chip_id = (void *)skb->data;
+	if (!rp_chip_id->status)
+		info.chip_id = rp_chip_id->chip_id;
+	kfree_skb(skb);
+
+	if (info.chip_id >= 55) {
+		/* A0010DA4 */
+		addr = 0xa0010da4;
+	}
+
+	rc = rtk_vendor_read_reg16(dev_entry, addr, reg_val);
+	if (rc < 0)
+		return -EIO;
+
+	info.key_id = reg_val[0];
+	RTKBT_DBG("%s: key id %u", __func__, info.key_id);
+
+	hdr = rtl_iov_pull_data(&iov, sizeof(*hdr));
+	if (!hdr)
+		return -EINVAL;
+	num_sections = le32_to_cpu(hdr->num_sections);
+
+	RTKBT_DBG("Timestamp %08x-%08x, num %u",
+		  get_unaligned_le32(hdr->timestamp),
+		  get_unaligned_le32(hdr->timestamp + 4), num_sections);
+
+	for (i = 0; i < num_sections; i++) {
+		RTKBT_DBG("rtl section: %ld", sizeof(*section));
+		section = rtl_iov_pull_data(&iov, sizeof(*section));
+		if (!section)
+			break;
+		section_len = le64_to_cpu(section->len);
+		opcode = le32_to_cpu(section->opcode);
+
+		RTKBT_DBG("opcode 0x%04x, %08x", section->opcode, section_len);
+
+		ptr = rtl_iov_pull_data(&iov, section_len);
+		if (!ptr) {
+			RTKBT_DBG("get payload data failed");
+			break;
+		}
+
+		switch (opcode) {
+		case RTL_PATCH_V3_1:
+		case RTL_PATCH_V3_PATCH_IMAGE:
+			rc = rtlbt_parse_section_v3(opcode, ptr, section_len,
+						    dev_entry, &info);
+			break;
+		default:
+			RTKBT_INFO("Unknown Opcode. Ignore");
+			rc = 0;
+			break;
+		}
+		if (rc < 0) {
+			RTKBT_ERR("RTL: Parse section (%u) err %d", opcode, rc);
+			continue;
+		}
+		len += rc;
+	}
+
+	RTKBT_DBG("image payload total len: 0x%08x", len);
+	if (!len)
+		return -ENODATA;
+
+	return len;
 }
 
 /* buff: points to the allocated buffer that stores extracted fw and config
@@ -2097,6 +3325,7 @@ int load_firmware(dev_data *dev_entry, xchange_data *xdata)
 	}
 
 	RTKBT_ERR("This is not 8723a, use new patch style!");
+	dev_entry->fw_type = FW_TYPE_V1;
 
 	/* Get version from ROM */
 	gEVersion = rtk_get_eversion(dev_entry);
@@ -2105,6 +3334,15 @@ int load_firmware(dev_data *dev_entry, xchange_data *xdata)
 		RTKBT_ERR("%s: Read ROM version failure", __func__);
 		need_download_fw = 0;
 		goto alloc_fail;
+	}
+
+	if (!memcmp(epatch_buf, RTK_EPATCH_SIGNATURE_V3, 8)) {
+		RTKBT_DBG("parse format patch v3");
+		dev_entry->cfg_buf = config_file_buf;
+		dev_entry->cfg_len = config_len;
+		buf_len = rtlbt_parse_firmware_v3(dev_entry, epatch_buf,
+						  fw->size);
+		goto done;
 	}
 
 	/* check Signature and Extension Section Field */
@@ -2139,6 +3377,8 @@ int load_firmware(dev_data *dev_entry, xchange_data *xdata)
 	if (memcmp(epatch_buf, RTK_EPATCH_SIGNATURE_NEW, 8) == 0) {
 		int key_id = rtk_vendor_read(dev_entry, READ_SEC_PROJ);
 		int tmp_len = 0;
+
+		dev_entry->fw_type = FW_TYPE_V2;
 
 		RTKBT_DBG("%s: key id %d", __func__, key_id);
 		if (key_id < 0) {
@@ -2221,7 +3461,8 @@ done:
 	if (buf && buf_len > 0 && need_download_fw) {
 		fw_len = buf_len;
 		xdata->fw_data = buf;
-	}
+	} else if (is_v3_fw(dev_entry->fw_type))
+		fw_len = buf_len;
 
 	RTKBT_DBG("load_firmware done");
 alloc_buf_err:
@@ -2244,29 +3485,57 @@ fw_fail:
 	if (config_file_buf)
 		kfree(config_file_buf);
 
-	if (fw_len == 0)
+	if (fw_len == 0 && buf)
 		vfree(buf);
 
 	return fw_len;
 }
 
-void init_xdata(xchange_data * xdata, dev_data * dev_entry)
+static int init_xdata(xchange_data *xdata, dev_data *dev_entry)
 {
+	int ret = -1;
+	struct usb_interface *intf;
+
+	if (!xdata || !dev_entry)
+		return -EINVAL;
+
+	intf = dev_entry->intf;
+	if (!intf)
+		return -EINVAL;
 	memset(xdata, 0, sizeof(xchange_data));
+	if (intf->cur_altsetting->desc.bAlternateSetting != 0)
+		xdata->bulk_mode = true;
 	xdata->dev_entry = dev_entry;
 	xdata->pipe_in = usb_rcvintpipe(dev_entry->udev, INTR_EP);
 	xdata->pipe_out = usb_sndctrlpipe(dev_entry->udev, CTRL_EP);
 	xdata->send_pkt = kzalloc(PKT_LEN, GFP_KERNEL);
+	if (!xdata->send_pkt) {
+		ret = -ENOMEM;
+		goto err;
+	}
 	xdata->rcv_pkt = kzalloc(PKT_LEN, GFP_KERNEL);
+	if (!xdata->rcv_pkt) {
+		ret = -ENOMEM;
+		goto err;
+	}
 	xdata->cmd_hdr = (struct hci_command_hdr *)(xdata->send_pkt);
 	xdata->evt_hdr = (struct hci_event_hdr *)(xdata->rcv_pkt);
 	xdata->cmd_cmp =
 	    (struct hci_ev_cmd_complete *)(xdata->rcv_pkt + EVT_HDR_LEN);
 	xdata->req_para = xdata->send_pkt + CMD_HDR_LEN;
 	xdata->rsp_para = xdata->rcv_pkt + EVT_HDR_LEN + CMD_CMP_LEN;
+
+	return 0;
+err:
+	if (xdata->send_pkt)
+		kfree(xdata->send_pkt);
+	if (xdata->rcv_pkt)
+		kfree(xdata->rcv_pkt);
+	memset(xdata, 0, sizeof(xchange_data));
+	return ret;
 }
 
-int check_fw_version(xchange_data * xdata)
+int check_fw_version(xchange_data *xdata, dev_data *dev_entry)
 {
 	struct hci_rp_read_local_version *read_ver_rsp;
 	patch_info *patch_entry;
@@ -2276,7 +3545,8 @@ int check_fw_version(xchange_data * xdata)
 
 	/* Ensure that the first cmd is hci reset after system suspend
 	 * or system reboot */
-	send_reset_command(xdata);
+	if (!is_v3_fw(dev_entry->fw_type))
+		send_reset_command(xdata);
 
 get_ver:
 	xdata->cmd_hdr->opcode = cpu_to_le16(HCI_OP_READ_LOCAL_VERSION);
@@ -2304,9 +3574,9 @@ get_ver:
 	RTKBT_DBG("read_ver_rsp->lmp_subver = 0x%x", lmp_subver);
 	RTKBT_DBG("read_ver_rsp->hci_rev = 0x%x", hci_rev);
 	RTKBT_DBG("patch_entry->lmp_sub = 0x%x", patch_entry->lmp_sub);
-	if (patch_entry->lmp_sub != lmp_subver) {
+
+	if (patch_entry->lmp_sub != lmp_subver)
 		return 1;
-	}
 
 	ret_val = 0;
 version_end:
@@ -2319,6 +3589,143 @@ version_end:
 
 	return ret_val;
 }
+
+int check_fw_version_v3(dev_data *dev_entry, xchange_data *xdata)
+{
+	struct rtl_subsection_v3 *sec;
+	struct list_head *pos;
+	struct list_head *next;
+	//struct rtl_subsection_v3 *sec, *tmp;
+	u32 sec_hdr_size_val, addr;
+	u8 reg_val[4];
+	int ret = -1;
+	int retry = 0;
+	struct sk_buff *skb;
+	struct hci_vendor_read_patch_ver_rp {
+		u8 status;
+		u8 version[4];
+	} __packed *rp;
+	u32 ver = 0xffff;
+	u16 opcode;
+
+	/*
+	 * Ensure that the first cmd is hci reset after system suspend
+	 * or system reboot
+	 */
+	/* send_reset_command(xdata) */;
+
+get_ver:
+	//list_for_each_entry_safe(sec, tmp, &list_secs, list) {
+	list_for_each_safe(pos, next, &list_secs) {
+		sec = list_entry(pos, struct rtl_subsection_v3, list);
+		RTKBT_DBG("%s: image (%04x:%02x)", __func__, sec->image_id,
+			  sec->index);
+
+		if (sec->image_id != IMAGE_ID_F000 &&
+		    sec->image_id != IMAGE_ID_F001 &&
+		    sec->image_id != IMAGE_ID_F002 &&
+		    sec->image_id != 0x0000)
+			continue;
+		if (sec->index > 0) {
+			sec_hdr_size_val = sec->fix[DL_FIX_SEC_HDR_ADDR].value;
+			if (sec->fix[DL_FIX_SEC_HDR_ADDR].addr == 0 ||
+			    sec->fix[DL_FIX_SEC_HDR_ADDR].addr == 0xFFFFFFFF)
+				sec_hdr_size_val = 0;
+			addr = sec->fix[DL_FIX_PATCH_ADDR].value +
+					sec->patch_image_len -
+					sec_hdr_size_val - 4;
+			ret = rtk_vendor_read_reg32(dev_entry, addr, reg_val);
+			if (ret <= 0) {
+				RTKBT_ERR("read (%08x) failed, %d", addr, ret);
+				ret = -EIO;
+				goto version_end;
+			}
+			if (sec->image_ver != get_unaligned_le32(reg_val)) {
+				RTKBT_DBG("version mismatch, index %02x, (%08x:%08x)",
+					  sec->index, sec->image_ver,
+					  get_unaligned_le32(reg_val));
+				ret = -EINVAL;
+				goto version_end;
+			}
+			continue;
+		}
+
+		if (sec->image_id == IMAGE_ID_F000 ||
+		    sec->image_id == IMAGE_ID_F001) {
+			u8 payload[4];
+
+			ver = 0xffff;
+			opcode = HCI_VENDOR_READ_PATCH_VERSION;
+			put_unaligned_le32(sec->fix[DL_FIX_CI_ID].value, payload);
+			skb = rtk_hci_cmd_sync(dev_entry, opcode, 4,
+					       payload, 200);
+			if (IS_ERR(skb) || !skb) {
+				RTKBT_ERR("cmd (%04x) failed, %ld", opcode,
+					  PTR_ERR(skb));
+				ret = -EIO;
+				goto version_end;
+			}
+			rp = NULL;
+			if (skb->len == sizeof(*rp))
+				rp = (void *)skb->data;
+			if (rp && !rp->status)
+				ver = get_unaligned_le32(rp->version);
+			kfree_skb(skb);
+			if (sec->image_ver != ver) {
+				RTKBT_DBG("version mismatch, image (%04x:%02x),"
+					  " (%08x:%08x)", sec->image_id,
+					  sec->index, sec->image_ver, ver);
+				ret = -EINVAL;
+				goto version_end;
+			}
+		} else if (sec->image_id == IMAGE_ID_F002 ||
+			   sec->image_id == 0) {
+			struct hci_rp_read_local_version *rsp;
+			u16 hci_rev;
+			u16 lmp_subver;
+
+			ver = 0xffff;
+			opcode = HCI_OP_READ_LOCAL_VERSION;
+			skb = rtk_hci_cmd_sync(dev_entry, opcode, 0, NULL,
+					       200);
+			if (IS_ERR(skb) || !skb) {
+				RTKBT_ERR("cmd (%04x) failed, %ld", opcode,
+					  PTR_ERR(skb));
+				ret = -EIO;
+				goto version_end;
+			}
+			rsp = NULL;
+			if (skb->len == sizeof(*rsp))
+				rsp = (void *)skb->data;
+			if (rsp && !rsp->status) {
+				hci_rev = le16_to_cpu(rsp->hci_rev);
+				lmp_subver = le16_to_cpu(rsp->lmp_subver);
+				ver = ((u32)hci_rev << 16) | lmp_subver;
+			}
+			kfree_skb(skb);
+			if (sec->image_ver != ver) {
+				RTKBT_DBG("version mismatch, image (%04x:%02x),"
+					  " (%08x:%08x)", sec->image_id,
+					  sec->index, sec->image_ver, ver);
+				ret = -EINVAL;
+				goto version_end;
+			}
+		}
+	}
+	ret = 0;
+version_end:
+	if (ret) {
+		send_reset_command(xdata);
+		retry++;
+		if (retry < 2) {
+			RTKBT_WARN("%s: check version again", __func__);
+			goto get_ver;
+		}
+	}
+
+	return ret;
+}
+
 
 uint8_t rtk_get_eversion(dev_data * dev_entry)
 {
@@ -2340,7 +3747,12 @@ uint8_t rtk_get_eversion(dev_data * dev_entry)
 		return ret_val;
 	}
 
-	init_xdata(xdata, dev_entry);
+	ret_val = init_xdata(xdata, dev_entry);
+	if (ret_val) {
+		ret_val = 0xFE;
+		RTKBT_ERR("failed to init xdata");
+		goto version_end;
+	}
 
 	xdata->cmd_hdr->opcode = cpu_to_le16(HCI_VENDOR_READ_RTK_ROM_VERISION);
 	xdata->cmd_hdr->plen = 0;
@@ -2383,6 +3795,172 @@ version_end:
 	return ret_val;
 }
 
+static int download_acldata(xchange_data *xdata)
+{
+	u8 *pcur;
+	int pkt_len, frag_num, frag_len;
+	int len = 0;
+	int i, ret = -EINVAL;
+	int j = 0;
+	int loop = 1;
+	u8 index;
+	u16 max_payload_len = xdata->acldata_pkt_len;
+	struct hci_acl_hdr *hdr;
+	u8 *buf;
+	u8 *evt;
+	int max_evt_len = 1 + 1 + 255;
+	int pipe_bulk_out;
+	int pipe_intr_in = xdata->pipe_in;
+	struct usb_device *udev = xdata->dev_entry->udev;
+	struct hci_ev_patch_status_evt *ev;
+	int loaded_len = 0;
+	u16 handle = xdata->handle | 0x8000;
+	u8 acl_cnt;
+	u8 *mem = NULL;
+	u8 *p;
+
+	RTKBT_DBG("download_acldata start");
+
+	pipe_bulk_out = usb_sndbulkpipe(udev, 0x02);
+	len = sizeof(*hdr) + 1 + max_payload_len;
+	if (xdata->bulk_mode) {
+		len++;
+		max_evt_len++;
+		pipe_intr_in = usb_rcvbulkpipe(udev, 0x02);
+	}
+	mem = kmalloc(len, GFP_KERNEL);
+	if (!mem)
+		return -ENOMEM;
+	buf = mem;
+	if (xdata->bulk_mode) {
+		*buf = 0x02;
+		buf++;
+	}
+	evt = kmalloc(max_evt_len, GFP_KERNEL);
+	if (!evt) {
+		ret = -ENOMEM;
+		goto err_nomem;
+	}
+
+	/* Caution: for fw of v3 format, the start index must be 1 */
+	if (is_v3_fw(xdata->dev_entry->fw_type))
+		j = 1;
+
+	RTKBT_DBG("%s: fw_len %08x", __func__, xdata->fw_len);
+
+	max_payload_len = (max_payload_len - 1) & ~0x3;
+	pcur = xdata->fw_data;
+	pkt_len = sizeof(*hdr) + 1 + max_payload_len;
+	if (xdata->bulk_mode)
+		pkt_len++;
+	frag_num = xdata->fw_len / max_payload_len + 1;
+	frag_len = max_payload_len;
+
+	hdr = (struct hci_acl_hdr *)buf;
+	hdr->handle = cpu_to_le16(handle);
+
+	acl_cnt = 1;
+	//acl_cnt = xdata->acl_cnt;
+	for (i = 0; i < frag_num; i++) {
+		index = j++;
+
+		if (index == 0x7f)
+			j = 1;
+
+		if (i == (frag_num - 1)) {
+			if (!is_v3_fw(xdata->dev_entry->fw_type))
+				index |= DATA_END;
+			frag_len = xdata->fw_len % max_payload_len;
+			pkt_len -= (max_payload_len - frag_len);
+		}
+		hdr->dlen = cpu_to_le16(1 + frag_len);
+		buf[sizeof(*hdr)] = index;
+		memcpy(buf + sizeof(*hdr) + 1, pcur, frag_len);
+
+		ret = usb_bulk_msg(udev, pipe_bulk_out, mem, pkt_len,
+					&len, 3000);
+
+		if (ret < 0 || (len != pkt_len)) {
+			RTKBT_ERR("%s: send bulk msg error (%d), %d %d",
+				  __func__, ret, len, pkt_len);
+			goto err;
+		}
+		loaded_len += frag_len;
+
+		acl_cnt--;
+		if (acl_cnt > 0) {
+			pcur += max_payload_len;
+			continue;
+		}
+
+		loop = 3;
+		while (--loop > 0) {
+			if (xdata->bulk_mode)
+				ret = usb_bulk_msg(udev, pipe_intr_in, evt,
+						   max_evt_len, &len, 1000);
+			else
+				ret = usb_interrupt_msg(udev, pipe_intr_in, evt,
+							max_evt_len, &len,
+							1000);
+			if (ret < 0) {
+				RTKBT_ERR("%s: recv evt error (%d)",
+					  __func__, ret);
+				goto err;
+			}
+			p = evt;
+			if (xdata->bulk_mode)
+				p++;
+			ev = (struct hci_ev_patch_status_evt *)p;
+			if (ev->evt != 0xff)
+				continue;
+			if (len < sizeof(*ev))
+				continue;
+			/* if the acl_cnt is more than one, what does the
+			 * ev->index mean ?
+			 */
+			/* if (index != ev->index) {
+			 * 	ret = -EINVAL;
+			 * 	RTKBT_ERR("%s: index mismatch (%u %u)",
+			 * 		  __func__, index, ev->index);
+			 * 	goto err;
+			 * }
+			 */
+			if ((handle & 0xfff) != le16_to_cpu(ev->handle)) {
+				ret = -EINVAL;
+				RTKBT_ERR("%s: handle mismatch (%04x %04x)",
+					  __func__, handle & 0xfff,
+					  le16_to_cpu(ev->handle));
+				goto err;
+			}
+			/* FIXME: Should we check the loaded_len ? */
+			break;
+		}
+		if (loop <= 0) {
+			RTKBT_ERR("%s: didn't receive patch status evt",
+				  __func__);
+			ret = -EIO;
+			goto err;
+		}
+
+		acl_cnt++;
+		pcur += max_payload_len;
+	}
+
+	kfree(mem);
+	kfree(evt);
+	RTKBT_DBG("download_acldata done");
+	/* FIXME: How long should we wait ?
+	 * By testing rtl8822cu, we get the following suitable delay time
+	 */
+	mdelay(5);
+	return xdata->fw_len;
+err:
+	kfree(evt);
+err_nomem:
+	kfree(mem);
+	return ret;
+}
+
 int download_data(xchange_data * xdata)
 {
 	download_cp *cmd_para;
@@ -2392,7 +3970,14 @@ int download_data(xchange_data * xdata)
 	int i, ret_val;
 	int j = 0;
 
+	if (xdata->dev_entry->enh_dl_enabled)
+		return download_acldata(xdata);
+
 	RTKBT_DBG("download_data start");
+
+	/* Caution: for fw of v3 format, the start index must be 1 */
+	if (is_v3_fw(xdata->dev_entry->fw_type))
+		j = 1;
 
 	cmd_para = (download_cp *) xdata->req_para;
 	evt_para = (download_rp *) xdata->rsp_para;
@@ -2408,7 +3993,8 @@ int download_data(xchange_data * xdata)
 			j = 1;
 
 		if (i == (frag_num - 1)) {
-			cmd_para->index |= DATA_END;
+			if (!is_v3_fw(xdata->dev_entry->fw_type))
+				cmd_para->index |= DATA_END;
 			frag_len = xdata->fw_len % PATCH_SEG_MAX;
 			pkt_len -= (PATCH_SEG_MAX - frag_len);
 		}
@@ -2438,9 +4024,78 @@ int download_data(xchange_data * xdata)
 	return xdata->fw_len;
 }
 
+static int recv_hci_evt_bulk_mode(xchange_data *xdata)
+{
+	unsigned int pipe;
+	int err = -EINVAL;
+	struct usb_device *udev = xdata->dev_entry->udev;
+	u8 *data;
+	u8 *p;
+	int len = PKT_LEN;
+	int i;
+	int actual_length;
+	struct hci_event_hdr *hdr;
+	struct hci_ev_cmd_complete *cc;
+	u16 opcode;
+	int count = 10;
+
+	data = kzalloc(len, GFP_ATOMIC);
+	if (!data)
+		return -ENOMEM;
+	pipe = usb_rcvbulkpipe(udev, BULK_EP);
+
+	while (count-- > 0) {
+		for (i = 0; i < 5; i++) {
+			actual_length = 0;
+			err = usb_bulk_msg(udev, pipe, data, len,
+					   &actual_length, 1000);
+			if (!err)
+				break;
+		}
+		if (err < 0) {
+			RTKBT_ERR("%s; rx timeout or err for hci ev, err (%d)",
+				  __func__, err);
+			goto done;
+		}
+
+		if (actual_length < 1 + sizeof(*hdr) + sizeof(*cc)) {
+			RTKBT_WARN("%s: received pkt too short %d", __func__,
+				   actual_length);
+			continue;
+		}
+		if (data[0] != HCI_EVENT_PKT) {
+			RTKBT_WARN("%s: The pkt is not a hci event", __func__);
+			continue;
+		}
+		p = data + 1;
+		hdr = (struct hci_event_hdr *)p;
+		if (hdr->evt != CMD_CMP_EVT) {
+			RTKBT_WARN("%s: The event 0x%02x is not expected",
+				   __func__, hdr->evt);
+			continue;
+		}
+		cc = (struct hci_ev_cmd_complete *)(p + sizeof(*hdr));
+		opcode = get_unaligned_le16(&cc->opcode);
+		if (opcode == xdata->cmd_hdr->opcode) {
+			memcpy(xdata->rcv_pkt, p, 2 + hdr->plen);
+			util_hexdump(xdata->rcv_pkt, 2 + hdr->plen);
+			break;
+		}
+	}
+	err = 0;
+done:
+	kfree(data);
+	return err;
+}
+
 int send_hci_cmd(xchange_data * xdata)
 {
 	int ret_val;
+
+	if (xdata->bulk_mode)
+		return __send_hci_cmd_bulk_mode(xdata->dev_entry->udev,
+						xdata->send_pkt,
+						xdata->pkt_len);
 
 	ret_val = usb_control_msg(xdata->dev_entry->udev, xdata->pipe_out,
 				  0, USB_TYPE_CLASS, 0, 0,
@@ -2458,6 +4113,9 @@ int rcv_hci_evt(xchange_data * xdata)
 {
 	int ret_len = 0, ret_val = 0;
 	int i;			// Added by Realtek
+
+	if (xdata->bulk_mode)
+		return recv_hci_evt_bulk_mode(xdata);
 
 	while (1) {
 		// **************************** Modifed by Realtek (begin)
@@ -2484,6 +4142,86 @@ int rcv_hci_evt(xchange_data * xdata)
 				return ret_len;
 		}
 	}
+}
+
+#ifndef BT_SKB_RESERVE
+#define BT_SKB_RESERVE		8
+#endif
+
+struct sk_buff *rtk_hci_cmd_sync(dev_data *dev_entry, u16 opcode, u8 plen,
+				 u8 *param, u32 timeout)
+{
+	xchange_data *xdata = NULL;
+	int ret = -EIO;
+	int rp_len = 0;
+	struct sk_buff *skb = NULL;
+	u8 *p;
+	struct hci_event_hdr *hdr;
+
+	xdata = kzalloc(sizeof(xchange_data), GFP_KERNEL);
+	if (!xdata) {
+		RTKBT_ERR("allocate xdata error");
+		ret = -ENOMEM;
+		return NULL;
+	}
+
+	ret = init_xdata(xdata, dev_entry);
+	if (ret) {
+		RTKBT_ERR("failed to init xdata");
+		goto end;
+	}
+
+	xdata->cmd_hdr->opcode = cpu_to_le16(opcode);
+	if (param && plen) {
+		xdata->cmd_hdr->plen = plen;
+		memcpy(xdata->req_para, param, plen);
+		xdata->pkt_len = CMD_HDR_LEN + plen;
+	} else {
+		xdata->pkt_len = CMD_HDR_LEN;
+	}
+
+	ret = send_hci_cmd(xdata);
+	if (ret < 0) {
+		RTKBT_ERR("Failed to send HCI cmd %04x, err %d", opcode, ret);
+		goto end;
+	}
+
+	/* FIXME: There might be some previous events held in controller.
+	 * So we needs set the proper loop count to read all events include the
+	 * recent cmd complete event for this hci command.
+	 */
+	ret = rcv_hci_evt(xdata);
+	if (ret < 0) {
+		RTKBT_ERR("Failed to receive cmd complete for %04x", opcode);
+		goto end;
+	}
+	p = xdata->rcv_pkt;
+	hdr = (void *)p;
+	rp_len = sizeof(*hdr) + hdr->plen;
+
+	if (rp_len > 0) {
+		skb = alloc_skb(rp_len + BT_SKB_RESERVE, GFP_KERNEL);
+		if (skb) {
+			skb_reserve(skb, BT_SKB_RESERVE);
+		} else {
+			ret = -ENOMEM;
+			goto end;
+		}
+		memcpy(skb_put(skb, rp_len), xdata->rcv_pkt, rp_len);
+		util_hexdump(skb->data, skb->len);
+		skb_pull(skb, EVT_HDR_LEN + CMD_CMP_LEN);
+	}
+
+end:
+	if (xdata) {
+		if (xdata->send_pkt)
+			kfree(xdata->send_pkt);
+		if (xdata->rcv_pkt)
+			kfree(xdata->rcv_pkt);
+		kfree(xdata);
+	}
+
+	return ret >= 0 ? skb : NULL;
 }
 
 void print_acl(struct sk_buff *skb, int dataOut)

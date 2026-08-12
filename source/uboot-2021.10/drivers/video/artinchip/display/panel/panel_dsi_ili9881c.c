@@ -2,7 +2,7 @@
 /*
  * Driver for ili9881c DSI panel.
  *
- * Copyright (C) 2020-2023 ArtInChip Technology Co., Ltd.
+ * Copyright (C) 2020-2026 ArtInChip Technology Co., Ltd.
  * Authors: huahui.mai <huahui.ami@artinchip.com>
  */
 
@@ -15,6 +15,8 @@
 
 #include "panel_dsi.h"
 
+#include "../aic_com.h"
+
 #define PANEL_DEV_NAME		"dsi_panel_ili9881c"
 
 struct ili9881c {
@@ -26,10 +28,53 @@ static inline struct ili9881c *panel_to_ili9881c(struct aic_panel *panel)
 	return (struct ili9881c *)panel->panel_private;
 }
 
-static int panel_enable(struct aic_panel *panel)
+static struct fb_videomode panel_768x1024_vm = {
+	.pixclock = 80000000,
+	.xres = 768,
+	.right_margin = 100,
+	.left_margin = 200,
+	.hsync_len = 100,
+	.yres = 1024,
+	.lower_margin = 20,
+	.upper_margin = 100,
+	.vsync_len = 80,
+	.flag = DISPLAY_FLAGS_HSYNC_LOW | DISPLAY_FLAGS_VSYNC_LOW |
+		DISPLAY_FLAGS_DE_HIGH | DISPLAY_FLAGS_PIXDATA_POSEDGE
+};
+
+static struct panel_dsi dsi0 = {
+	.format = DSI_FMT_RGB888,
+	.mode = DSI_MOD_VID_PULSE,
+	.lane_num = 4,
+};
+
+/* Init the videomode parameter, dts will override the initial value. */
+static struct fb_videomode panel_800x1280_vm = {
+	.pixclock = 70000000,
+	.xres = 800,
+	.right_margin = 100,
+	.left_margin = 48,
+	.hsync_len = 8,
+	.yres = 1280,
+	.lower_margin = 16,
+	.upper_margin = 15,
+	.vsync_len = 6,
+	.flag = DISPLAY_FLAGS_HSYNC_LOW | DISPLAY_FLAGS_VSYNC_LOW |
+		DISPLAY_FLAGS_DE_HIGH | DISPLAY_FLAGS_PIXDATA_POSEDGE
+};
+
+static struct panel_dsi dsi1 = {
+	.format = DSI_FMT_RGB888,
+	.mode = DSI_MOD_VID_BURST,
+	.lane_num = 4,
+};
+
+/* read a panel ID from screen */
+int panel_get_screen_id(struct aic_panel *panel)
 {
 	struct ili9881c *ili9881c = panel_to_ili9881c(panel);
-	int ret;
+	unsigned int *plat = dev_get_plat(panel->dev);
+	int id;
 
 	panel_di_enable(panel, 0);
 
@@ -42,6 +87,266 @@ static int panel_enable(struct aic_panel *panel)
 	aic_delay_ms(120);
 
 	panel_dsi_send_perpare(panel);
+	/*
+	 * FIXME:
+	 * Here is an instance, hardcoded 0x70, we should use di_send_cmd()
+	 * to read the panel ID, for example:
+	 *
+	 * id = panel->callbacks.di_send_cmd((u32)MIPI_DSI_DCS_READ, (u8[]){ 0x04 }, 1);
+	 */
+	id = 0x70;
+
+	/* Here is an example, the ID code should come from the screen driver IC datasheet */
+	if (id == 0x70) {
+		/* set video mode and panel_dsi struct according to the read-back panel ID */
+		panel->dsi = &dsi1;
+		panel->vm = &panel_800x1280_vm;
+		/* save panel ID to the plat pointer. This is required */
+		*plat = 0;
+		panel->id = 0;
+	} else if (id == 0x71) {
+		panel->dsi = &dsi0;
+		panel->vm = &panel_768x1024_vm;
+		*plat = 1;
+		panel->id = 1;
+	} else {
+		pr_err("unknown panel id 0x%x, use default video mode\n", id);
+		panel->id = 0;
+	}
+
+	return panel->id;
+}
+
+static int tft050bp071_init(struct aic_panel *panel)
+{
+	int ret;
+
+	panel_dsi_generic_send_seq(panel, 0xFF, 0x98, 0x81, 0x03);
+
+	/* GIP_1 */
+	panel_dsi_generic_send_seq(panel, 0x01, 0x00);
+	panel_dsi_generic_send_seq(panel, 0x02, 0x00);
+	panel_dsi_generic_send_seq(panel, 0x03, 0x73);
+	panel_dsi_generic_send_seq(panel, 0x04, 0x00);
+	panel_dsi_generic_send_seq(panel, 0x05, 0x00);
+	panel_dsi_generic_send_seq(panel, 0x06, 0x08);
+	panel_dsi_generic_send_seq(panel, 0x07, 0x00);
+	panel_dsi_generic_send_seq(panel, 0x08, 0x00);
+	panel_dsi_generic_send_seq(panel, 0x09, 0x1B);
+	panel_dsi_generic_send_seq(panel, 0x0a, 0x01);
+	panel_dsi_generic_send_seq(panel, 0x0b, 0x01);
+	panel_dsi_generic_send_seq(panel, 0x0c, 0x0D);
+	panel_dsi_generic_send_seq(panel, 0x0d, 0x01);
+	panel_dsi_generic_send_seq(panel, 0x0e, 0x01);
+	panel_dsi_generic_send_seq(panel, 0x0f, 0x26);
+	panel_dsi_generic_send_seq(panel, 0x10, 0x26);
+	panel_dsi_generic_send_seq(panel, 0x11, 0x00);
+	panel_dsi_generic_send_seq(panel, 0x12, 0x00);
+	panel_dsi_generic_send_seq(panel, 0x13, 0x02);
+	panel_dsi_generic_send_seq(panel, 0x14, 0x00);
+	panel_dsi_generic_send_seq(panel, 0x15, 0x00);
+	panel_dsi_generic_send_seq(panel, 0x16, 0x00);
+	panel_dsi_generic_send_seq(panel, 0x17, 0x00);
+	panel_dsi_generic_send_seq(panel, 0x18, 0x00);
+	panel_dsi_generic_send_seq(panel, 0x19, 0x00);
+	panel_dsi_generic_send_seq(panel, 0x1a, 0x00);
+	panel_dsi_generic_send_seq(panel, 0x1b, 0x00);
+	panel_dsi_generic_send_seq(panel, 0x1c, 0x00);
+	panel_dsi_generic_send_seq(panel, 0x1d, 0x00);
+	panel_dsi_generic_send_seq(panel, 0x1e, 0x40);
+	panel_dsi_generic_send_seq(panel, 0x1f, 0x00);
+	panel_dsi_generic_send_seq(panel, 0x20, 0x06);
+	panel_dsi_generic_send_seq(panel, 0x21, 0x01);
+	panel_dsi_generic_send_seq(panel, 0x22, 0x00);
+	panel_dsi_generic_send_seq(panel, 0x23, 0x00);
+	panel_dsi_generic_send_seq(panel, 0x24, 0x00);
+	panel_dsi_generic_send_seq(panel, 0x25, 0x00);
+	panel_dsi_generic_send_seq(panel, 0x26, 0x00);
+	panel_dsi_generic_send_seq(panel, 0x27, 0x00);
+	panel_dsi_generic_send_seq(panel, 0x28, 0x33);
+	panel_dsi_generic_send_seq(panel, 0x29, 0x03);
+	panel_dsi_generic_send_seq(panel, 0x2a, 0x00);
+	panel_dsi_generic_send_seq(panel, 0x2b, 0x00);
+	panel_dsi_generic_send_seq(panel, 0x2c, 0x00);
+	panel_dsi_generic_send_seq(panel, 0x2d, 0x00);
+	panel_dsi_generic_send_seq(panel, 0x2e, 0x00);
+	panel_dsi_generic_send_seq(panel, 0x2f, 0x00);
+	panel_dsi_generic_send_seq(panel, 0x30, 0x00);
+	panel_dsi_generic_send_seq(panel, 0x31, 0x00);
+	panel_dsi_generic_send_seq(panel, 0x32, 0x00);
+	panel_dsi_generic_send_seq(panel, 0x33, 0x00);
+	panel_dsi_generic_send_seq(panel, 0x34, 0x00);
+	panel_dsi_generic_send_seq(panel, 0x35, 0x00);
+	panel_dsi_generic_send_seq(panel, 0x36, 0x00);
+	panel_dsi_generic_send_seq(panel, 0x37, 0x00);
+	panel_dsi_generic_send_seq(panel, 0x38, 0x00);
+	panel_dsi_generic_send_seq(panel, 0x39, 0x00);
+	panel_dsi_generic_send_seq(panel, 0x3a, 0x00);
+	panel_dsi_generic_send_seq(panel, 0x3b, 0x00);
+	panel_dsi_generic_send_seq(panel, 0x3c, 0x00);
+	panel_dsi_generic_send_seq(panel, 0x3d, 0x00);
+	panel_dsi_generic_send_seq(panel, 0x3e, 0x00);
+	panel_dsi_generic_send_seq(panel, 0x3f, 0x00);
+	panel_dsi_generic_send_seq(panel, 0x40, 0x00);
+	panel_dsi_generic_send_seq(panel, 0x41, 0x00);
+	panel_dsi_generic_send_seq(panel, 0x42, 0x00);
+	panel_dsi_generic_send_seq(panel, 0x43, 0x00);
+	panel_dsi_generic_send_seq(panel, 0x44, 0x00);
+
+	/* GIP_2 */
+	panel_dsi_generic_send_seq(panel, 0x50, 0x01);
+	panel_dsi_generic_send_seq(panel, 0x51, 0x23);
+	panel_dsi_generic_send_seq(panel, 0x52, 0x45);
+	panel_dsi_generic_send_seq(panel, 0x53, 0x67);
+	panel_dsi_generic_send_seq(panel, 0x54, 0x89);
+	panel_dsi_generic_send_seq(panel, 0x55, 0xab);
+	panel_dsi_generic_send_seq(panel, 0x56, 0x01);
+	panel_dsi_generic_send_seq(panel, 0x57, 0x23);
+	panel_dsi_generic_send_seq(panel, 0x58, 0x45);
+	panel_dsi_generic_send_seq(panel, 0x59, 0x67);
+	panel_dsi_generic_send_seq(panel, 0x5a, 0x89);
+	panel_dsi_generic_send_seq(panel, 0x5b, 0xab);
+	panel_dsi_generic_send_seq(panel, 0x5c, 0xcd);
+	panel_dsi_generic_send_seq(panel, 0x5d, 0xef);
+
+	/* GIP_3 */
+	panel_dsi_generic_send_seq(panel, 0x5e, 0x11);
+	panel_dsi_generic_send_seq(panel, 0x5f, 0x02);
+	panel_dsi_generic_send_seq(panel, 0x60, 0x00);
+	panel_dsi_generic_send_seq(panel, 0x61, 0x07);
+	panel_dsi_generic_send_seq(panel, 0x62, 0x06);
+	panel_dsi_generic_send_seq(panel, 0x63, 0x0E);
+	panel_dsi_generic_send_seq(panel, 0x64, 0x0F);
+	panel_dsi_generic_send_seq(panel, 0x65, 0x0C);
+	panel_dsi_generic_send_seq(panel, 0x66, 0x0D);
+	panel_dsi_generic_send_seq(panel, 0x67, 0x02);
+	panel_dsi_generic_send_seq(panel, 0x68, 0x02);
+	panel_dsi_generic_send_seq(panel, 0x69, 0x02);
+	panel_dsi_generic_send_seq(panel, 0x6a, 0x02);
+	panel_dsi_generic_send_seq(panel, 0x6b, 0x02);
+	panel_dsi_generic_send_seq(panel, 0x6c, 0x02);
+	panel_dsi_generic_send_seq(panel, 0x6d, 0x02);
+	panel_dsi_generic_send_seq(panel, 0x6e, 0x05);
+	panel_dsi_generic_send_seq(panel, 0x6f, 0x02);
+	panel_dsi_generic_send_seq(panel, 0x70, 0x02);
+	panel_dsi_generic_send_seq(panel, 0x71, 0x02);
+	panel_dsi_generic_send_seq(panel, 0x72, 0x02);
+	panel_dsi_generic_send_seq(panel, 0x73, 0x05);
+	panel_dsi_generic_send_seq(panel, 0x74, 0x01);
+	panel_dsi_generic_send_seq(panel, 0x75, 0x02);
+	panel_dsi_generic_send_seq(panel, 0x76, 0x00);
+	panel_dsi_generic_send_seq(panel, 0x77, 0x07);
+	panel_dsi_generic_send_seq(panel, 0x78, 0x06);
+	panel_dsi_generic_send_seq(panel, 0x79, 0x0E);
+	panel_dsi_generic_send_seq(panel, 0x7a, 0x0F);
+	panel_dsi_generic_send_seq(panel, 0x7b, 0x0C);
+	panel_dsi_generic_send_seq(panel, 0x7c, 0x0D);
+	panel_dsi_generic_send_seq(panel, 0x7d, 0x02);
+	panel_dsi_generic_send_seq(panel, 0x7e, 0x02);
+	panel_dsi_generic_send_seq(panel, 0x7f, 0x02);
+	panel_dsi_generic_send_seq(panel, 0x80, 0x02);
+	panel_dsi_generic_send_seq(panel, 0x81, 0x02);
+	panel_dsi_generic_send_seq(panel, 0x82, 0x02);
+	panel_dsi_generic_send_seq(panel, 0x83, 0x02);
+	panel_dsi_generic_send_seq(panel, 0x84, 0x02);
+	panel_dsi_generic_send_seq(panel, 0x85, 0x02);
+	panel_dsi_generic_send_seq(panel, 0x86, 0x02);
+	panel_dsi_generic_send_seq(panel, 0x87, 0x02);
+	panel_dsi_generic_send_seq(panel, 0x88, 0x02);
+	panel_dsi_generic_send_seq(panel, 0x89, 0x05);
+	panel_dsi_generic_send_seq(panel, 0x8A, 0x01);
+
+	/* CMD Page 4 */
+	panel_dsi_generic_send_seq(panel, 0xFF, 0x98, 0x81, 0x04);
+	panel_dsi_generic_send_seq(panel, 0x6C, 0x15);
+	panel_dsi_generic_send_seq(panel, 0x6E, 0x1A);
+	panel_dsi_generic_send_seq(panel, 0x6F, 0x25);
+	panel_dsi_generic_send_seq(panel, 0x3A, 0xA4);
+	panel_dsi_generic_send_seq(panel, 0x8D, 0x20);
+	panel_dsi_generic_send_seq(panel, 0x87, 0xBA);
+
+	/* CMD Page 1 */
+	panel_dsi_generic_send_seq(panel, 0xFF, 0x98, 0x81, 0x01);
+	panel_dsi_generic_send_seq(panel, 0x22, 0x0A);
+	panel_dsi_generic_send_seq(panel, 0x31, 0x00);
+	panel_dsi_generic_send_seq(panel, 0x53, 0x86);
+	panel_dsi_generic_send_seq(panel, 0x55, 0x90);
+	panel_dsi_generic_send_seq(panel, 0x50, 0x75);
+	panel_dsi_generic_send_seq(panel, 0x51, 0x75);
+	panel_dsi_generic_send_seq(panel, 0x60, 0x1B);
+	panel_dsi_generic_send_seq(panel, 0x61, 0x01);
+	panel_dsi_generic_send_seq(panel, 0x62, 0x0C);
+	panel_dsi_generic_send_seq(panel, 0x63, 0x00);
+
+	/* Gamma P */
+	panel_dsi_generic_send_seq(panel, 0xA0, 0x00);
+	panel_dsi_generic_send_seq(panel, 0xA1, 0x16);
+	panel_dsi_generic_send_seq(panel, 0xA2, 0x23);
+	panel_dsi_generic_send_seq(panel, 0xA3, 0x12);
+	panel_dsi_generic_send_seq(panel, 0xA4, 0x15);
+	panel_dsi_generic_send_seq(panel, 0xA5, 0x28);
+	panel_dsi_generic_send_seq(panel, 0xA6, 0x1D);
+	panel_dsi_generic_send_seq(panel, 0xA7, 0x1E);
+	panel_dsi_generic_send_seq(panel, 0xA8, 0x80);
+	panel_dsi_generic_send_seq(panel, 0xA9, 0x1D);
+	panel_dsi_generic_send_seq(panel, 0xAA, 0x29);
+	panel_dsi_generic_send_seq(panel, 0xAB, 0x6E);
+	panel_dsi_generic_send_seq(panel, 0xAC, 0x18);
+	panel_dsi_generic_send_seq(panel, 0xAD, 0x14);
+	panel_dsi_generic_send_seq(panel, 0xAE, 0x48);
+	panel_dsi_generic_send_seq(panel, 0xAF, 0x1E);
+	panel_dsi_generic_send_seq(panel, 0xB0, 0x26);
+	panel_dsi_generic_send_seq(panel, 0xB1, 0x4D);
+	panel_dsi_generic_send_seq(panel, 0xB2, 0x60);
+	panel_dsi_generic_send_seq(panel, 0xB3, 0x39);
+
+	/* Gamma N */
+	panel_dsi_generic_send_seq(panel, 0xC0, 0x00);
+	panel_dsi_generic_send_seq(panel, 0xC1, 0x15);
+	panel_dsi_generic_send_seq(panel, 0xC2, 0x23);
+	panel_dsi_generic_send_seq(panel, 0xC3, 0x12);
+	panel_dsi_generic_send_seq(panel, 0xC4, 0x15);
+	panel_dsi_generic_send_seq(panel, 0xC5, 0x27);
+	panel_dsi_generic_send_seq(panel, 0xC6, 0x1D);
+	panel_dsi_generic_send_seq(panel, 0xC7, 0x1F);
+	panel_dsi_generic_send_seq(panel, 0xC8, 0x7F);
+	panel_dsi_generic_send_seq(panel, 0xC9, 0x1D);
+	panel_dsi_generic_send_seq(panel, 0xCA, 0x29);
+	panel_dsi_generic_send_seq(panel, 0xCB, 0x6F);
+	panel_dsi_generic_send_seq(panel, 0xCC, 0x19);
+	panel_dsi_generic_send_seq(panel, 0xCD, 0x16);
+	panel_dsi_generic_send_seq(panel, 0xCE, 0x49);
+	panel_dsi_generic_send_seq(panel, 0xCF, 0x1F);
+	panel_dsi_generic_send_seq(panel, 0xD0, 0x26);
+	panel_dsi_generic_send_seq(panel, 0xD1, 0x4D);
+	panel_dsi_generic_send_seq(panel, 0xD2, 0x60);
+	panel_dsi_generic_send_seq(panel, 0xD3, 0x39);
+
+	/* CMD Page 0 */
+	panel_dsi_generic_send_seq(panel, 0xFF, 0x98, 0x81, 0x00);
+	panel_dsi_generic_send_seq(panel, 0x35, 0x00);
+
+	ret = panel_dsi_dcs_exit_sleep_mode(panel);
+	if (ret < 0) {
+		pr_err("Failed to exit sleep mode: %d\n", ret);
+		return ret;
+	}
+	aic_delay_ms(120);
+
+	ret = panel_dsi_dcs_set_display_on(panel);
+	if (ret < 0) {
+		pr_err("Failed to set display on: %d\n", ret);
+		return ret;
+	}
+	aic_delay_ms(5);
+
+	return 0;
+}
+
+static int ili9881c_default_init(struct aic_panel *panel)
+{
+	int ret;
+
 	panel_dsi_dcs_send_seq(panel, 0xFF, 0x98, 0x81, 0x03);
 
 	/* GIP_1 */
@@ -252,6 +557,10 @@ static int panel_enable(struct aic_panel *panel)
 
 	panel_dsi_dcs_send_seq(panel, 0xFF, 0x98, 0x81, 0x00);
 	panel_dsi_dcs_send_seq(panel, 0x35, 0x00);
+	panel_dsi_dcs_send_seq(panel, 0x11);
+	aic_delay_ms(120);
+	panel_dsi_dcs_send_seq(panel, 0x29);
+	aic_delay_ms(20);
 
 	ret = panel_dsi_dcs_exit_sleep_mode(panel);
 	if (ret < 0) {
@@ -259,7 +568,7 @@ static int panel_enable(struct aic_panel *panel)
 		return ret;
 	}
 
-	aic_delay_ms(120);
+	aic_delay_ms(200);
 
 	ret = panel_dsi_dcs_set_display_on(panel);
 	if (ret < 0) {
@@ -267,7 +576,34 @@ static int panel_enable(struct aic_panel *panel)
 		return ret;
 	}
 
-	aic_delay_ms(20);
+	aic_delay_ms(120);
+
+	return 0;
+}
+
+static int panel_enable(struct aic_panel *panel)
+{
+	struct ili9881c *ili9881c = panel_to_ili9881c(panel);
+
+	panel_di_enable(panel, 0);
+
+	aic_delay_ms(10);
+	dm_gpio_set_value(&ili9881c->reset, 1);
+	aic_delay_ms(1);
+	dm_gpio_set_value(&ili9881c->reset, 0);
+	aic_delay_ms(10);
+	dm_gpio_set_value(&ili9881c->reset, 1);
+	aic_delay_ms(120);
+
+	panel_dsi_send_perpare(panel);
+
+	/* perform different enable operations base on the panel ID, if need */
+	if (panel->id == 0)
+		ili9881c_default_init(panel);
+	else if (panel->id == 1)
+		tft050bp071_init(panel);
+	else
+		dev_err(panel->dev, "Invalid panel id %d\n", panel->id);
 
 	panel_dsi_setup_realmode(panel);
 	panel_de_timing_enable(panel, 0);
@@ -280,27 +616,6 @@ static struct aic_panel_funcs panel_funcs = {
 	.enable = panel_enable,
 	.get_video_mode = panel_default_get_video_mode,
 	.register_callback = panel_register_callback,
-};
-
-/* Init the videomode parameter, dts will override the initial value. */
-static struct fb_videomode panel_vm = {
-	.pixclock = 70000000,
-	.xres = 800,
-	.right_margin = 100,
-	.left_margin = 48,
-	.hsync_len = 8,
-	.yres = 1280,
-	.lower_margin = 16,
-	.upper_margin = 15,
-	.vsync_len = 6,
-	.flag = DISPLAY_FLAGS_HSYNC_LOW | DISPLAY_FLAGS_VSYNC_LOW |
-		DISPLAY_FLAGS_DE_HIGH | DISPLAY_FLAGS_PIXDATA_POSEDGE
-};
-
-static struct panel_dsi dsi = {
-	.format = DSI_FMT_RGB888,
-	.mode = DSI_MOD_VID_BURST,
-	.lane_num = 4,
 };
 
 static int panel_probe(struct udevice *dev)
@@ -326,8 +641,13 @@ static int panel_probe(struct udevice *dev)
 	}
 	dm_gpio_set_value(&ili9881c->reset, 0);
 
-	priv->panel.dsi = &dsi;
-	panel_init(priv, dev, &panel_vm, &panel_funcs, ili9881c);
+	/*
+	 * Temporarily set a videomode from dsi read operation.
+	 * We can reset the videomode and struct panel_dsi after reading back
+	 * the panel ID.
+	 */
+	priv->panel.dsi = &dsi0;
+	panel_init(priv, dev, &panel_768x1024_vm, &panel_funcs, ili9881c);
 
 	return 0;
 }
@@ -343,4 +663,5 @@ U_BOOT_DRIVER(panel_dsi_ili9881c) = {
 	.of_match  = panel_match_ids,
 	.probe     = panel_probe,
 	.priv_auto = sizeof(struct panel_priv),
+	.plat_auto = sizeof(unsigned int), // Save the panel ID. This is required.
 };

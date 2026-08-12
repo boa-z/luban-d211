@@ -8,22 +8,33 @@ menuconfig SPL_CLK_ARTINCHIP
 	  This enables SPL DM/DTS support for clock driver in ArtInChip platforms.
 
 if SPL_CLK_ARTINCHIP
+	config SPL_CLK_ARTINCHIP_CMU_DRIVER_V1
+		bool
+		default n
+
+	config SPL_CLK_ARTINCHIP_CMU_DRIVER_V2
+		bool
+		default n
+
+	config SPL_CLK_ARTINCHIP_CMU_V2_x
+		bool
+		default n
+
+	config SPL_CLK_ARTINCHIP_CMU_V3_x
+		bool
+		default n
+
 	choice
 		prompt "Select SPL clock driver"
 		default SPL_CLK_ARTINCHIP_CMU_V1_0
 		config SPL_CLK_ARTINCHIP_CMU_V1_0
 			bool "aic-cmu-v1.0"
+			depends on TARGET_D211
+			select SPL_CLK_ARTINCHIP_CMU_DRIVER_V1
 			help
-			SPL clock driver for aic-cmu-v1.0
+			  SPL clock driver for aic-cmu-v1.0
 
-		config SPL_CLK_ARTINCHIP_CMU_V2_0
-			bool "aic-cmu-v2.0"
-			help
-			SPL clock driver for aic-cmu-v2.0
-		config SPL_CLK_ARTINCHIP_CMU_V3_0
-			bool "aic-cmu-v3.0"
-			help
-			SPL clock driver for aic-cmu-v3.0
+
 	endchoice
 endif
 
@@ -34,23 +45,33 @@ menuconfig CLK_ARTINCHIP
 	default y
 
 if CLK_ARTINCHIP
+	config CLK_ARTINCHIP_CMU_DRIVER_V1
+		bool
+		default n
+
+	config CLK_ARTINCHIP_CMU_DRIVER_V2
+		bool
+		default n
+
+	config CLK_ARTINCHIP_CMU_V2_x
+		bool
+		default n
+
+	config CLK_ARTINCHIP_CMU_V3_x
+		bool
+		default n
+
 	choice
 		prompt "Select clock driver"
 		default CLK_ARTINCHIP_CMU_V1_0
 		config CLK_ARTINCHIP_CMU_V1_0
 			bool "aic-cmu-v1.0"
+			depends on TARGET_D211
+			select CLK_ARTINCHIP_CMU_DRIVER_V1
 			help
-			SPL clock driver for aic-cmu
+			  SPL clock driver for aic-cmu
 
-		config CLK_ARTINCHIP_CMU_V2_0
-			bool "aic-cmu-v2.0"
-			help
-			SPL clock driver for aic-cmu
 
-		config CLK_ARTINCHIP_CMU_V3_0
-			bool "aic-cmu-v3.0"
-			help
-			SPL clock driver for aic-cmu
 	endchoice
 
 config CLK_ARTINCHIP_V0_1

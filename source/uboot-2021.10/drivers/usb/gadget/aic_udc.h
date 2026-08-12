@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0+ */
 /*
- * Copyright (c) 2021, ArtInChip Technology Co., Ltd
+ * Copyright (c) 2021-2026, ArtInChip Technology Co., Ltd
  */
 
 #ifndef __AIC_UDC_H
@@ -32,6 +32,7 @@ struct aic_plat_udc_data {
 	unsigned int	np_tx_fifo_sz;
 	unsigned int	tx_fifo_sz;
 	unsigned int	tx_fifo_sz_array[AIC_MAX_HW_ENDPOINTS];
+	u32		txpreempamptune;
 	unsigned char   tx_fifo_sz_nb;
 	bool		force_b_session_valid;
 	bool		force_vbus_detection;
@@ -215,6 +216,8 @@ struct aic_udc_reg_v20 {
 	u32 dtknqr3;			/* 0x0368: DTKNQR3 */
 	u32 dtknqr4;			/* 0x036C: DTKNQR4 */
 };
+#define USB_DEV_PLL_INT_CFG_OFF	0x8074
+#define USB_DEV_PHY_CTL_OFF	0x8010
 
 /*===================================================================== */
 /*definitions related to CSR setting */
@@ -418,5 +421,17 @@ struct aic_udc_reg_v20 {
 /* Device ALL Endpoints Interrupt Register (USBEPINT) */
 #define DAINT_IN_EP_INT(x)                        (x << 0)
 #define DAINT_OUT_EP_INT(x)                       (x << 16)
+
+/* PHY_TUNE */
+#define USBPHYTUNE				(0x8018)
+#define USBPHYTUNE_COMPDISTUNE_MASK		GENMASK(25, 23)
+#define USBPHYTUNE_COMPDISTUNE_SHIFT		23
+#define USBPHYTUNE_TXPREEMPAMPTUNE_MASK		GENMASK(1, 0)
+#define USBPHYTUNE_TXPREEMPAMPTUNE_SHIFT	0
+#define USBPHYTUNE_TXPREEMPAMPTUNE(_x)		((_x) << USBPHYTUNE_TXPREEMPAMPTUNE_SHIFT)
+#define USBPHYTUNE_TXPREEMPAMPTUNE_DISABLE	0x0	/* Pre-emphasis disabled, 600 uA */
+#define USBPHYTUNE_TXPREEMPAMPTUNE_1X		0x1	/* 1X pre-emphasis current */
+#define USBPHYTUNE_TXPREEMPAMPTUNE_2X		0x2	/* 2X pre-emphasis current */
+#define USBPHYTUNE_TXPREEMPAMPTUNE_3X		0x3	/* 3X pre-emphasis current */
 
 #endif

@@ -234,7 +234,7 @@ int main(int argc, char *argv[]) {
 
 	char cmd[128] = {0};
 	// start the wpa_supplicant
-	snprintf(cmd, sizeof(cmd), "wpa_supplicant -iwlan0 -Dnl80211 -c/etc/wifi/p2p_supplicant.conf &");
+	snprintf(cmd, sizeof(cmd), "wpa_supplicant -i%s -Dnl80211 -c/etc/wifi/p2p_supplicant.conf &", argv[1]);
 	system(cmd);
 	sleep(2);
 

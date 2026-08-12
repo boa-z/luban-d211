@@ -71,7 +71,6 @@ config USB_GADGET_PRODUCT_NUM
 
 menuconfig USB_GADGET_AIC
 	bool "ArtInChip USB2.0 Device controller"
-	select USB_GADGET_DUALSPEED
 	help
 	  The ArtInChip USB2.0 high-speed device controller.
 	  This option requires USB_GADGET to be enabled.
@@ -167,7 +166,8 @@ config SDP_LOADADDR
 
 # Selected by UDC drivers that support high-speed operation.
 config USB_GADGET_DUALSPEED
-	bool
+	bool "Support high-speed"
+	default y
 
 config USB_GADGET_DOWNLOAD
 	bool "Enable USB download gadget"

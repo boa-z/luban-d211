@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0+
 /*
- * Copyright (c) 2022-2025, ArtInChip Technology Co., Ltd
+ * Copyright (c) 2022-2026, ArtInChip Technology Co., Ltd
  *
  * Dehuang Wu <dehuang.wu@artinchip.com>
  */
@@ -156,6 +156,7 @@ DECLARE_GLOBAL_DATA_PTR;
 #define AIC_SPI_MIN_RATE        3000
 #define AIC_SPI_DEFAULT_RATE    24000000
 #define AIC_SPI_TIMEOUT_US      1000000
+#define MHZ			(1000 * 1000)
 
 #define RX_SAMP_DLY_AUTO        0
 #define RX_SAMP_DLY_NONE        1
@@ -741,7 +742,7 @@ static int aic_spi_set_speed(struct udevice *dev, uint speed)
 	struct aic_spi_priv *priv = dev_get_priv(dev);
 	u32 reg, cdr, div, mclk;
 
-	dev_info(dev, "speed %d plat->max_hz %d\n", speed, plat->max_hz);
+	dev_info(dev, "freq: %d / %d MHz\n", speed / MHZ, plat->max_hz / MHZ);
 	if (speed > plat->max_hz)
 		speed = plat->max_hz;
 
@@ -794,7 +795,7 @@ static int aic_spi_set_mode(struct udevice *dev, uint mode)
 	struct aic_spi_priv *priv = dev_get_priv(dev);
 	u32 reg, val, busmode;
 
-	dev_info(dev, "mode = 0x%x\n", mode);
+	dev_info(dev, "mode: 0x%x\n", mode);
 	reg = readl(SPI_REG_TCR(priv));
 	reg &= ~(TCR_BIT_CPOL | TCR_BIT_CPHA);
 
@@ -1045,7 +1046,6 @@ static int aic_spi_probe(struct udevice *bus)
 	struct aic_spi_priv *priv = dev_get_priv(bus);
 	int ret = 0;
 
-	dev_info(bus, "%s\n", __func__);
 #if CONFIG_IS_ENABLED(OF_PLATDATA)
 	aic_spi_get_platdata(bus);
 #elif CONFIG_IS_ENABLED(OF_CONTROL) && defined(CONFIG_ARTINCHIP_DMA)
@@ -1093,7 +1093,7 @@ static int aic_spi_probe(struct udevice *bus)
 	/* enable interrupt */
 	setbits_le32(SPI_REG_ICR(priv), 0x3fff);
 
-	dev_info(bus, "%s done.\n", __func__);
+	dev_dbg(bus, "%s done.\n", __func__);
 	return ret;
 }
 

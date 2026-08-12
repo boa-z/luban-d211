@@ -379,7 +379,7 @@ static s32 spl_build_page_table(struct aicupg_nand_spl *spl,
 			ret = -1;
 			goto out;
 		}
-		pa = (blkidx << 6) + page_in_blk;
+		pa = (blkidx * page_per_blk) + page_in_blk;
 		if (pgidx < PAGE_TABLE_MAX_ENTRY) {
 			pt->entry[pgidx].pageaddr[0] = pa;
 			pt->entry[pgidx].checksum = ~sumval;
@@ -394,7 +394,7 @@ static s32 spl_build_page_table(struct aicupg_nand_spl *spl,
 
 	pgidx = 0;
 	blkidx = spl->spl_blocks[0];
-	pa = (blkidx << 6) + pgidx;
+	pa = (blkidx * page_per_blk) + pgidx;
 	pt->entry[0].pageaddr[0] = pa;
 	pt->entry[0].checksum = 0;
 	memset(page_data, 0xFF, PAGE_TABLE_USE_SIZE);
@@ -506,7 +506,9 @@ static s32 nand_fwc_spl_program(struct fwc_info *fwc,
 		else
 			data_size = (unsigned long)end - (unsigned long)p;
 		memset(page_data, 0xFF, slice_size);
+#ifdef CONFIG_AICUPG_SINGLE_TRANS_BURN_CRC32_VERIFY
 		memset(rd_page_data, 0xFF, slice_size);
+#endif
 		memcpy(page_data, p, data_size);
 
 		p += data_size;

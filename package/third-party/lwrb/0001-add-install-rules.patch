@@ -1,0 +1,37 @@
+diff -git a/CMakeLists.txt b/CMakeLists.txt
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -1,4 +1,4 @@
+-cmake_minimum_required(VERSION 3.22)
++cmake_minimum_required(VERSION 3.10)
+
+ # Setup project
+ project(LwLibPROJECT C)
+diff -git a/lwrb/CMakeLists.txt b/lwrb/CMakeLists.txt
+--- a/lwrb/CMakeLists.txt
++++ b/lwrb/CMakeLists.txt
+@@ -1,3 +1,3 @@
+-cmake_minimum_required(VERSION 3.22)
++cmake_minimum_required(VERSION 3.10)
+
+ include(${CMAKE_CURRENT_LIST_DIR}/library.cmake)
+diff -git a/lwrb/library.cmake b/lwrb/library.cmake
+--- a/lwrb/library.cmake
++++ b/lwrb/library.cmake
+@@ -42,3 +42,16 @@
+ target_include_directories(lwrb_ex PUBLIC ${lwrb_include_DIRS})
+ target_compile_options(lwrb_ex PUBLIC ${LWRB_COMPILE_OPTIONS})
+ target_compile_definitions(lwrb_ex PUBLIC ${LWRB_COMPILE_DEFINITIONS} LWRB_EXTENDED)
++
++include(GNUInstallDirs)
++
++install(TARGETS lwrb lwrb_ex
++    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
++    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
++    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
++)
++
++install(FILES
++    ${CMAKE_CURRENT_LIST_DIR}/src/include/lwrb/lwrb.h
++    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/lwrb
++)

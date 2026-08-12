@@ -9,6 +9,7 @@
 #include <linux/uaccess.h>
 #include <linux/vmalloc.h>
 #include <uapi/linux/dma-heap.h>
+#include <linux/dma-map-ops.h>
 
 #include "heap-helpers.h"
 
@@ -198,7 +199,9 @@ static int dma_heap_dma_buf_begin_cpu_access(struct dma_buf *dmabuf,
 					     enum dma_data_direction direction)
 {
 	struct heap_helper_buffer *buffer = dmabuf->priv;
+	struct page *pages = buffer->priv_virt;
 	struct dma_heaps_attachment *a;
+	bool has_mapped = false;
 	int ret = 0;
 
 	mutex_lock(&buffer->lock);
@@ -209,7 +212,13 @@ static int dma_heap_dma_buf_begin_cpu_access(struct dma_buf *dmabuf,
 	list_for_each_entry(a, &buffer->attachments, list) {
 		dma_sync_sg_for_cpu(a->dev, a->table.sgl, a->table.nents,
 				    direction);
+		has_mapped = true;
 	}
+
+	if (!has_mapped)
+		arch_sync_dma_for_cpu(page_to_phys(pages),
+				      buffer->size, direction);
+
 	mutex_unlock(&buffer->lock);
 
 	return ret;
@@ -219,7 +228,9 @@ static int dma_heap_dma_buf_end_cpu_access(struct dma_buf *dmabuf,
 					   enum dma_data_direction direction)
 {
 	struct heap_helper_buffer *buffer = dmabuf->priv;
+	struct page *pages = buffer->priv_virt;
 	struct dma_heaps_attachment *a;
+	bool has_mapped = false;
 
 	mutex_lock(&buffer->lock);
 
@@ -229,7 +240,13 @@ static int dma_heap_dma_buf_end_cpu_access(struct dma_buf *dmabuf,
 	list_for_each_entry(a, &buffer->attachments, list) {
 		dma_sync_sg_for_device(a->dev, a->table.sgl, a->table.nents,
 				       direction);
+		has_mapped = true;
 	}
+
+	if (!has_mapped)
+		arch_sync_dma_for_device(page_to_phys(pages),
+					 buffer->size, direction);
+
 	mutex_unlock(&buffer->lock);
 
 	return 0;
@@ -256,6 +273,17 @@ static void dma_heap_dma_buf_vunmap(struct dma_buf *dmabuf, void *vaddr)
 	mutex_unlock(&buffer->lock);
 }
 
+#ifdef CONFIG_ARCH_ARTINCHIP
+static int dma_heap_dma_get_phy_addr(struct dma_buf *dmabuf, unsigned int *phy_addr)
+{
+	struct heap_helper_buffer *buffer = dmabuf->priv;
+	struct page *page = buffer->pages[0];
+
+	*phy_addr = page_to_phys(page);
+	return 0;
+}
+#endif
+
 const struct dma_buf_ops heap_helper_ops = {
 	.map_dma_buf = dma_heap_map_dma_buf,
 	.unmap_dma_buf = dma_heap_unmap_dma_buf,
@@ -267,4 +295,7 @@ const struct dma_buf_ops heap_helper_ops = {
 	.end_cpu_access = dma_heap_dma_buf_end_cpu_access,
 	.vmap = dma_heap_dma_buf_vmap,
 	.vunmap = dma_heap_dma_buf_vunmap,
+#ifdef CONFIG_ARCH_ARTINCHIP
+	.get_phy_addr = dma_heap_dma_get_phy_addr,
+#endif
 };

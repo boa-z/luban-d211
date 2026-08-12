@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2024 ArtInChip Technology Co. Ltd
+ * Copyright (C) 2020-2026 ArtInChip Technology Co. Ltd
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -105,6 +105,7 @@ static struct mov_stream_ctx *new_stream(struct aic_mov_parser *c)
 	memset(sc, 0, sizeof(struct mov_stream_ctx));
 
 	sc->index = c->nb_streams;
+
 	return sc;
 }
 
@@ -361,10 +362,15 @@ static int mov_read_trak(struct aic_mov_parser *c, struct mov_atom atom)
 		return ret;
 	}
 
+	if (MPP_MEDIA_TYPE_AUDIO == st->type) {
+		st->audio_track_id = c->nb_audio_track;
+		c->nb_audio_track++;
+	}
+
 	// build index
 	mov_build_index(c, st);
-	logi("stream id: %d, sample count: %d, index_entries: %d",
-		c->nb_streams-1, st->sample_count, st->nb_index_entries);
+	logi("stream id:%d, sample count:%d, index_entries:%d type:%d audio_track_cnt:%d track_id:%d",
+		c->nb_streams-1, st->sample_count, st->nb_index_entries, st->type, c->nb_audio_track, st->audio_track_id);
 
 	return 0;
 }
@@ -1227,10 +1233,15 @@ static int mov_read_default(struct aic_mov_parser *c, struct mov_atom atom)
 		total_size += a.size;
 	}
 
-	if (total_size < atom.size && atom.size < 0x7ffff)
+	if (total_size < atom.size && atom.size < 0x7ffff) {
 		aic_stream_skip(c->stream, atom.size - total_size);
+		total_size = atom.size;
+	}
 
 	c->atom_depth --;
+	if (total_size >= atom.size)
+		return 1;
+
 	return 0;
 }
 
@@ -1239,6 +1250,7 @@ static struct index_entry *find_next_sample(struct aic_mov_parser *c, struct mov
 	int i;
 	struct index_entry *sample = NULL;
 	int64_t best_dts = INT64_MAX;
+	int64_t best_pos = INT64_MAX;
 
 	// find the sample with the smallest dts from every streams
 	for (i=0; i<c->nb_streams; i++) {
@@ -1246,11 +1258,20 @@ static struct index_entry *find_next_sample(struct aic_mov_parser *c, struct mov
 		if (cur_st->cur_sample_idx < cur_st->nb_index_entries) {
 			struct index_entry *cur_sample = &cur_st->index_entries[cur_st->cur_sample_idx];
 			int64_t dts = get_time(cur_sample->timestamp, cur_st->time_scale);
-
-			if (!sample || dts < best_dts) {
-				sample = cur_sample;
-				best_dts = dts;
-				*st = cur_st;
+			int64_t pos = cur_sample->pos;
+			//network stream need to peek by offset
+			if (c->is_network_stream) {
+				if (!sample || pos < best_pos) {
+					sample = cur_sample;
+					best_pos = pos;
+					*st = cur_st;
+				}
+			} else {
+				if (!sample || dts < best_dts) {
+					sample = cur_sample;
+					best_dts = dts;
+					*st = cur_st;
+				}
 			}
 		}
 	}
@@ -1277,6 +1298,9 @@ int mov_peek_packet(struct aic_mov_parser *c, struct aic_parser_packet *pkt)
 
 	pkt->size = sample->size;
 	pkt->type = st->type;
+	if (MPP_MEDIA_TYPE_AUDIO == st->type) {
+		pkt->stream_index = st->audio_track_id;
+	}
 
 	if (st->cur_sample_idx == st->nb_index_entries) {
 		// eos now
@@ -1333,7 +1357,7 @@ int mov_read_header(struct aic_mov_parser *c)
 	atom.size = aic_stream_size(c->stream);
 	do {
 		err = mov_read_default(c, atom);
-		if(err < 0) {
+		if(err) {
 			loge("error reading header");
 			return -1;
 		}

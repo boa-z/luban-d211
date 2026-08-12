@@ -1,0 +1,56 @@
+#!/bin/sh
+#
+
+DAEMON="/usr/local/bin/selfie"
+SELFIE="selfie"
+PIDFILE=/var/run/$SELFIE.pid
+EXEPATH="/usr/bin"
+
+start() {
+      printf "Starting selfie:"
+
+      $EXEPATH/hciconfig up
+      $EXEPATH/bluetoothctl &
+
+      PID=`$DAEMON > /dev/null 2>&1 & echo $!`
+
+      if [ -z $PID ]; then
+          printf "Fail \n"
+      else
+          echo $PID >$PIDFILE
+          printf "OK\n"
+      fi
+}
+
+stop() {
+        printf "Stopping selfie: "
+
+        PID=`cat $PIDFILE`
+        if [ -f $PIDFILE ]; then
+            kill -HUP $PID
+            printf "OK \n"
+            rm -f $PIDFILE
+        else
+            printf "$SELFIE pidfile not found \n"
+        fi
+
+        $EXEPATH/hciconfig down
+}
+
+case "$1" in
+    start)
+        start
+        ;;
+    stop)
+        stop
+        ;;
+    restart|reload)
+        stop
+        start
+        ;;
+  *)
+        echo "Usage: $0 {start|stop|restart}"
+        exit 1
+esac
+
+exit $?

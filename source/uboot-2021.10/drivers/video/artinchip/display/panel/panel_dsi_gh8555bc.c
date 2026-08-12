@@ -19,6 +19,7 @@
 
 struct gh8555bc {
 	struct gpio_desc reset;
+	struct gpio_desc pwr;
 };
 
 static inline struct gh8555bc *panel_to_gh8555bc(struct aic_panel *panel)
@@ -30,6 +31,8 @@ static int panel_enable(struct aic_panel *panel)
 {
 	struct gh8555bc *gh8555bc = panel_to_gh8555bc(panel);
 	int ret;
+
+	dm_gpio_set_value(&gh8555bc->pwr, 1);
 
 	dm_gpio_set_value(&gh8555bc->reset, 1);
 	aic_delay_ms(120);
@@ -203,6 +206,14 @@ static int panel_probe(struct udevice *dev)
 					&gh8555bc->reset, GPIOD_IS_OUT);
 	if (ret) {
 		dev_err(dev, "failed to get reset gpio\n");
+		free(gh8555bc);
+		return ret;
+	}
+
+	ret = gpio_request_by_name(dev, "pwr-gpios", 0,
+					&gh8555bc->pwr, GPIOD_IS_OUT);
+	if (ret) {
+		dev_err(dev, "failed to get pwr gpio\n");
 		free(gh8555bc);
 		return ret;
 	}

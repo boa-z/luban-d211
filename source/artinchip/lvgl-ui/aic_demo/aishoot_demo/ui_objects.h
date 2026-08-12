@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2024-2025, ArtInChip Technology Co., Ltd
+ * Copyright (c) 2024-2026, ArtInChip Technology Co., Ltd
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -20,6 +20,8 @@ typedef struct {
     lv_obj_t *obj;
     lv_obj_t *image_descrip;
     lv_obj_t *image_battery;
+    lv_obj_t *image_charge;
+    lv_obj_t *image_battery_low;
 } screen_t;
 
 

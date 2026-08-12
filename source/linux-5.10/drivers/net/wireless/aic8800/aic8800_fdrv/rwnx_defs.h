@@ -49,6 +49,10 @@
 #ifdef CONFIG_BR_SUPPORT
 #include "aic_br_ext.h"
 #endif /* CONFIG_BR_SUPPORT */
+#ifdef CONFIG_BAND_STEERING
+#include "aicwf_steering.h"
+#endif
+
 
 #define WPI_HDR_LEN    18
 #define WPI_PN_LEN     16
@@ -163,6 +167,41 @@ enum nl80211_mesh_power_mode {
         NL80211_MESH_POWER_MAX = __NL80211_MESH_POWER_AFTER_LAST - 1
 };
 #endif
+
+#ifdef CONFIG_BAND_STEERING
+enum band_type {
+	BAND_ON_24G = 0,
+	BAND_ON_5G = 1,
+	BAND_ON_60G = 2,
+	BAND_ON_6G = 3,
+	BAND_MAX,
+};
+
+enum WIFI_FRAME_TYPE {
+	WIFI_MGT_TYPE  = (0),
+};
+
+enum WIFI_FRAME_SUBTYPE {
+	WIFI_ASSOCREQ       = (0 | WIFI_MGT_TYPE),
+	WIFI_PROBEREQ       = (BIT(6) | WIFI_MGT_TYPE),
+	WIFI_AUTH           = (BIT(7) | BIT(5) | BIT(4) | WIFI_MGT_TYPE),
+};
+
+struct tmp_feature_sta {
+	u8_l sta_idx;
+	u8_l supported_band;
+};
+
+#if 0
+#define MAX_PENDING_PROBES 3
+struct ap_probe_rsp {
+	u8_l da[6];
+	struct work_struct rsp_work;
+	bool in_use;
+};
+#endif
+#endif
+
 
 /**
  * struct rwnx_bcn - Information of the beacon in used (AP mode)
@@ -302,6 +341,7 @@ struct rwnx_vif {
 	struct rwnx_key key[6];
     unsigned long drv_flags;
 	atomic_t drv_conn_state;
+	spinlock_t conn_state_lock;
 	u8 drv_vif_index;           /* Identifier of the VIF in driver */
 	u8 vif_index;               /* Identifier of the station in FW */
 	u8 ch_index;                /* Channel context identifier */
@@ -349,6 +389,12 @@ struct rwnx_vif {
 			bool create_path;            /* Indicate if we are waiting for a MESH_CREATE_PATH_CFM
 											message */
 			int generation;              /* Increased each time the list of Mesh Paths is updated */
+#ifdef CONFIG_BAND_STEERING
+			u8_l tmp_sta_idx;
+			enum band_type band;
+			u32_l freq;
+			bool start;
+#endif
 			enum nl80211_mesh_power_mode mesh_pm; /* mesh power save mode currently set in firmware */
 			enum nl80211_mesh_power_mode next_mesh_pm; /* mesh power save mode for next peer */
 		} ap;
@@ -376,6 +422,15 @@ struct rwnx_vif {
 
 	struct br_ext_info		ethBrExtInfo;
     #endif /* CONFIG_BR_SUPPORT */
+#ifdef CONFIG_BAND_STEERING
+	struct timer_list steer_timer;
+	struct work_struct steer_work;
+	struct b_steer_priv bsteerpriv;
+#if 0
+	struct workqueue_struct *rsp_wq;
+	struct ap_probe_rsp pb_pool[MAX_PENDING_PROBES];
+#endif
+#endif
 };
 
 #define RWNX_VIF_TYPE(rwnx_vif) (rwnx_vif->wdev.iftype)
@@ -428,6 +483,14 @@ struct aic_sta {
     u8 sta_idx;             /* Identifier of the station */
 	bool he;               /* Flag indicating if the station supports HE */
 	bool vht;               /* Flag indicating if the station supports VHT */
+
+	struct ieee80211_he_cap_elem he_cap_elem;
+	struct ieee80211_he_mcs_nss_supp he_mcs_nss_supp;
+
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3, 8, 0) || defined(CONFIG_VHT_FOR_OLD_KERNEL)
+	__le32 vht_cap_info;
+	struct ieee80211_vht_mcs_info supp_mcs;
+#endif
 };
 #endif
 
@@ -475,6 +538,12 @@ struct rwnx_sta {
 	struct rwnx_tdls tdls; /* TDLS station information */
 	struct rwnx_sta_stats stats;
 	enum nl80211_mesh_power_mode mesh_pm; /*  link-specific mesh power save mode */
+#ifdef CONFIG_BAND_STEERING
+	u32_l link_time;
+	s8_l rssi;
+	u8_l support_band;
+#endif
+
 };
 
 static inline const u8 *rwnx_sta_addr(struct rwnx_sta *rwnx_sta)
@@ -580,7 +649,7 @@ struct amsdu_subframe_hdr {
 
 
 /* rwnx driver status */
-void rwnx_set_conn_state(atomic_t *drv_conn_state, int state);
+void rwnx_set_conn_state(struct rwnx_vif *vif, atomic_t *drv_conn_state, int state);
 
 enum rwnx_drv_connect_status { 
 	RWNX_DRV_STATUS_DISCONNECTED = 0,
@@ -717,10 +786,17 @@ struct rwnx_hw {
 #ifdef CONFIG_SCHED_SCAN
     bool is_sched_scan;
 #endif//CONFIG_SCHED_SCAN
+	s8_l temp;
 #ifdef CONFIG_TEMP_CONTROL
 	unsigned long started_jiffies;
-	s8_l temp;
 #endif
+#ifdef CONFIG_BAND_STEERING
+	u8_l iface_idx;
+	struct tmp_feature_sta feature_table[NX_REMOTE_STA_MAX + NX_VIRT_DEV_MAX];
+#endif
+
+	ktime_t last_time;
+	char last_alpha2[3];
 
 };
 

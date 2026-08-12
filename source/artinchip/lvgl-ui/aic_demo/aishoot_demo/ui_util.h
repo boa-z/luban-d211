@@ -19,8 +19,6 @@ bool screen_is_loading(lv_obj_t *scr);
 
 void ui_style_init(lv_style_t * style);
 
-lv_font_t *ui_font_init(char *path, int size);
-
 #ifdef __cplusplus
 } /*extern "C"*/
 #endif

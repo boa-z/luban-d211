@@ -269,15 +269,19 @@ static int aes_ecb_calc(struct udevice *dev, struct task_desc *task,
 			dev_err(dev, "AES run error.\n");
 			return ret;
 		}
-		invalidate_dcache_range((ulong)pout,
-					(ulong)pout + dolen);
+		invalidate_dcache_range((ulong)pout, (ulong)pout + dolen);
 
 		if (OUTPUT_NOT_ALIGN(align_flag)) {
 			memcpy(out, pout, dolen);
 			out += dolen;
 		}
+
 		if ((!INPUT_NOT_ALIGN(align_flag)))
 			pin += dolen;
+
+		if (!(OUTPUT_NOT_ALIGN(align_flag)))
+			pout += dolen;
+
 		len -= dolen;
 	} while (len);
 
@@ -412,20 +416,16 @@ static int aes_cbc_calc(struct udevice *dev, struct task_desc *task,
 			in += dolen;
 		}
 
-		flush_dcache_range((ulong)iv_in,
-				   (ulong)iv_in + AES_BLOCK_SIZE);
-		flush_dcache_range((ulong)pin,
-				   (ulong)pin + dolen);
-		flush_dcache_range((ulong)pout,
-				   (ulong)pout + dolen);
+		flush_dcache_range((ulong)iv_in, (ulong)iv_in + AES_BLOCK_SIZE);
+		flush_dcache_range((ulong)pin, (ulong)pin + dolen);
+		flush_dcache_range((ulong)pout, (ulong)pout + dolen);
 
 		task->data.in_addr = (u32)(uintptr_t)pin;
 		task->data.in_len = dolen;
 		task->data.out_addr = (u32)(uintptr_t)pout;
 		task->data.out_len = dolen;
 
-		flush_dcache_range((ulong)task,
-				   (ulong)task + sizeof(task));
+		flush_dcache_range((ulong)task, (ulong)task + sizeof(task));
 
 		crypto_start(dev, task);
 
@@ -442,8 +442,7 @@ static int aes_cbc_calc(struct udevice *dev, struct task_desc *task,
 			pr_err("AES run error.\n");
 			return ret;
 		}
-		invalidate_dcache_range((ulong)pout,
-					(ulong)pout + dolen);
+		invalidate_dcache_range((ulong)pout, (ulong)pout + dolen);
 
 		/* prepare iv for next */
 		if (dir == ALG_DIR_ENCRYPT)
@@ -458,8 +457,13 @@ static int aes_cbc_calc(struct udevice *dev, struct task_desc *task,
 
 		if (!(INPUT_NOT_ALIGN(align_flag)))
 			pin += dolen;
+
+		if (!(OUTPUT_NOT_ALIGN(align_flag)))
+			pout += dolen;
+
 		len -= dolen;
 	} while (len);
+
 	return 0;
 }
 
@@ -724,6 +728,13 @@ int sha_start(struct udevice *dev, sha_context_t *context, sha_mode_t mode)
 	context->mode = mode;
 
 	switch (mode) {
+	case MD5_MODE:
+		priv->sha->alg_tag = ALG_MD5;
+		priv->sha->out_len = MD5_CE_OUT_LEN;
+		priv->sha->digest_len = MD5_DIGEST_SIZE;
+		u32 md5_iv[] = { MD5_H0, MD5_H1, MD5_H2, MD5_H3 };
+		memcpy(priv->sha->digest, md5_iv, MD5_DIGEST_SIZE);
+		break;
 	case SHA_MODE_1:
 		priv->sha->alg_tag = ALG_SHA1;
 		priv->sha->out_len = SHA1_CE_OUT_LEN;

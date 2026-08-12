@@ -1,10 +1,10 @@
 /*
- * Copyright (C) 2020-2022 Artinchip Technology Co. Ltd
+ * Copyright (C) 2020-2026 ArtInChip Technology Co. Ltd
  *
  * SPDX-License-Identifier: Apache-2.0
  *
  *  author: <qi.xu@artinchip.com>
- *  Desc:  refrence frame function 
+ *  Desc:  refrence frame function
  *
  */
 
@@ -12,7 +12,7 @@
 #include <string.h>
 #include "h264_decoder.h"
 
-#define REFSWAP(type,a,b) do{type SWAP_tmp= b; b= a; a= SWAP_tmp;}while(0)
+#define REFSWAP(type,a,b) do {type SWAP_tmp= b; b= a; a= SWAP_tmp;} while(0)
 
 static void print_short_term(struct h264_dec_ctx *s)
 {
@@ -84,11 +84,11 @@ static int unreference_pic(struct h264_dec_ctx *s, struct h264_picture *pic, int
 	int i = 0;
 	logi("unreference_pic, buf_idx: %d, refrence: %d, refmask: %d, display: %d",
 		pic->buf_idx, pic->refrence, refmask, pic->displayed_flag);
-	if(pic->refrence &= refmask) {
-		//* if one field of this frame is unrefrence, do nothing
+	if (pic->refrence &= refmask) {
+		// if one field of this frame is unrefrence, do nothing
 		return 0;
 	} else {
-		//* if one field of this frame is unrefrence, set DELAYED_PIC_REF to this field
+		// if one field of this frame is unrefrence, set DELAYED_PIC_REF to this field
 		for(i=0; s->frame_info.delayed_pic[i]; i++) {
 			if(pic == s->frame_info.delayed_pic[i]) {
 				pic->refrence = DELAYED_PIC_REF;
@@ -96,7 +96,7 @@ static int unreference_pic(struct h264_dec_ctx *s, struct h264_picture *pic, int
 			}
 		}
 
-		//* if this frame is unrefrence, return it
+		// if this frame is unrefrence, return it
 		if((pic->refrence == 0 || pic->refrence == 4) && pic->frame) {
 			fm_decoder_put_frame(s->decoder.fm, pic->frame);
 		}
@@ -169,14 +169,12 @@ static int split_field_copy(struct h264_ref *dest, struct h264_picture *src, int
 {
 	int match = !!(src->refrence & parity);
 
-	if(match)
-	{
+	if (match) {
 		dest->refrence = src->refrence;
 		dest->poc = src->poc;
 		dest->pic_id = src->pic_id;
 		dest->parent = src;
-		if(parity != PICT_FRAME)
-		{
+		if (parity != PICT_FRAME) {
 			dest->refrence = parity;
 			dest->pic_id *= 2;
 			dest->pic_id += id_add;
@@ -282,189 +280,232 @@ static void generate_sliding_window_mmcos(struct h264_dec_ctx *s)
 	s->sh.nb_mmco = nb_mmco;
 }
 
-int execute_ref_pic_marking(struct h264_dec_ctx *s)
+/**
+ * Handle MMCO_SHORT2LONG operation
+ */
+static void execute_mmco_short2long(struct h264_dec_ctx *s, struct h264_picture *pic,
+                                   int long_arg, int short_idx)
 {
-	int i = 0, j = 0;
-	int frame_num = 0;
-	int structure;
-	int current_ref_assigned = 0;
-	struct h264_picture* pic = NULL;
-	struct h264_sps_info* cur_sps = s->sps_buffers[s->active_sps_id];
-	struct mmco* mmco = s->sh.mmco;
-	int mmco_cnt;
+	if (s->frame_info.long_ref[long_arg] != pic) {
+		remove_long(s, long_arg, 0);
+	}
 
-	print_short_term(s);
-	print_long_term(s);
+	remove_short_at_index(s, short_idx);
+	s->frame_info.long_ref[long_arg] = pic;
+	if (s->frame_info.long_ref[long_arg]) {
+		s->frame_info.long_ref[long_arg]->long_ref = 1;
+		s->long_ref_count++;
+	}
+}
 
-	if(!s->sh.explicit_ref_marking)
-		generate_sliding_window_mmcos(s);
-	mmco_cnt = s->sh.nb_mmco;
-	logi("explicit_ref_marking: %d, mmco_cnt: %d", s->sh.explicit_ref_marking, mmco_cnt);
+/**
+ * Handle MMCO_LONG2UNUSED operation
+ */
+static void execute_mmco_long2unused(struct h264_dec_ctx *s, int long_arg)
+{
+	int structure, j;
+	struct h264_picture *pic;
 
-	for(i=0; i<mmco_cnt; i++) {
-		logi("i: %d, mmco[i].opcode: %d, short_pic_num: %d, long_arg: %d",
-			i, mmco[i].opcode, mmco[i].short_pic_num, mmco[i].long_arg);
-		if(mmco[i].opcode == MMCO_SHORT2UNUSED || mmco[i].opcode == MMCO_SHORT2LONG) {
-			frame_num = pic_num_extract(s, mmco[i].short_pic_num, &structure);
-			pic       = find_short(s, frame_num, &j);
+	j = pic_num_extract(s, long_arg, &structure);
+	pic = s->frame_info.long_ref[j];
+	if (!pic) {
+		loge("mmco unref long failed");
+		return;
+	}
 
-			if(!pic) {
-				if (mmco[i].opcode != MMCO_SHORT2LONG ||
-				    !s->frame_info.long_ref[mmco[i].long_arg] ||
-				    s->frame_info.long_ref[mmco[i].long_arg]->frame_num != frame_num) {
-					loge("mmco: unref short failure");
-                		}
-				continue;
+	remove_long(s, j, structure ^ PICT_FRAME);
+}
+
+/**
+ * Handle MMCO_LONG operation - assign current picture as long term reference
+ */
+static int execute_mmco_long(struct h264_dec_ctx *s, int long_arg)
+{
+	int j;
+
+	// Check if current picture is in short term list
+	if (s->frame_info.short_ref[0] == s->frame_info.cur_pic_ptr) {
+		loge("mmco: cannot assign current picture to short and long at the same time");
+		remove_short_at_index(s, 0);
+	}
+
+	// Ensure current picture is not already assigned as a long ref at different index
+	if (s->frame_info.cur_pic_ptr->long_ref) {
+		for (j = 0; j < 32; j++) {
+		if (s->frame_info.long_ref[j] == s->frame_info.cur_pic_ptr) {
+			if (j != long_arg) {
+			logw("mmco: cannot assign current picture to 2 long term references");
 			}
+			remove_long(s, j, 0);
 		}
-
-		switch(mmco[i].opcode) {
-		case MMCO_SHORT2UNUSED: {
-			remove_short(s, frame_num, structure ^ PICT_FRAME);
-			break;
 		}
-		case MMCO_SHORT2LONG: {
-			if(s->frame_info.long_ref[mmco[i].long_arg] != pic)
-				remove_long(s, mmco[i].long_arg, 0);
+	}
 
-			remove_short_at_index(s, j);
-			s->frame_info.long_ref[ mmco[i].long_arg ] = pic;
-			if(s->frame_info.long_ref[ mmco[i].long_arg ]) {
-				s->frame_info.long_ref[ mmco[i].long_arg ]->long_ref = 1;
-				s->long_ref_count++;
+	if (s->frame_info.long_ref[long_arg] != s->frame_info.cur_pic_ptr) {
+		remove_long(s, long_arg, 0);
+		s->frame_info.long_ref[long_arg] = s->frame_info.cur_pic_ptr;
+		s->frame_info.long_ref[long_arg]->long_ref = 1;
+		s->long_ref_count++;
+	}
+
+	s->frame_info.cur_pic_ptr->refrence |= s->picture_structure;
+	return 1; // Current reference assigned
+}
+
+/**
+ * Handle MMCO_SET_MAX_LONG operation
+ */
+static void execute_mmco_set_max_long(struct h264_dec_ctx *s, int max_long_arg)
+{
+	int j;
+	for (j = max_long_arg; j < 16; j++) {
+		remove_long(s, j, 0);
+	}
+}
+
+/**
+ * Handle MMCO_RESET operation
+ */
+static void execute_mmco_reset(struct h264_dec_ctx *s)
+{
+	int j;
+
+	while (s->short_ref_count) {
+		remove_short(s, s->frame_info.short_ref[0]->frame_num, 0);
+	}
+
+	for (j = 0; j < 16; j++) {
+		remove_long(s, j, 0);
+	}
+
+	s->sh.frame_num = 0;
+	s->frame_info.cur_pic_ptr->frame_num = 0;
+	s->frame_info.cur_pic_ptr->mmco_reset = 1;
+
+	for (j = 0; j < MAX_DELAYED_PIC_COUNT; j++) {
+		s->frame_info.last_pocs[j] = INT_MIN;
+	}
+}
+
+/**
+ * Execute MMCO operations for reference picture marking
+ */
+static int execute_mmco_operation(struct h264_dec_ctx *s, struct mmco *mmco, int i)
+{
+	int frame_num, structure, j;
+	struct h264_picture *pic = NULL;
+
+	logi("i: %d, mmco[i].opcode: %d, short_pic_num: %d, long_arg: %d",
+		i, mmco[i].opcode, mmco[i].short_pic_num, mmco[i].long_arg);
+
+	if (mmco[i].opcode == MMCO_SHORT2UNUSED || mmco[i].opcode == MMCO_SHORT2LONG) {
+		frame_num = pic_num_extract(s, mmco[i].short_pic_num, &structure);
+		pic = find_short(s, frame_num, &j);
+
+		if (!pic) {
+			if (mmco[i].opcode != MMCO_SHORT2LONG ||
+				!s->frame_info.long_ref[mmco[i].long_arg] ||
+				s->frame_info.long_ref[mmco[i].long_arg]->frame_num != frame_num) {
+				loge("mmco: unref short failure");
 			}
-			break;
+			return 0; // Continue to next MMCO
 		}
-		case MMCO_LONG2UNUSED: {
-			j = pic_num_extract(s, mmco[i].long_arg, &structure);
-			pic = s->frame_info.long_ref[j];
-			if(!pic) {
-				loge("mmco unref long failed");
-			}
+	}
 
-			remove_long(s, j, structure ^ PICT_FRAME);
-			break;
-		}
-		case MMCO_LONG: {
-			// Comment below left from previous code as it is an interesting note.
-			/* First field in pair is in short term list or
-			* at a different long term index.
-			* This is not allowed; see 7.4.3.3, notes 2 and 3.
-			* Report the problem and keep the pair where it is,
-			* and mark this field valid.
-			*/
-			if(s->frame_info.short_ref[0] == s->frame_info.cur_pic_ptr) {
-				loge("mmco: cannot assign current picture to short and long at the same time");
-				remove_short_at_index(s, 0);
-			}
+	switch (mmco[i].opcode) {
+		case MMCO_SHORT2UNUSED:
+		remove_short(s, frame_num, structure ^ PICT_FRAME);
+		break;
 
-			/* make sure the current picture is not already assigned as a long ref */
-			if(s->frame_info.cur_pic_ptr->long_ref) {
-				for(j=0; j<32; j++) {
-					if(s->frame_info.long_ref[j] == s->frame_info.cur_pic_ptr) {
-						if(j != mmco[i].long_arg) {
-							logw("mmco: cannot assign current picture to 2 long term references");
-						}
-						remove_long(s, j, 0);
-					}
-				}
-			}
+		case MMCO_SHORT2LONG:
+		execute_mmco_short2long(s, pic, mmco[i].long_arg, j);
+		break;
 
-			if(s->frame_info.long_ref[mmco[i].long_arg] != s->frame_info.cur_pic_ptr) {
-				remove_long(s, mmco[i].long_arg, 0);
+		case MMCO_LONG2UNUSED:
+		execute_mmco_long2unused(s, mmco[i].long_arg);
+		break;
 
-				s->frame_info.long_ref[mmco[i].long_arg]	   = s->frame_info.cur_pic_ptr;
-				s->frame_info.long_ref[mmco[i].long_arg]->long_ref = 1;
-				s->long_ref_count++;
-			}
+		case MMCO_LONG:
+		return execute_mmco_long(s, mmco[i].long_arg);
 
-			s->frame_info.cur_pic_ptr->refrence |= s->picture_structure;
-			current_ref_assigned = 1;
-			break;
-		}
-		case MMCO_SET_MAX_LONG: {
-			// remove the long term which index is greater than new max
-			for(j=mmco[i].long_arg; j<16; j++) {
-				remove_long(s, j, 0);
-			}
-			break;
-		}
-		case MMCO_RESET: {
-			while(s->short_ref_count) {
-				remove_short(s, s->frame_info.short_ref[0]->frame_num, 0);
-			}
-			for(j=0; j<16; j++) {
-				remove_long(s, j, 0);
-			}
+		case MMCO_SET_MAX_LONG:
+		execute_mmco_set_max_long(s, mmco[i].long_arg);
+		break;
 
-			s->sh.frame_num = 0;
-			s->frame_info.cur_pic_ptr->frame_num = 0;
-			s->frame_info.cur_pic_ptr->mmco_reset = 1;
-			for(j=0; j<MAX_DELAYED_PIC_COUNT; j++) {
-				s->frame_info.last_pocs[j] = INT_MIN;
-			}
+		case MMCO_RESET:
+		execute_mmco_reset(s);
+		break;
 
-			break;
-		}
 		default:
-			loge("error mmco type(%d)", mmco[i].opcode);
-		}
+		loge("error mmco type(%d)", mmco[i].opcode);
 	}
 
-	logi("current_ref_assigned: %d", current_ref_assigned);
-	if(!current_ref_assigned) {
-		/* Second field of complementary field pair; the first field of
-		* which is already referenced. If short referenced, it
-		* should be first entry in short_ref. If not, it must exist
-		* in long_ref; trying to put it on the short list here is an
-		* error in the encoded bit stream (ref: 7.4.3.3, NOTE 2 and 3).
-		*/
-		logd("s->short_ref_count: %d", s->short_ref_count);
-		if(s->short_ref_count && s->frame_info.short_ref[0] == s->frame_info.cur_pic_ptr) {
-			s->frame_info.cur_pic_ptr->refrence |= s->picture_structure;
-		} else if(s->frame_info.cur_pic_ptr->long_ref) {
-			loge("illegal short term reference assignment for second field");
-			return -1;
-		} else {logd("s->frame_info.cur_pic_ptr->frame_num: %d", s->frame_info.cur_pic_ptr->frame_num);
-			pic = remove_short(s, s->frame_info.cur_pic_ptr->frame_num, 0);
-			if(pic) {
-				loge("illegal short term buffer state detected");
-				return -1;
-			}
-
-			if(s->short_ref_count) {
-				memmove(&s->frame_info.short_ref[1],&s->frame_info.short_ref[0],
-					s->short_ref_count * sizeof(struct h264_picture*));
-			}
-
-			s->frame_info.short_ref[0] = s->frame_info.cur_pic_ptr;
-			s->short_ref_count++;
-			s->frame_info.cur_pic_ptr->refrence |= s->picture_structure;
-		}
-	}
-
-	logi("s->long_ref_count: %d, short_ref_count: %d, max_num_ref_frames: %d",
-		s->long_ref_count, s->short_ref_count, cur_sps->max_num_ref_frames);
-	if(s->long_ref_count + s->short_ref_count > cur_sps->max_num_ref_frames) {
-		/* We have too many reference frames, probably due to corrupted
-		* stream. Need to discard one frame. Prevents overrun of the
-		* short_ref and long_ref buffers.
-		*/
-		if(s->long_ref_count && !s->short_ref_count) {
-			for(i=0; i<16; i++) {
-				if(s->frame_info.long_ref[i])
-					break;
-			}
-			remove_long(s, i, 0);
-		} else {
-			pic = s->frame_info.short_ref[s->short_ref_count-1];
-			remove_short(s, pic->frame_num, 0);
-		}
-	}
-
-	print_short_term(s);
-	print_long_term(s);
 	return 0;
+}
+
+/**
+ * Assign current picture reference when not explicitly assigned by MMCO
+ */
+static int assign_current_pic_reference(struct h264_dec_ctx *s)
+{
+	struct h264_picture *pic;
+
+	logd("s->short_ref_count: %d", s->short_ref_count);
+
+	if (s->short_ref_count && s->frame_info.short_ref[0] == s->frame_info.cur_pic_ptr) {
+		s->frame_info.cur_pic_ptr->refrence |= s->picture_structure;
+	} else if (s->frame_info.cur_pic_ptr->long_ref) {
+		loge("illegal short term reference assignment for second field");
+		return -1;
+	} else {
+		logd("s->frame_info.cur_pic_ptr->frame_num: %d", s->frame_info.cur_pic_ptr->frame_num);
+		pic = remove_short(s, s->frame_info.cur_pic_ptr->frame_num, 0);
+		if (pic) {
+		loge("illegal short term buffer state detected");
+		// return -1;
+		}
+
+		if (s->short_ref_count) {
+		memmove(&s->frame_info.short_ref[1], &s->frame_info.short_ref[0],
+			s->short_ref_count * sizeof(struct h264_picture*));
+		}
+
+		s->frame_info.short_ref[0] = s->frame_info.cur_pic_ptr;
+		s->short_ref_count++;
+		s->frame_info.cur_pic_ptr->refrence |= s->picture_structure;
+	}
+
+	return 0;
+}
+
+/**
+ * Handle reference count overflow by discarding one frame
+ */
+static void handle_reference_overflow(struct h264_dec_ctx *s)
+{
+	int i;
+	struct h264_picture *pic;
+	struct h264_sps_info *cur_sps = s->sps_buffers[s->active_sps_id];
+
+	if (s->long_ref_count + s->short_ref_count <= cur_sps->max_num_ref_frames) {
+		return;
+	}
+
+	/* We have too many reference frames, probably due to corrupted
+	* stream. Need to discard one frame. Prevents overrun of the
+	* short_ref and long_ref buffers.
+	*/
+	if (s->long_ref_count && !s->short_ref_count) {
+		for (i = 0; i < 16; i++) {
+			if (s->frame_info.long_ref[i]) {
+				break;
+			}
+		}
+		remove_long(s, i, 0);
+	} else {
+		pic = s->frame_info.short_ref[s->short_ref_count - 1];
+		remove_short(s, pic->frame_num, 0);
+	}
 }
 
 void reference_refresh(struct h264_dec_ctx *s)
@@ -528,7 +569,7 @@ int init_ref_list(struct h264_dec_ctx *s)
 		if (lens[0] == lens[1] && lens[1] > 1) {
 			for (i = 0; i < lens[0] &&
 				s->frame_info.def_ref_list[0][i].parent->buf_idx ==
-				s->frame_info.def_ref_list[1][i].parent->buf_idx; i++);
+				s->frame_info.def_ref_list[1][i].parent->buf_idx; i++) {}
 
 			if (i == lens[0]) {
 				REFSWAP(struct h264_ref,s->frame_info.def_ref_list[1][0], s->frame_info.def_ref_list[1][1]);
@@ -725,8 +766,14 @@ int render_all_delayed_frame(struct h264_dec_ctx *s)
 
 		// send this frame to render, not call decoder_put_frame here.
 		// decoder_put_frame will be called in reference_refresh
-		fm_decoder_frame_to_render(s->decoder.fm, out_pic->frame, 1);
+		if (s->decoder.rotmir_flag) {
+			fm_decoder_frame_to_render(s->decoder.fm, s->frame_info.picture[out_pic->rotmir_idx].frame, 1);
+			fm_decoder_put_frame(s->decoder.fm, s->frame_info.picture[out_pic->rotmir_idx].frame);
 
+			fm_decoder_frame_to_render(s->decoder.fm, out_pic->frame, 0);
+		} else {
+			fm_decoder_frame_to_render(s->decoder.fm, out_pic->frame, 1);
+		}
 		// if the out_pic is not used for refrence, return it
 		if((!out_pic->nal_ref_idc[0] && out_pic->picture_structure == PICT_FRAME) ||
 		  (!out_pic->nal_ref_idc[0] && !out_pic->nal_ref_idc[1] && out_pic->picture_structure != PICT_FRAME))
@@ -735,149 +782,345 @@ int render_all_delayed_frame(struct h264_dec_ctx *s)
 	return 0;
 }
 
-void select_output_frame(struct h264_dec_ctx *s)
+int execute_ref_pic_marking(struct h264_dec_ctx *s)
 {
 	int i;
-	int min_poc = INT_MAX;
-	int max_poc = -1;
-	int idx = 0;
-	int out_of_order = 0;
-	struct h264_sps_info* cur_sps = s->sps_buffers[s->active_sps_id];
-	struct h264_picture* cur_pic = s->frame_info.cur_pic_ptr;
-	struct h264_picture* out_pic = NULL;
-	struct h264_picture* max_poc_pic = NULL;
+	int current_ref_assigned = 0;
+	struct mmco *mmco = s->sh.mmco;
+	int mmco_cnt;
 
-	//* 1. order poc, start pos is 16 to 0
-	for(i=0; i<=MAX_DELAYED_PIC_COUNT; i++) {
-		if(i == MAX_DELAYED_PIC_COUNT || cur_pic->poc < s->frame_info.last_pocs[i]) {
-			if(i)
-				s->frame_info.last_pocs[i-1] = cur_pic->poc;
-			break;
-		} else if(i) {
-			s->frame_info.last_pocs[i-1] = s->frame_info.last_pocs[i];
+	print_short_term(s);
+	print_long_term(s);
+
+	if (!s->sh.explicit_ref_marking) {
+		generate_sliding_window_mmcos(s);
+	}
+	mmco_cnt = s->sh.nb_mmco;
+	logi("explicit_ref_marking: %d, mmco_cnt: %d", s->sh.explicit_ref_marking, mmco_cnt);
+
+	// Execute all MMCO operations
+	for (i = 0; i < mmco_cnt; i++) {
+		int result = execute_mmco_operation(s, mmco, i);
+		if (result > 0) {
+			current_ref_assigned = result;
 		}
 	}
-	out_of_order = MAX_DELAYED_PIC_COUNT - i;
-	if(s->sh.slice_type == H264_SLICE_B ||
-		(s->frame_info.last_pocs[MAX_DELAYED_PIC_COUNT-2] > INT_MIN &&
-		s->frame_info.last_pocs[MAX_DELAYED_PIC_COUNT-1] - (int64_t)s->frame_info.last_pocs[MAX_DELAYED_PIC_COUNT-2] > 2)) {
+
+	logi("current_ref_assigned: %d", current_ref_assigned);
+
+	// Assign reference to current picture if not done by MMCO
+	if (!current_ref_assigned) {
+		if (assign_current_pic_reference(s) != 0) {
+			return -1;
+		}
+	}
+
+	// Handle reference count overflow
+	handle_reference_overflow(s);
+
+	print_short_term(s);
+	print_long_term(s);
+	return 0;
+}
+
+
+/**
+ * Update POC ordering history
+ */
+static void update_poc_ordering(struct h264_dec_ctx *s, struct h264_picture *cur_pic)
+{
+	int i;
+
+	for (i = 0; i <= MAX_DELAYED_PIC_COUNT; i++) {
+		if (i == MAX_DELAYED_PIC_COUNT || cur_pic->poc < s->frame_info.last_pocs[i]) {
+			if (i) {
+				s->frame_info.last_pocs[i - 1] = cur_pic->poc;
+			}
+			break;
+		} else if (i) {
+			s->frame_info.last_pocs[i - 1] = s->frame_info.last_pocs[i];
+		}
+	}
+}
+
+/**
+ * Calculate out-of-order count based on POC ordering
+ */
+static int calculate_out_of_order_count(struct h264_dec_ctx *s, struct h264_picture *cur_pic)
+{
+	int i, out_of_order = 0;
+
+	for (i = 0; i <= MAX_DELAYED_PIC_COUNT; i++) {
+		if (i == MAX_DELAYED_PIC_COUNT || cur_pic->poc < s->frame_info.last_pocs[i]) {
+			out_of_order = MAX_DELAYED_PIC_COUNT - i;
+			break;
+		}
+	}
+
+	if (s->sh.slice_type == H264_SLICE_B ||
+		(s->frame_info.last_pocs[MAX_DELAYED_PIC_COUNT - 2] > INT_MIN &&
+		s->frame_info.last_pocs[MAX_DELAYED_PIC_COUNT - 1] -
+		(int64_t)s->frame_info.last_pocs[MAX_DELAYED_PIC_COUNT - 2] > 2)) {
 		out_of_order = out_of_order > 1 ? out_of_order : 1;
 	}
 
-	if(out_of_order == MAX_DELAYED_PIC_COUNT) {
-		loge("invalid poc %d < %d", cur_pic->poc, s->frame_info.last_pocs[0]);
-		for(i=0; i<MAX_DELAYED_PIC_COUNT; i++)
+	return out_of_order;
+}
+
+/**
+ * Update B-frame count based on out-of-order information
+ */
+static void update_b_frame_count(struct h264_dec_ctx *s, int out_of_order,
+                                struct h264_sps_info *cur_sps)
+{
+	if (out_of_order == MAX_DELAYED_PIC_COUNT) {
+		int i;
+		loge("invalid poc %d < %d", s->frame_info.cur_pic_ptr->poc,
+		s->frame_info.last_pocs[0]);
+		for (i = 0; i < MAX_DELAYED_PIC_COUNT; i++) {
 			s->frame_info.last_pocs[i] = INT_MIN;
-		s->frame_info.last_pocs[0] = cur_pic->poc;
-		cur_pic->mmco_reset = 1;
-	} else if(s->has_b_frames < out_of_order) {
+		}
+		s->frame_info.last_pocs[0] = s->frame_info.cur_pic_ptr->poc;
+		s->frame_info.cur_pic_ptr->mmco_reset = 1;
+	} else if (s->has_b_frames < out_of_order) {
 		s->has_b_frames = out_of_order;
 	}
-	if(cur_sps->max_num_ref_frames > 13) {
+
+	if (cur_sps->max_num_ref_frames > 13) {
 		logi("force set has_b_frames to 0");
 		s->has_b_frames = 0;
 	}
 
-	if(s->has_b_frames > s->b_frames_max_num)
+	if (s->has_b_frames > s->b_frames_max_num) {
 		s->has_b_frames = s->b_frames_max_num;
-	logd("s->has_b_frames: %d, b_frames_max_num: %d", s->has_b_frames, s->b_frames_max_num);
+	}
 
-	//* 1. add cur_pic to delay_pic list
-	s->frame_info.delayed_pic[s->frame_info.delay_pic_num++] = cur_pic;
-	s->frame_info.delayed_pic[s->frame_info.delay_pic_num] = NULL;
-	s->frame_info.cur_pic_ptr = NULL;
-	logd("delay_pic_num: %d  %p", s->frame_info.delay_pic_num, s->frame_info.delayed_pic[0]);
+	if (s->no_b_frame || s->drop_b_frame_en) {
+		s->has_b_frames = 0;
+	}
+}
 
-	//* 2. find the picture with min poc in delayed_pic list
-	for(i=0; i<s->frame_info.delay_pic_num; i++) {
-		if(s->frame_info.delayed_pic[i]->poc < min_poc) {
-			min_poc = s->frame_info.delayed_pic[i]->poc;
-			out_pic = s->frame_info.delayed_pic[i];
-			idx = i;
-		}
+/**
+ * Find picture with minimum POC in delayed list
+ */
+static struct h264_picture *find_min_poc_picture(struct h264_dec_ctx *s, int *min_idx)
+{
+	int i;
+	int min_poc = INT_MAX;
+	struct h264_picture *out_pic = NULL;
 
-		if(s->frame_info.delayed_pic[i]->poc > max_poc) {
-			max_poc = s->frame_info.delayed_pic[i]->poc;
-			max_poc_pic = s->frame_info.delayed_pic[i];
+	for (i = 0; i < s->frame_info.delay_pic_num; i++) {
+		if (s->frame_info.delayed_pic[i]->poc < min_poc) {
+		min_poc = s->frame_info.delayed_pic[i]->poc;
+		out_pic = s->frame_info.delayed_pic[i];
+		*min_idx = i;
 		}
 	}
-	logd("min_poc: %d, s->curr_packet: %p", min_poc, s->curr_packet);
-	logd("max_poc: %d, s->curr_packet flag: %d", max_poc, s->curr_packet->flag);
 
-	//* set eos flag to the frame with max poc
-	if(s->curr_packet->flag & PACKET_FLAG_EOS)
-		max_poc_pic->frame->mpp_frame.flags |= FRAME_FLAG_EOS;
+	return out_pic;
+}
 
-	if(s->has_b_frames == 0 && (s->frame_info.delayed_pic[0]->key_frame || s->frame_info.delayed_pic[0]->mmco_reset))
+/**
+ * Find picture with maximum POC in delayed list
+ */
+static struct h264_picture *find_max_poc_picture(struct h264_dec_ctx *s)
+{
+	int i;
+	int max_poc = -1;
+	struct h264_picture *max_poc_pic = NULL;
+
+	for (i = 0; i < s->frame_info.delay_pic_num; i++) {
+		if (s->frame_info.delayed_pic[i]->poc > max_poc) {
+		max_poc = s->frame_info.delayed_pic[i]->poc;
+		max_poc_pic = s->frame_info.delayed_pic[i];
+		}
+	}
+
+	return max_poc_pic;
+}
+
+/**
+ * Handle out-of-order frame by discarding it
+ */
+static void handle_out_of_order_frame(struct h264_dec_ctx *s, struct h264_picture *out_pic,
+                                     int idx, int out_of_order)
+{
+	int i;
+
+	if (!out_of_order) {
+		return;
+	}
+
+	logw("out_of_order: %d, delay_num: %d, has_b_frame: %d",
+		out_of_order, s->frame_info.delay_pic_num, s->has_b_frames);
+	logw("discard this frame, poc: %d, buf_idx: %d", out_pic->poc, out_pic->buf_idx);
+
+	out_pic->refrence &= ~DELAYED_PIC_REF;
+	s->frame_info.delay_pic_num--;
+
+	fm_decoder_frame_to_render(s->decoder.fm, out_pic->frame, 0);
+
+	// If the out_pic is not used for reference, return it
+	if ((!out_pic->nal_ref_idc[0] && out_pic->picture_structure == PICT_FRAME) ||
+		(!out_pic->nal_ref_idc[0] && !out_pic->nal_ref_idc[1] &&
+		out_pic->picture_structure != PICT_FRAME)) {
+		fm_decoder_put_frame(s->decoder.fm, out_pic->frame);
+	}
+
+	for (i = idx; s->frame_info.delayed_pic[i]; i++) {
+		s->frame_info.delayed_pic[i] = s->frame_info.delayed_pic[i + 1];
+	}
+}
+
+/**
+ * Output a frame from the delayed list
+ */
+static void output_delayed_frame(struct h264_dec_ctx *s, struct h264_picture *out_pic,
+                                int idx, int out_of_order)
+{
+	int i;
+
+	if (out_of_order || s->frame_info.delay_pic_num <= s->has_b_frames) {
+		return;
+	}
+
+	if (idx == 0 && s->frame_info.delayed_pic[0] &&
+		(s->frame_info.delayed_pic[0]->key_frame ||
+		s->frame_info.delayed_pic[0]->mmco_reset)) {
 		s->next_output_poc = INT_MIN;
-	out_of_order = out_pic->poc < s->next_output_poc;
+	} else {
+		s->next_output_poc = out_pic->poc;
+	}
 
-	//* out of order, discard this frame
-	if (out_of_order) {
-		logw("out_of_order: %d, delay_num: %d, has_b_frame: %d",
-			out_of_order, s->frame_info.delay_pic_num, s->has_b_frames);
-		logw("discard this frame, poc: %d, buf_idx: %d", out_pic->poc, out_pic->buf_idx);
-		out_pic->refrence &= ~DELAYED_PIC_REF;
-		s->frame_info.delay_pic_num --;
+	out_pic->displayed_flag = 1;
+
+	if (s->decoder.rotmir_flag) {
+		fm_decoder_frame_to_render(s->decoder.fm, s->frame_info.picture[out_pic->rotmir_idx].frame, 1);
+		fm_decoder_put_frame(s->decoder.fm, s->frame_info.picture[out_pic->rotmir_idx].frame);
+
 		fm_decoder_frame_to_render(s->decoder.fm, out_pic->frame, 0);
-
-		// if the out_pic is not used for refrence, return it
-		if((!out_pic->nal_ref_idc[0] && out_pic->picture_structure == PICT_FRAME) ||
-		  (!out_pic->nal_ref_idc[0] && !out_pic->nal_ref_idc[1] && out_pic->picture_structure != PICT_FRAME))
-			fm_decoder_put_frame(s->decoder.fm, out_pic->frame);
-		for (i = idx; s->frame_info.delayed_pic[i]; i++)
-			s->frame_info.delayed_pic[i] = s->frame_info.delayed_pic[i + 1];
+	} else {
+		fm_decoder_frame_to_render(s->decoder.fm, out_pic->frame, 1);
 	}
 
-	logi("cur poc: %d, out poc: %d, next poc: %d", cur_pic->poc, out_pic->poc, s->next_output_poc);
-	if(!out_of_order && s->frame_info.delay_pic_num > s->has_b_frames) {
-		if(idx == 0 && s->frame_info.delayed_pic[0] &&
-			(s->frame_info.delayed_pic[0]->key_frame || s->frame_info.delayed_pic[0]->mmco_reset)) {
-			s->next_output_poc = INT_MIN;
-		} else {
-			s->next_output_poc = out_pic->poc;
-		}
-
-		out_pic->displayed_flag = 1;
-
-		if(out_pic->refrence == 0 || out_pic->refrence == DELAYED_PIC_REF) {
-			fm_decoder_frame_to_render(s->decoder.fm, out_pic->frame, 1);
-			out_pic->refrence = 0;
-			out_pic->displayed_flag = 0;
-		} else {
-			fm_decoder_frame_to_render(s->decoder.fm, out_pic->frame, 1);
-		}
-		logi("render frame poc: %d, buf_idx: %d, frame_id: %d, refrence: %d",
-			out_pic->poc, out_pic->buf_idx, out_pic->frame->mpp_frame.id, out_pic->refrence);
-
-		logi("nal_ref_idc: %d %d", out_pic->nal_ref_idc[0], out_pic->nal_ref_idc[1]);
-		//* if the frame is not used for refrence, it will not be used by decoder now
-		if(!out_pic->nal_ref_idc[0] && !out_pic->nal_ref_idc[1]) {
-			fm_decoder_put_frame(s->decoder.fm, out_pic->frame);
-			out_pic->refrence = 0;
-			out_pic->displayed_flag = 0;
-		}
-
-		for(i=idx; i<s->frame_info.delay_pic_num; i++) {
-			s->frame_info.delayed_pic[i] = s->frame_info.delayed_pic[i+1];
-		}
-		s->frame_info.delayed_pic[i] = NULL;
-		s->frame_info.delay_pic_num--;
-		s->min_display_poc = out_pic->poc;
-		s->frame_info.delayed_output_pic = out_pic;
+	if (out_pic->refrence == 0 || out_pic->refrence == DELAYED_PIC_REF) {
+		out_pic->refrence = 0;
+		out_pic->displayed_flag = 0;
 	}
+
+	logi("render frame poc: %d, buf_idx: %d, frame_id: %d, refrence: %d",
+		out_pic->poc, out_pic->buf_idx, out_pic->frame->mpp_frame.id, out_pic->refrence);
+
+	logi("nal_ref_idc: %d %d", out_pic->nal_ref_idc[0], out_pic->nal_ref_idc[1]);
+
+	// If the frame is not used for reference, it will not be used by decoder now
+	if (!out_pic->nal_ref_idc[0] && !out_pic->nal_ref_idc[1]) {
+		fm_decoder_put_frame(s->decoder.fm, out_pic->frame);
+		out_pic->refrence = 0;
+		out_pic->displayed_flag = 0;
+	}
+
+	for (i = idx; i < s->frame_info.delay_pic_num; i++) {
+		s->frame_info.delayed_pic[i] = s->frame_info.delayed_pic[i + 1];
+	}
+
+	s->frame_info.delayed_pic[i] = NULL;
+	s->frame_info.delay_pic_num--;
+	s->min_display_poc = out_pic->poc;
+	s->frame_info.delayed_output_pic = out_pic;
+}
+
+/**
+ * Print delayed picture list for debugging
+ */
+static void print_delayed_pic_list(struct h264_dec_ctx *s)
+{
+	int i;
 
 	logd("====== print delay pic =======");
-	for(i=0; i<s->frame_info.delay_pic_num; i++) {
+	for (i = 0; i < s->frame_info.delay_pic_num; i++) {
 		logd("delay pic: %d, %p", i, s->frame_info.delayed_pic[i]);
-		if(s->frame_info.delayed_pic[i]) {
-			logd("poc: %d, buf_idx: %d, flag: %x",
+		if (s->frame_info.delayed_pic[i]) {
+		logd("poc: %d, buf_idx: %d, flag: %x",
 			s->frame_info.delayed_pic[i]->poc,
 			s->frame_info.delayed_pic[i]->buf_idx,
 			s->frame_info.delayed_pic[i]->frame->mpp_frame.flags);
 		}
-
 	}
+}
+
+void select_output_frame(struct h264_dec_ctx *s)
+{
+	int out_of_order, idx = 0;
+	struct h264_sps_info *cur_sps = s->sps_buffers[s->active_sps_id];
+	struct h264_picture *cur_pic = s->frame_info.cur_pic_ptr;
+	struct h264_picture *out_pic = NULL;
+	struct h264_picture *max_poc_pic = NULL;
+
+	// 1. Update POC ordering and calculate out-of-order count
+	update_poc_ordering(s, cur_pic);
+	out_of_order = calculate_out_of_order_count(s, cur_pic);
+
+	// 2. Update B-frame count based on out-of-order information
+	update_b_frame_count(s, out_of_order, cur_sps);
+
+	logd("s->has_b_frames: %d, b_frames_max_num: %d", s->has_b_frames, s->b_frames_max_num);
+
+	// 3. Add current picture to delayed list
+	s->frame_info.delayed_pic[s->frame_info.delay_pic_num++] = cur_pic;
+	s->frame_info.delayed_pic[s->frame_info.delay_pic_num] = NULL;
+	s->frame_info.cur_pic_ptr = NULL;
+
+	logd("delay_pic_num: %d  %p", s->frame_info.delay_pic_num, s->frame_info.delayed_pic[0]);
+
+	// 4. Find pictures with min and max POC
+	out_pic = find_min_poc_picture(s, &idx);
+	max_poc_pic = find_max_poc_picture(s);
+
+	logd("min_poc: %d, s->curr_packet: %p", out_pic ? out_pic->poc : -1, s->curr_packet);
+	logd("max_poc: %d, s->curr_packet flag: %d",
+		max_poc_pic ? max_poc_pic->poc : -1, s->curr_packet->flag);
+
+	// 5. Set EOS flag to the frame with max POC
+	if (s->curr_packet->flag & PACKET_FLAG_EOS && max_poc_pic) {
+		max_poc_pic->frame->mpp_frame.flags |= FRAME_FLAG_EOS;
+	}
+
+	if (s->has_b_frames == 0 && s->frame_info.delayed_pic[0] &&
+		(s->frame_info.delayed_pic[0]->key_frame ||
+		s->frame_info.delayed_pic[0]->mmco_reset)) {
+		s->next_output_poc = INT_MIN;
+	}
+
+	out_of_order = out_pic && (out_pic->poc < s->next_output_poc);
+
+	// If there is no b frame, the picture out of order is error
+	if (s->no_b_frame) {
+		if (out_of_order && out_pic) {
+			out_pic->frame->mpp_frame.flags |= FRAME_FLAG_ERROR;
+		}
+		out_of_order = 0;
+	}
+
+	// Skip POC reordering when dropping B-frames
+	if (s->drop_b_frame_en) {
+		out_of_order = 0;
+	}
+
+	// 6. Handle out-of-order frame
+	if (out_pic) {
+		handle_out_of_order_frame(s, out_pic, idx, out_of_order);
+	}
+
+	logi("cur poc: %d, out poc: %d, next poc: %d",
+		cur_pic->poc, out_pic->poc, s->next_output_poc);
+	// 7. Output frame if conditions are met
+	if (out_pic && !out_of_order) {
+		output_delayed_frame(s, out_pic, idx, out_of_order);
+	}
+
+	// 8. Print delayed picture list for debugging
+	print_delayed_pic_list(s);
 }
 
 void flush_all_delay_picture(struct h264_dec_ctx *s)

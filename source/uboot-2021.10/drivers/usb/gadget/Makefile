@@ -7,7 +7,8 @@ obj-$(CONFIG_USB_GADGET) += epautoconf.o config.o usbstring.o
 obj-$(CONFIG_USB_ETHER) += epautoconf.o config.o usbstring.o
 
 ifdef CONFIG_SPL_BUILD
-obj-$(CONFIG_SPL_USB_GADGET) += g_dnl.o
+obj-$(CONFIG_SPL_USB_GADGET) += epautoconf.o config.o usbstring.o
+obj-$(CONFIG_USB_GADGET_DOWNLOAD) += g_dnl.o
 obj-$(CONFIG_SPL_DFU) += f_dfu.o
 obj-$(CONFIG_SPL_USB_SDP_SUPPORT) += f_sdp.o
 endif
@@ -24,10 +25,8 @@ obj-$(CONFIG_USB_GADGET_FOTG210) += fotg210.o
 obj-$(CONFIG_USB_GADGET_MAX3420) += max3420_udc.o
 obj-$(CONFIG_CI_UDC)	+= ci_udc.o
 ifndef CONFIG_SPL_BUILD
-ifndef CONFIG_PTUPG_ARTINCHIP
 obj-$(CONFIG_USB_GADGET_DOWNLOAD) += g_dnl.o
 obj-$(CONFIG_USB_FUNCTION_AICUPGUSB_ARTINCHIP) += f_aicupgusb.o
-endif
 obj-$(CONFIG_USB_FUNCTION_THOR) += f_thor.o
 obj-$(CONFIG_DFU_OVER_USB) += f_dfu.o
 obj-$(CONFIG_USB_FUNCTION_MASS_STORAGE) += f_mass_storage.o

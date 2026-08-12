@@ -65,11 +65,17 @@ static int aicmac_get_soc_chipid(struct device *dev, unsigned char *chipid)
 	}
 
 	value = nvmem_cell_read(cell, &len);
+	nvmem_cell_put(cell);
+	if (IS_ERR(value))
+		return PTR_ERR(value);
+
 	if (len == 0) {
+		kfree(value);
 		dev_info(dev, "Efuse didn't burn calibration value\n");
 		return -1;
 	}
 	sprintf(chipid, "%llx", *((u64 *)value));
+	kfree(value);
 	return 0;
 }
 

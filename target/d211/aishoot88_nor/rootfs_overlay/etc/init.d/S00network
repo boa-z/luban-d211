@@ -1,0 +1,45 @@
+#! /bin/sh
+#
+# network	This script configure and launch the network service.
+#	It is called from the boot, halt and reboot scripts.
+#
+# Version:	0.1
+#
+
+#[ -c /dev/urandom ] || exit 0
+#. /etc/default/rcS
+
+start() {
+	printf "Starting network: "
+	#wpa_supplicant -iwlan0 -Dnl80211 -c /etc/wifi_net.conf -B
+	cp /etc/p2p_supplicant_gc.conf /tmp/p2p_supplicant_gc.conf
+	wpa_supplicant -iwlan1 -Dnl80211 -c /tmp/p2p_supplicant_gc.conf -B
+	#apple_p2p_config -ip2p0 -D
+	#/usr/bin/cast_demo &
+	#udhcpc -iwlan0
+	echo "OK"
+}
+
+stop() {
+	printf "Stopping network: "
+	killall -9 wpa_supplicant udhcpc
+	echo "OK"
+}
+
+case "$1" in
+  start)
+	start
+	;;
+  stop)
+	stop
+	;;
+  restart|reload)
+	stop
+	start
+	;;
+  *)
+	echo "Usage: $0 {start|stop|restart}"
+	exit 1
+esac
+
+exit $?

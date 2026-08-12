@@ -514,8 +514,6 @@ struct artinchip_mmc_board {
 #define __raw_readq(__reg) (*(volatile u64 __force *)(__reg))
 #endif
 
-extern int artinchip_mmc_probe(struct artinchip_mmc *host);
-extern void artinchip_mmc_remove(struct artinchip_mmc *host);
 #ifdef CONFIG_PM
 extern int artinchip_mmc_runtime_suspend(struct device *device);
 extern int artinchip_mmc_runtime_resume(struct device *device);

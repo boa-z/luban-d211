@@ -1,0 +1,7 @@
+{
+    "video_width": 1280,
+    "video_height": 720,
+    "loop_duration": 60,
+    "sensitivity": 1,
+    "audio_enabled": true
+}

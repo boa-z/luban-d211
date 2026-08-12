@@ -1,16 +1,16 @@
 /*
- * Copyright (C) 2020-2023 ArtInChip Technology Co. Ltd
+ * Copyright (C) 2020-2026 ArtInChip Technology Co. Ltd
  *
  * SPDX-License-Identifier: Apache-2.0
  *
- *  author: <qi.xu@artinchip.com>
- *  Desc: put bits
+ * Author: <qi.xu@artinchip.com>
+ * Desc: put bits
  */
 
 #ifndef __PUT_BITS_H_
 #define __PUT_BITS_H_
-
-#include <unistd.h>
+#include <stdlib.h>
+#include <inttypes.h>
 #include "mpp_log.h"
 
 static const int BUF_BITS = 8 * sizeof(uint32_t);
@@ -50,8 +50,8 @@ static inline int put_bits_left(struct put_bit_ctx* s)
 
 #define AV_BSWAP16C(x) (((x) << 8 & 0xff00)  | ((x) >> 8 & 0x00ff))
 #define AV_BSWAP32C(x) (AV_BSWAP16C(x) << 16 | AV_BSWAP16C((x) >> 16))
-#define AV_WLBUF(p, v) (*(( uint64_t*)(p)) = (v))
-#define AV_WBBUF(p, v) (*(( uint64_t*)(p)) = (v))
+#define AV_WLBUF(p, v) (*((uint64_t *)(p)) = (v))
+#define AV_WBBUF(p, v) (*((uint64_t *)(p)) = (v))
 static inline void put_bits_no_assert(struct put_bit_ctx* s, int n, uint32_t value)
 {
 	uint32_t bit_buf;
@@ -87,11 +87,10 @@ static inline void put_bits_no_assert(struct put_bit_ctx* s, int n, uint32_t val
 */
 static inline void put_bits(struct put_bit_ctx *s, int n, uint32_t value)
 {
-	if(n <= 31 && value < (1UL << n))
+	if(n <= 31 && value < (1UL << n)) {
 		put_bits_no_assert(s, n, value);
-	else
-	{
-		loge("put bits fail, n: %d, val: 0x%x", n, value);
+	} else {
+		loge("put bits fail, n: %d, val: 0x%"PRIx32"", n, value);
 	}
 }
 
@@ -102,8 +101,7 @@ static unsigned av_mod_uintp2_c(unsigned a, unsigned p)
 
 static inline void put_sbits(struct put_bit_ctx *pb, int n, int32_t value)
 {
-	if (n < 0 || n>31)
-	{
+	if (n < 0 || n > 31) {
 		loge("put_sbits error");
 		return;
 	}

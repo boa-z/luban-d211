@@ -1,0 +1,37 @@
+#!/bin/sh
+
+show_sdk_ver()
+{
+	VER_FILE=/etc/os-release
+	SDK_NAME=$(cat $VER_FILE | grep "ID=" | awk -F "=" '{print $2}')
+	SDK_VER=$(cat $VER_FILE | grep "VERSION=V" | awk -F "=" '{print $2}')
+	printf "SDK info: %s %s\n" "$SDK_NAME" "$SDK_VER"
+}
+
+show_kernel_ver()
+{
+	printf "Kernel  : %s\n" "$(uname -sr)"
+	printf "Built on: %s\n" "$(uname -v)"
+}
+
+show_soc_name()
+{
+	NAME_FILE=/proc/device-tree/compatible
+	if [ -f $NAME_FILE ]; then
+		SOC_NAME=$(cat $NAME_FILE | awk -F ',' '{print $2}')
+		printf "SoC     : %s\n" $SOC_NAME
+	fi
+}
+
+show_board_name()
+{
+	NAME_FILE=/proc/device-tree/model
+	if [ -f $NAME_FILE ]; then
+		printf "Board   : %s\n" "$(cat $NAME_FILE)"
+	fi
+}
+
+show_sdk_ver
+show_kernel_ver
+show_soc_name
+show_board_name

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2025 ArtInChip Technology Co. Ltd
+ * Copyright (C) 2020-2026 ArtInChip Technology Co. Ltd
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -32,6 +32,7 @@ enum aic_player_event {
 
 enum aic_player_command {
     AIC_PLAYER_CMD_SET_VIDEO_RENDER_KEEP_LAST_FRAME,
+    AIC_PLAYER_CMD_SET_DEBUG_INFO,
 };
 // now do not support  setting  nWidth and  nHeight,just only support setting pFilePath
 struct aic_capture_info {
@@ -58,8 +59,9 @@ struct av_media_info {
 	u8   has_video;
 	u8   has_audio;
 	u8   seek_able;
+	u8   audio_track_count;
 	struct aic_video_stream video_stream;
-	struct aic_audio_stream audio_stream;
+	struct aic_audio_stream audio_stream[8];
 };
 
 typedef s32 (*event_handler)(void* app_data,s32 event,s32 data1,s32 data2);
@@ -75,6 +77,8 @@ s32 aic_player_prepare_async(struct aic_player *player);
 s32 aic_player_prepare_sync(struct aic_player *player);
 
 s32 aic_player_start(struct aic_player *player);
+
+s32 aic_player_switch_track(struct aic_player *player, int track_id);
 
 s32 aic_player_play(struct aic_player *player);
 

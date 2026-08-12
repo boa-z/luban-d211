@@ -23,6 +23,7 @@ from collections import OrderedDict
 from Cryptodome.PublicKey import RSA
 from Cryptodome.Hash import MD5
 from Cryptodome.Hash import SHA256
+from Cryptodome.Hash import HMAC
 from Cryptodome.Cipher import AES
 from Cryptodome.Signature import PKCS1_v1_5
 import binascii
@@ -39,6 +40,23 @@ META_ALIGNED_SIZE = 512
 BURNER = False
 VERBOSE = False
 SIGN = False
+COLOR_BEGIN = "\033["
+COLOR_RED = COLOR_BEGIN + "41;37m"
+COLOR_YELLOW = COLOR_BEGIN + "43;30m"
+COLOR_WHITE = COLOR_BEGIN + "47;30m"
+COLOR_END = "\033[0m"
+
+
+def pr_err(string):
+    print(COLOR_RED + '*** ' + string + COLOR_END)
+
+
+def pr_info(string):
+    print(COLOR_WHITE + '>>> ' + string + COLOR_END)
+
+
+def pr_warn(string):
+    print(COLOR_YELLOW + '!!! ' + string + COLOR_END)
 
 
 def parse_image_cfg(cfgfile):
@@ -65,6 +83,17 @@ def parse_image_cfg(cfgfile):
     return cfg
 
 
+def dump_hex(msg, data, dlen):
+    print("{}:".format(msg))
+    for i in range(len(data)):
+        if i > dlen:
+            break
+        if i > 0 and i % 16 == 0:
+            print("")
+        print("{} ".format(hex(data[i])), end="")
+    print("")
+
+
 def get_file_path(fpath, dirpath):
     if dirpath is not None and os.path.exists(dirpath + fpath):
         return dirpath + fpath
@@ -80,6 +109,13 @@ def aic_boot_get_resource_file_size(cfg, keydir, datadir):
     files = {}
     filepath = ""
     if "resource" in cfg:
+        sign_len = 0
+        if "signature" in cfg and cfg["signature"]["algo"] == "rsa,2048":
+            sign_len = 256
+        if "signature" in cfg and cfg["signature"]["algo"] == "hmac,sha256":
+            sign_len = 32
+        if "signature" in cfg and cfg["signature"]["algo"] == "sm2":
+            sign_len = 64
         if "private" in cfg["resource"]:
             filepath = get_file_path(cfg["resource"]["private"], keydir)
             if filepath is None:
@@ -90,6 +126,23 @@ def aic_boot_get_resource_file_size(cfg, keydir, datadir):
             statinfo = os.stat(filepath)
             files["resource/private"] = statinfo.st_size
             files["round(resource/private)"] = round_up(statinfo.st_size, 32)
+        if "private2" in cfg["resource"]:
+            align_len = 4
+            if sign_len:
+                align_len = sign_len
+            if os.path.exists(keydir + cfg["resource"]["private2"]):
+                statinfo = os.stat(keydir + cfg["resource"]["private2"])
+                files["resource/private2"] = statinfo.st_size
+                files["round(resource/private2)"] = round_up(statinfo.st_size, align_len)
+                files["round(resource/private2/sign_len)"] = sign_len
+            elif os.path.exists(datadir + cfg["resource"]["private2"]):
+                statinfo = os.stat(datadir + cfg["resource"]["private2"])
+                files["resource/private2"] = statinfo.st_size
+                files["round(resource/private2)"] = round_up(statinfo.st_size, align_len)
+                files["round(resource/private2/sign_len)"] = sign_len
+            else:
+                print("Error, {} is not found.".format(cfg["resource"]["private2"]))
+                sys.exit(1)
 
         if "pubkey" in cfg["resource"]:
             filepath = get_file_path(cfg["resource"]["pubkey"], keydir)
@@ -109,6 +162,23 @@ def aic_boot_get_resource_file_size(cfg, keydir, datadir):
             statinfo = os.stat(filepath)
             files["resource/pbp"] = statinfo.st_size
             files["round(resource/pbp)"] = round_up(statinfo.st_size, 32)
+        if "pbp2" in cfg["resource"]:
+            align_len = 16
+            if sign_len:
+                align_len = sign_len
+            if os.path.exists(keydir + cfg["resource"]["pbp2"]):
+                statinfo = os.stat(keydir + cfg["resource"]["pbp2"])
+                files["resource/pbp2"] = statinfo.st_size
+                files["round(resource/pbp2)"] = round_up(statinfo.st_size, align_len)
+                files["round(resource/pbp2/sign_len)"] = sign_len
+            elif os.path.exists(datadir + cfg["resource"]["pbp2"]):
+                statinfo = os.stat(datadir + cfg["resource"]["pbp2"])
+                files["resource/pbp2"] = statinfo.st_size
+                files["round(resource/pbp2)"] = round_up(statinfo.st_size, align_len)
+                files["round(resource/pbp2/sign_len)"] = sign_len
+            else:
+                print("Error, {} is not found.".format(cfg["resource"]["pbp2"]))
+                sys.exit(1)
     if "encryption" in cfg:
         if "iv" in cfg["encryption"]:
             filepath = get_file_path(cfg["encryption"]["iv"], keydir)
@@ -136,7 +206,7 @@ def aic_boot_get_resource_file_size(cfg, keydir, datadir):
     return files
 
 
-def aic_boot_calc_image_length(filesizes, cfg):
+def aic_boot_calc_image_length(filesizes, sign_len):
     """ Calculate the boot image's total length
     """
 
@@ -145,24 +215,20 @@ def aic_boot_calc_image_length(filesizes, cfg):
         total_siz = total_siz + filesizes["round(resource/pubkey)"]
     if "encryption/iv" in filesizes:
         total_siz = total_siz + filesizes["round(encryption/iv)"]
-    if "resource/private" in filesizes:
+    if "resource/private2" in filesizes:
+        total_siz = total_siz + filesizes["round(resource/private2)"]
+    elif "resource/private" in filesizes:
         total_siz = total_siz + filesizes["round(resource/private)"]
-    if "resource/pbp" in filesizes:
+    if "resource/pbp2" in filesizes:
+        total_siz = total_siz + filesizes["round(resource/pbp2)"]
+    elif "resource/pbp" in filesizes:
         total_siz = total_siz + filesizes["round(resource/pbp)"]
     total_siz = round_up(total_siz, 256)
-    if "signature" in cfg:
-        # Add the length of signature
-        if cfg["signature"]["algo"] == "sm2":
-            total_siz = total_siz + 64
-        else:
-            total_siz = total_siz + 256
-    else:
-        # Add the length of md5
-        total_siz = total_siz + 16
+    total_siz = total_siz + sign_len
     return total_siz
 
 
-def aic_boot_calc_image_length_for_ext(filesizes, sign):
+def aic_boot_calc_image_length_for_ext(filesizes, sign_len):
     """ Calculate the boot image's total length
     """
 
@@ -171,15 +237,12 @@ def aic_boot_calc_image_length_for_ext(filesizes, sign):
         total_siz = total_siz + filesizes["round(resource/pubkey)"]
     if "encryption/iv" in filesizes:
         total_siz = total_siz + filesizes["round(encryption/iv)"]
-    if "resource/private" in filesizes:
+    if "resource/private2" in filesizes:
+        total_siz = total_siz + filesizes["round(resource/private2)"]
+    elif "resource/private" in filesizes:
         total_siz = total_siz + filesizes["round(resource/private)"]
     total_siz = round_up(total_siz, 256)
-    if sign:
-        # Add the length of signature
-        total_siz = total_siz + 256
-    else:
-        # Add the length of md5
-        total_siz = total_siz + 16
+    total_siz = total_siz + sign_len
     return total_siz
 
 
@@ -194,6 +257,58 @@ def check_loader_run_in_dram(cfg):
         if cfg["loader"]["run in dram"].upper() == "FALSE":
             return False
     return True
+
+
+def aic_boot_get_encryption_key(cfg, ssk_derived=False):
+    fpath = get_file_path(cfg["encryption"]["key"], cfg["keydir"])
+    if fpath is None:
+        fpath = get_file_path(cfg["encryption"]["key"], cfg["datadir"])
+    if fpath is None:
+        print('Please provide key file')
+        sys.exit(1)
+    keydata = None
+    ivdata = None
+    if ssk_derived:
+        # Use SSK(Symmetric Secure Key) derived AES key to encrypt it
+        #
+        #                SSK(128bit)
+        #                 | (key)
+        #                 v
+        #  KM(128bit) -> AES -> HSK(128bit, in Secure SRAM)
+        #                        | (key)
+        #                        v
+        #      SPL plaintext -> AES -> SPL ciphertext
+
+        # Only encrypt loader content, if loader not exist, don't do it
+        try:
+            with open(fpath, "rb") as f:
+                key_material = b"0123456789abcdef"
+                symmetric_secure_key = f.read(16)
+                cipher = AES.new(symmetric_secure_key, AES.MODE_ECB)
+                hardware_secure_key = cipher.encrypt(key_material)
+                keydata = hardware_secure_key
+        except IOError:
+            print('Failed to open symmetric secure key file')
+            sys.exit(1)
+    else:
+        try:
+            with open(fpath, "rb") as f:
+                keydata = f.read(16)
+        except IOError:
+            print('Failed to open aes key file')
+            sys.exit(1)
+
+    fpath = get_file_path(cfg["encryption"]["iv"], cfg["keydir"])
+    if fpath is None:
+        fpath = get_file_path(cfg["encryption"]["iv"], cfg["datadir"])
+    try:
+        with open(fpath, "rb") as f:
+            ivdata = f.read(16)
+    except IOError:
+        print('Failed to open iv file')
+        sys.exit(1)
+
+    return keydata, ivdata
 
 
 def aic_boot_get_loader_bytes(cfg, filesizes):
@@ -240,7 +355,12 @@ def aic_boot_get_loader_bytes(cfg, filesizes):
     #                        v
     #      SPL plaintext -> AES -> SPL ciphertext
     if "encryption" in cfg and loader_size > 0:
-        if "encryption" in cfg and cfg["encryption"]["algo"] == "sm4-ecb":
+        if "encryption" in cfg and cfg["encryption"]["algo"] == "aes-128-ecb":
+            keydata, ivdata = aic_boot_get_encryption_key(cfg, True)
+            cipher = AES.new(keydata, AES.MODE_CBC, ivdata)
+            enc_bytes = cipher.encrypt(rawbytes)
+            return enc_bytes
+        elif "encryption" in cfg and cfg["encryption"]["algo"] == "sm4-ecb":
             # Only encrypt loader content, if loader not exist, don't do it
             try:
                 if os.path.exists(cfg["keydir"] + cfg["encryption"]["key"]):
@@ -293,6 +413,8 @@ def aic_boot_get_loader_bytes(cfg, filesizes):
 
 def aic_boot_get_loader_for_ext(cfg, filesizes):
     """ Read the loader's binaray data, and perform encryption if it is needed.
+
+        Legacy code, will be removed in later's version
     """
 
     loader_size = 0
@@ -385,7 +507,19 @@ def aic_boot_get_loader_bytes_v2(cfg, filesizes):
     filesizes["resource_start"] = header_size + loader_size
 
     if "encryption" in cfg and loader_size > 0:
-        if "encryption" in cfg and cfg["encryption"]["algo"] == "sm4-ecb":
+        derive = aic_boot_use_ssk_derived_key(cfg)
+        if "encryption" in cfg and cfg["encryption"]["algo"] == "aes-128-cbc":
+            keydata, ivdata = aic_boot_get_encryption_key(cfg, derive)
+            cipher = AES.new(keydata, AES.MODE_CBC, ivdata)
+            enc_bytes = cipher.encrypt(rawbytes)
+            return enc_bytes
+        elif "encryption" in cfg and cfg["encryption"]["algo"] == "sm4-cbc":
+            keydata, ivdata = aic_boot_get_encryption_key(cfg, derive)
+            cipher = SM4.CryptSM4()
+            cipher.set_key(keydata, SM4.SM4_ENCRYPT)
+            enc_bytes = cipher.crypt_cbc(ivdata, rawbytes)
+            return enc_bytes[0:len(rawbytes)]
+        elif "encryption" in cfg and cfg["encryption"]["algo"] == "sm4-ecb":
             # Only encrypt loader content, if loader not exist, don't do it
             try:
                 if os.path.exists(cfg["keydir"] + cfg["encryption"]["key"]):
@@ -448,11 +582,121 @@ def aic_boot_get_loader_bytes_v2(cfg, filesizes):
         return rawbytes
 
 
+def aic_boot_private2_data_sign(cfg, privdata):
+    if "signature" in cfg and cfg["signature"]["algo"] == "hmac,sha256":
+        newdata = privdata[0:4] + bytearray(4)
+        newdata = newdata + privdata[8:12] + int_to_uint32_bytes(len(privdata)) + privdata[16:]
+        signature = aic_boot_gen_hmac_signature_bytes(cfg, newdata)
+        signed_bytes = newdata + signature
+    elif "signature" in cfg and cfg["signature"]["algo"] == "rsa,2048":
+        newdata = privdata[0:4] + bytearray(4)
+        newdata = newdata + privdata[8:12] + int_to_uint32_bytes(len(privdata)) + privdata[16:]
+        signature = aic_boot_gen_rsa_signature_bytes(cfg, newdata)
+        signed_bytes = newdata + signature
+    elif "signature" in cfg and cfg["signature"]["algo"] == "sm2":
+        newdata = privdata[0:4] + bytearray(4)
+        newdata = newdata + privdata[8:12] + int_to_uint32_bytes(len(privdata)) + privdata[16:]
+        signature = aic_boot_gen_sm2_signature_bytes(cfg, newdata)
+        signed_bytes = newdata + signature
+    else:
+        signed_bytes = privdata
+    return signed_bytes
+
+
+def aic_boot_pbp2_enc_and_sign(cfg, pbp_data):
+    """
+        PBP format:
+        struct pbp_header {
+            char magic[4]; // "PBP2"
+            u32  checksum; // Secure boot it can be set to 0
+            u32  head_ver;
+            u32  sign_offset; // Offset from PBP header start to the pbp signature
+            char pad[16];
+            .... PBP data; // should align to 256 byte
+            u8 sign[256];
+    """
+    out_bytes = pbp_data
+    prog_data = pbp_data[32:]
+    if "encryption" in cfg and cfg["encryption"]["algo"] == "aes-128-cbc":
+        keydata, ivdata = aic_boot_get_encryption_key(cfg, False)
+        cipher = AES.new(keydata, AES.MODE_CBC, ivdata)
+        enc_bytes = cipher.encrypt(prog_data)
+        prog_data = enc_bytes
+        # Update checksum first for no signature case
+        newdata = pbp_data[0:4] + bytearray(4) + pbp_data[8:32] + enc_bytes
+        cksum = aic_calc_checksum(newdata, len(newdata))
+        out_bytes = pbp_data[0:4] + int_to_uint32_bytes(cksum) + newdata[8:]
+    if "encryption" in cfg and cfg["encryption"]["algo"] == "sm4-ecb":
+        try:
+            if os.path.exists(cfg["keydir"] + cfg["encryption"]["key"]):
+                fpath = cfg["keydir"] + cfg["encryption"]["key"]
+            else:
+                fpath = cfg["datadir"] + cfg["encryption"]["key"]
+            with open(fpath, "rb") as f:
+                keydata = f.read(16)
+        except IOError:
+            print('Failed to open aes key file')
+            sys.exit(1)
+        cipher = SM4.CryptSM4()
+        cipher.set_key(keydata, SM4.SM4_ENCRYPT)
+        enc_bytes = cipher.crypt_ecb(prog_data)
+        prog_data = enc_bytes[0:len(prog_data)]
+        # Update checksum first for no signature case
+        newdata = pbp_data[0:4] + bytearray(4) + pbp_data[8:32] + enc_bytes
+        cksum = aic_calc_checksum(newdata, len(newdata))
+        out_bytes = pbp_data[0:4] + int_to_uint32_bytes(cksum) + newdata[8:]
+    if "encryption" in cfg and cfg["encryption"]["algo"] == "sm4-cbc":
+        keydata, ivdata = aic_boot_get_encryption_key(cfg, False)
+        cipher = SM4.CryptSM4()
+        cipher.set_key(keydata, SM4.SM4_ENCRYPT)
+        enc_bytes = cipher.crypt_cbc(ivdata, prog_data)
+        prog_data = enc_bytes[0:len(prog_data)]
+        # Update checksum first for no signature case
+        newdata = pbp_data[0:4] + bytearray(4) + pbp_data[8:32] + enc_bytes
+        cksum = aic_calc_checksum(newdata, len(newdata))
+        out_bytes = pbp_data[0:4] + int_to_uint32_bytes(cksum) + newdata[8:]
+    if "signature" in cfg and cfg["signature"]["algo"] == "hmac,sha256":
+        newdata = pbp_data[0:4] + bytearray(4)
+        newdata = newdata + pbp_data[8:12] + int_to_uint32_bytes(len(pbp_data)) + pbp_data[16:32]
+        newdata = newdata + prog_data
+        signature = aic_boot_gen_hmac_signature_bytes(cfg, newdata)
+        signed_bytes = newdata + signature
+        out_bytes = signed_bytes
+    elif "signature" in cfg and cfg["signature"]["algo"] == "rsa,2048":
+        newdata = pbp_data[0:4] + bytearray(4)
+        newdata = newdata + pbp_data[8:12] + int_to_uint32_bytes(len(pbp_data)) + pbp_data[16:32]
+        newdata = newdata + prog_data
+        signature = aic_boot_gen_rsa_signature_bytes(cfg, newdata)
+        signed_bytes = newdata + signature
+        out_bytes = signed_bytes
+    elif "signature" in cfg and cfg["signature"]["algo"] == "sm2":
+        newdata = pbp_data[0:4] + bytearray(4)
+        newdata = newdata + pbp_data[8:12] + int_to_uint32_bytes(len(pbp_data)) + pbp_data[16:32]
+        newdata = newdata + prog_data
+        signature = aic_boot_gen_sm2_signature_bytes(cfg, newdata)
+        signed_bytes = newdata + signature
+        out_bytes = signed_bytes
+    return out_bytes
+
+
 def aic_boot_get_resource_bytes(cfg, filesizes):
     """ Pack all resource data into boot image's resource section
     """
     resbytes = bytearray(0)
-    if "resource/pbp" in filesizes:
+    if "resource/pbp2" in filesizes:
+        pbp_size = filesizes["round(resource/pbp2)"]
+        try:
+            fpath = get_file_path(cfg["resource"]["pbp2"], cfg["datadir"])
+            with open(fpath, "rb") as f:
+                pbp_data = f.read(pbp_size)
+        except IOError:
+            print('Failed to open pbp file')
+            sys.exit(1)
+        paddata = pbp_data + bytearray(pbp_size - len(pbp_data))
+        pbp_data = aic_boot_pbp2_enc_and_sign(cfg, paddata)
+        filesizes["round(resource/pbp2)"] = len(pbp_data)
+        resbytes = resbytes + pbp_data
+    elif "resource/pbp" in filesizes:
         pbp_size = filesizes["round(resource/pbp)"]
         try:
             fpath = get_file_path(cfg["resource"]["pbp"], cfg["datadir"])
@@ -462,7 +706,21 @@ def aic_boot_get_resource_bytes(cfg, filesizes):
             print('Failed to open pbp file')
             sys.exit(1)
         resbytes = resbytes + pbp_data + bytearray(pbp_size - len(pbp_data))
-    if "resource/private" in filesizes:
+    if "resource/private2" in filesizes:
+        priv_size = filesizes["round(resource/private2)"]
+        try:
+            fpath = get_file_path(cfg["resource"]["private2"], cfg["datadir"])
+            with open(fpath, "rb") as f:
+                privdata = f.read(priv_size)
+        except IOError:
+            print('Failed to open private file')
+            sys.exit(1)
+
+        paddata = privdata + bytearray(priv_size - len(privdata))
+        privdata = aic_boot_private2_data_sign(cfg, paddata)
+        filesizes["round(resource/private2)"] = len(privdata)
+        resbytes = resbytes + privdata
+    elif "resource/private" in filesizes:
         priv_size = filesizes["round(resource/private)"]
         try:
             fpath = get_file_path(cfg["resource"]["private"], cfg["datadir"])
@@ -509,6 +767,20 @@ def aic_boot_get_resource_for_ext(cfg, filesizes):
     """
 
     resbytes = bytearray(0)
+    if "resource/private2" in filesizes:
+        priv_size = filesizes["round(resource/private2)"]
+        try:
+            fpath = get_file_path(cfg["resource"]["private2"], cfg["datadir"])
+            with open(fpath, "rb") as f:
+                privdata = f.read(priv_size)
+        except IOError:
+            print('Failed to open private file')
+            sys.exit(1)
+
+        paddata = privdata + bytearray(priv_size - len(privdata))
+        privdata = aic_boot_private2_data_sign(cfg, paddata)
+        filesizes["round(resource/private2)"] = len(privdata)
+        resbytes = resbytes + privdata
     if "resource/private" in filesizes:
         priv_size = filesizes["round(resource/private)"]
         try:
@@ -601,7 +873,14 @@ def aic_boot_gen_header_bytes(cfg, filesizes):
     if "head_ver" in cfg:
         header_ver = int(cfg["head_ver"], 16)
 
-    img_len = aic_boot_calc_image_length(filesizes, cfg)
+    if "signature" in cfg and cfg["signature"]["algo"] == "rsa,2048":
+        img_len = aic_boot_calc_image_length(filesizes, 256)
+    elif "signature" in cfg and cfg["signature"]["algo"] == "sm2":
+        img_len = aic_boot_calc_image_length(filesizes, 64)
+    elif "signature" in cfg and cfg["signature"]["algo"] == "hmac,sha256":
+        img_len = aic_boot_calc_image_length(filesizes, 32)
+    else:
+        img_len = aic_boot_calc_image_length(filesizes, 16)
     fw_ver = 0
     if "anti-rollback counter" in cfg:
         fw_ver = cfg["anti-rollback counter"]
@@ -630,13 +909,21 @@ def aic_boot_gen_header_bytes(cfg, filesizes):
     next_res_offset = filesizes["resource_start"]
     pbp_data_offset = 0
     pbp_data_length = 0
-    if "resource" in cfg and "pbp" in cfg["resource"]:
+    if "resource" in cfg and "pbp2" in cfg["resource"]:
+        pbp_data_offset = next_res_offset
+        pbp_data_length = filesizes["round(resource/pbp2)"]
+        next_res_offset = pbp_data_offset + filesizes["round(resource/pbp2)"]
+    elif "resource" in cfg and "pbp" in cfg["resource"]:
         pbp_data_offset = next_res_offset
         pbp_data_length = filesizes["resource/pbp"]
         next_res_offset = pbp_data_offset + filesizes["round(resource/pbp)"]
     priv_data_offset = 0
     priv_data_length = 0
-    if "resource" in cfg and "private" in cfg["resource"]:
+    if "resource" in cfg and "private2" in cfg["resource"]:
+        priv_data_offset = next_res_offset
+        priv_data_length = filesizes["round(resource/private2)"]
+        next_res_offset = priv_data_offset + filesizes["round(resource/private2)"]
+    elif "resource" in cfg and "private" in cfg["resource"]:
         priv_data_offset = next_res_offset
         priv_data_length = filesizes["resource/private"]
         next_res_offset = priv_data_offset + filesizes["round(resource/private)"]
@@ -647,6 +934,10 @@ def aic_boot_gen_header_bytes(cfg, filesizes):
     elif "signature" in cfg and cfg["signature"]["algo"] == "sm2":
         sign_algo = 2
         sign_length = 64
+        sign_offset = img_len - sign_length
+    elif "signature" in cfg and cfg["signature"]["algo"] == "hmac,sha256":
+        sign_algo = 3
+        sign_length = 32
         sign_offset = img_len - sign_length
     else:
         # Append md5 result to the end
@@ -665,6 +956,11 @@ def aic_boot_gen_header_bytes(cfg, filesizes):
     iv_data_length = 0
     if "encryption" in cfg and cfg["encryption"]["algo"] == "aes-128-cbc" and loader_length != 0:
         enc_algo = 1
+        iv_data_offset = next_res_offset
+        iv_data_length = 16
+        next_res_offset = iv_data_offset + filesizes["round(encryption/iv)"]
+    elif "encryption" in cfg and cfg["encryption"]["algo"] == "sm4-cbc" and loader_length != 0:
+        enc_algo = 3
         iv_data_offset = next_res_offset
         iv_data_length = 16
         next_res_offset = iv_data_offset + filesizes["round(encryption/iv)"]
@@ -708,7 +1004,14 @@ def aic_boot_gen_header_for_ext(cfg, filesizes):
     if "head_ver" in cfg:
         header_ver = int(cfg["head_ver"], 16)
 
-    img_len = aic_boot_calc_image_length_for_ext(filesizes, "signature" in cfg)
+    if "signature" in cfg and cfg["signature"]["algo"] == "rsa,2048":
+        img_len = aic_boot_calc_image_length_for_ext(filesizes, 256)
+    elif "signature" in cfg and cfg["signature"]["algo"] == "sm2":
+        img_len = aic_boot_calc_image_length_for_ext(filesizes, 64)
+    elif "signature" in cfg and cfg["signature"]["algo"] == "hmac,sha256":
+        img_len = aic_boot_calc_image_length_for_ext(filesizes, 32)
+    else:
+        img_len = aic_boot_calc_image_length_for_ext(filesizes, 16)
     fw_ver = 0
 
     loader_length = 0
@@ -744,6 +1047,10 @@ def aic_boot_gen_header_for_ext(cfg, filesizes):
         sign_algo = 1
         sign_length = 256
         sign_offset = img_len - sign_length
+    elif "signature" in cfg and cfg["signature"]["algo"] == "hmac,sha256":
+        sign_algo = 3
+        sign_length = 32
+        sign_offset = img_len - sign_length
     else:
         # Append md5 result to the end
         sign_algo = 0
@@ -761,6 +1068,11 @@ def aic_boot_gen_header_for_ext(cfg, filesizes):
     iv_data_length = 0
     if "encryption" in cfg and cfg["encryption"]["algo"] == "aes-128-cbc":
         enc_algo = 1
+        iv_data_offset = next_res_offset
+        iv_data_length = 16
+        next_res_offset = iv_data_offset + filesizes["round(encryption/iv)"]
+    if "encryption" in cfg and cfg["encryption"]["algo"] == "sm4-cbc":
+        enc_algo = 3
         iv_data_offset = next_res_offset
         iv_data_length = 16
         next_res_offset = iv_data_offset + filesizes["round(encryption/iv)"]
@@ -802,7 +1114,23 @@ def aic_boot_gen_header_bytes_v2(cfg, filesizes):
     if "head_ver" in cfg:
         header_ver = int(cfg["head_ver"], 16)
 
-    img_len = aic_boot_calc_image_length(filesizes, cfg)
+    # Default is MD5
+    cksum_aux_len = 0
+    cksum_algo = "md5"
+    if "checksum-algo" in cfg:
+        cksum_algo = cfg["checksum-algo"].strip().lower()
+    if cksum_algo == "md5":
+        cksum_aux_len = 16
+    if cksum_algo == "sm3":
+        cksum_aux_len = 32
+    if "signature" in cfg and cfg["signature"]["algo"] == "rsa,2048":
+        img_len = aic_boot_calc_image_length(filesizes, 256)
+    elif "signature" in cfg and cfg["signature"]["algo"] == "sm2":
+        img_len = aic_boot_calc_image_length(filesizes, 64)
+    elif "signature" in cfg and cfg["signature"]["algo"] == "hmac,sha256":
+        img_len = aic_boot_calc_image_length(filesizes, 32)
+    else:
+        img_len = aic_boot_calc_image_length(filesizes, cksum_aux_len)
     fw_ver = 0
     if "anti-rollback counter" in cfg:
         fw_ver = cfg["anti-rollback counter"]
@@ -837,13 +1165,21 @@ def aic_boot_gen_header_bytes_v2(cfg, filesizes):
     next_res_offset = filesizes["resource_start"]
     pbp_data_offset = 0
     pbp_data_length = 0
-    if "resource" in cfg and "pbp" in cfg["resource"]:
+    if "resource" in cfg and "pbp2" in cfg["resource"]:
+        pbp_data_offset = next_res_offset
+        pbp_data_length = filesizes["round(resource/pbp2)"]
+        next_res_offset = pbp_data_offset + filesizes["round(resource/pbp2)"]
+    elif "resource" in cfg and "pbp" in cfg["resource"]:
         pbp_data_offset = next_res_offset
         pbp_data_length = filesizes["resource/pbp"]
         next_res_offset = pbp_data_offset + filesizes["round(resource/pbp)"]
     priv_data_offset = 0
     priv_data_length = 0
-    if "resource" in cfg and "private" in cfg["resource"]:
+    if "resource" in cfg and "private2" in cfg["resource"]:
+        priv_data_offset = next_res_offset
+        priv_data_length = filesizes["round(resource/private2)"]
+        next_res_offset = priv_data_offset + filesizes["round(resource/private2)"]
+    elif "resource" in cfg and "private" in cfg["resource"]:
         priv_data_offset = next_res_offset
         priv_data_length = filesizes["resource/private"]
         next_res_offset = priv_data_offset + filesizes["round(resource/private)"]
@@ -855,10 +1191,14 @@ def aic_boot_gen_header_bytes_v2(cfg, filesizes):
         sign_algo = 2
         sign_length = 64
         sign_offset = img_len - sign_length
+    elif "signature" in cfg and cfg["signature"]["algo"] == "hmac,sha256":
+        sign_algo = 3
+        sign_length = 32
+        sign_offset = img_len - sign_length
     else:
-        # Append md5 result to the end
+        # Append other checksum algo result to the end
         sign_algo = 0
-        sign_length = 16
+        sign_length = cksum_aux_len
         sign_offset = img_len - sign_length
 
     if "resource" in cfg and "pubkey" in cfg["resource"]:
@@ -870,8 +1210,13 @@ def aic_boot_gen_header_bytes_v2(cfg, filesizes):
     enc_algo = 0
     iv_data_offset = 0
     iv_data_length = 0
-    if "encryption" in cfg and cfg["encryption"]["algo"] == "aes-128-cbc" and loader_length != 0:
+    if "encryption" in cfg and cfg["encryption"]["algo"] == "aes-128-cbc":
         enc_algo = 1
+        iv_data_offset = next_res_offset
+        iv_data_length = 16
+        next_res_offset = iv_data_offset + filesizes["round(encryption/iv)"]
+    elif "encryption" in cfg and cfg["encryption"]["algo"] == "sm4-cbc":
+        enc_algo = 3
         iv_data_offset = next_res_offset
         iv_data_length = 16
         next_res_offset = iv_data_offset + filesizes["round(encryption/iv)"]
@@ -903,7 +1248,7 @@ def aic_boot_gen_header_bytes_v2(cfg, filesizes):
     return header_bytes
 
 
-def aic_boot_gen_signature_bytes(cfg, bootimg):
+def aic_boot_gen_rsa_signature_bytes(cfg, bootimg):
     """ Generate RSASSA-PKCS1-v1.5 Signature with SHA-256
     """
     if "privkey" not in cfg["signature"]:
@@ -935,6 +1280,53 @@ def aic_boot_gen_signature_bytes(cfg, bootimg):
     return sign_bytes
 
 
+def aic_boot_gen_hmac_signature_bytes(cfg, bootimg):
+    """ Generate ArtInChip specified HMAC-SHA256 authentication code calculate flow for
+        firmware component:
+
+        1. Use privkey to perform AES-128-ECB encrypt first 64 bytes, the output will be used as
+           HMAC key
+        2. Use the calculated HMAC key to calculate firmware component's authentication code.
+    """
+    if "privkey" not in cfg["signature"]:
+        print("HMAC Private key is not exist.")
+        sys.exit(1)
+    try:
+        if os.path.exists(cfg["keydir"] + cfg["signature"]["privkey"]):
+            fpath = cfg["keydir"] + cfg["signature"]["privkey"]
+        else:
+            fpath = cfg["datadir"] + cfg["signature"]["privkey"]
+        with open(fpath, 'rb') as fkey:
+            privkey = fkey.read()
+    except IOError:
+        print("Failed to open file: " + cfg["signature"]["privkey"])
+        sys.exit(1)
+    # Check if it is private key
+    if len(privkey) != 16:
+        print("Should provide 16 bytes private key to sign")
+        sys.exit(1)
+    cipher = AES.new(privkey, AES.MODE_ECB)
+    keyseed = bootimg[0:64]
+    hmackey = cipher.encrypt(keyseed)
+    hmac = HMAC.new(hmackey, digestmod=SHA256)
+    hmac.update(bootimg)
+
+    sign_bytes = hmac.digest()
+    return sign_bytes
+
+
+def aic_boot_gen_signature_bytes(cfg, bootimg):
+    if "signature" in cfg and cfg["signature"]["algo"] == "rsa,2048":
+        return aic_boot_gen_rsa_signature_bytes(cfg, bootimg)
+    elif "signature" in cfg and cfg["signature"]["algo"] == "hmac,sha256":
+        return aic_boot_gen_hmac_signature_bytes(cfg, bootimg)
+    elif "signature" in cfg and cfg["signature"]["algo"] == "sm2":
+        return aic_boot_gen_sm2_signature_bytes(cfg, bootimg)
+    else:
+        print("Not support signature algorithm")
+        sys.exit(1)
+
+
 def aic_boot_gen_img_md5_bytes(cfg, bootimg):
     """ Calculate MD5 of image to make brom verify image faster
     """
@@ -946,9 +1338,11 @@ def aic_boot_gen_img_md5_bytes(cfg, bootimg):
 
 
 def aic_boot_check_params(cfg):
-    if "encryption" in cfg and (cfg["encryption"]["algo"] != "aes-128-cbc" and
-            cfg["encryption"]["algo"] != "sm4-ecb"):
-        print("Only support aes-128-cbc or sm4-ecb encryption")
+    if ("encryption" in cfg and
+        (cfg["encryption"]["algo"] != "aes-128-cbc" and
+         cfg["encryption"]["algo"] != "sm4-cbc" and
+         cfg["encryption"]["algo"] != "sm4-ecb")):
+        print("Only support aes-128-cbc/sm4-cbc/sm4-ecb encryption")
         return False
     if "signature" in cfg and (cfg["signature"]["algo"] != "rsa,2048" and
             cfg["signature"]["algo"] != "sm2"):
@@ -961,6 +1355,7 @@ def aic_boot_check_params(cfg):
     #     print("entry point is not set")
     #     return False
     return True
+
 
 def get_sm2_key_pair(derfile):
     pk = None
@@ -983,6 +1378,7 @@ def get_sm2_key_pair(derfile):
     pub_key_hex = binascii.hexlify(pk).decode('utf-8')
     return (priv_key_hex, pub_key_hex)
 
+
 def aic_boot_gen_sm2_signature_bytes(cfg, bootimg):
     """ Generate SM2 Signature with SM3
     """
@@ -997,10 +1393,27 @@ def aic_boot_gen_sm2_signature_bytes(cfg, bootimg):
     sm2_crypt = SM2.CryptSM2(public_key=pk, private_key=pr)
     sm3_str = SM3.sm3_hash(bytearray(bootimg))
     sm3_bin = binascii.unhexlify(sm3_str)
+    # Debug
+    # random_str = sm3_str
     random_str = func.random_hex(sm2_crypt.para_len)
+    # random_str = 'fadc36018fcc350ffd1783553d6ede3790eda384cd61eeb923a52f51bb2762ea'
     sign_str = sm2_crypt.sign(sm3_bin, random_str)
     sign_bytes = binascii.unhexlify(sign_str)
     return sign_bytes
+
+
+def aic_boot_gen_img_sm3_bytes(cfg, bootimg):
+    """ Calculate SM3 of image to make brom verify image faster
+    """
+    # Calculate SM3 hash
+
+    sm3_str = SM3.sm3_hash(bytearray(bootimg))
+    # print(sm3_str)
+    # with open('check_sm3.bin', 'wb') as f:
+    #     f.write(bootimg)
+    sm3_bytes = binascii.unhexlify(sm3_str)
+    return sm3_bytes
+
 
 def aic_boot_create_image(cfg, keydir, datadir):
     """ Create AIC format Boot Image for Boot ROM
@@ -1112,15 +1525,22 @@ def aic_boot_create_image_v2(cfg, keydir, datadir):
                 bootimg += bytearray(padlen)
         return bootimg
 
-    # Secure boot is not enabled, always add md5 result to the end
-    md5_bytes = aic_boot_gen_img_md5_bytes(cfg, bootimg[8:])
-    bootimg = bootimg + md5_bytes
+    # Default is MD5
+    cksum_algo = "md5"
+    if "checksum-algo" in cfg:
+        cksum_algo = cfg["checksum-algo"].strip().lower()
+    if cksum_algo == "md5":
+        # Secure boot is not enabled, always add md5 result to the end
+        md5_bytes = aic_boot_gen_img_md5_bytes(cfg, bootimg[8:])
+        bootimg = bootimg + md5_bytes
+    if cksum_algo == "sm3":
+        sm3_bytes = aic_boot_gen_img_sm3_bytes(cfg, bootimg[8:])
+        bootimg = bootimg + sm3_bytes
     if aic_boot_with_ext_loader(cfg):
         padlen = round_up(len(bootimg), META_ALIGNED_SIZE) - len(bootimg)
         if padlen > 0:
             bootimg += bytearray(padlen)
-    # Calculate checksum.
-    # When MD5 is disabled, checksum will be checked by BROM.
+    # Always Calculate simple checksum.
     cs = aic_boot_checksum(bootimg)
     cs_bytes = cs.to_bytes(4, byteorder='little', signed=False)
     bootimg = bootimg[0:4] + cs_bytes + bootimg[8:]
@@ -1316,6 +1736,16 @@ def str_from_nbytes(s):
     return str(s, encoding='utf-8')
 
 
+def val_to_int(val):
+    """ Maybe int, or hex string
+    """
+    if isinstance(val, int):
+        return val
+    if isinstance(val, str):
+        return int(val, 16)
+    return 0
+
+
 def int_to_uint32_bytes(n):
     """ Int value to uint32 bytes
     """
@@ -1338,6 +1768,70 @@ def int_from_uint32_bytes(s):
     """ Int value from uint32 bytes
     """
     return int.from_bytes(s, byteorder='little', signed=False)
+
+
+def _extract_media_info(cfg):
+    """Extract and normalize media info from config (support both old and new format)
+
+    Args:
+        cfg: Configuration dictionary
+
+    Returns:
+        list: List of dicts with keys: "name", "type", "controller"
+
+    Old format: {"type": "spi-nor", "device_id": 0}
+    New format: {"name": ["spi-nor0", "spi-nand1"], "controller": [0, 1]}
+    """
+    media_cfg = cfg["image"]["info"]["media"]
+    media_list = []
+
+    if "type" in media_cfg:
+        # Old format: type and device_id
+        media_type = media_cfg["type"]
+        device_id = media_cfg.get("device_id", 0)
+
+        # Normalize to list (handle both string and list formats)
+        if isinstance(media_type, str):
+            media_types_list = [media_type]
+        else:
+            media_types_list = media_type
+
+        if isinstance(device_id, (int, str)):
+            device_ids_list = [device_id]
+        else:
+            device_ids_list = device_id
+
+        # Ensure device_ids_list has same length as media_types_list
+        while len(device_ids_list) < len(media_types_list):
+            device_ids_list.append(0)
+
+        for mt, ctrl_id in zip(media_types_list, device_ids_list):
+            # Convert ctrl_id to int if it's a string
+            if isinstance(ctrl_id, str):
+                ctrl_id = int(ctrl_id)
+
+            media_list.append({
+                "name": mt,
+                "type": mt,
+                "controller": ctrl_id
+            })
+    else:
+        # New format: name and controller list
+        device_names = media_cfg["name"]
+        controllers = media_cfg.get("controller", [])
+
+        for idx, device_name in enumerate(device_names):
+            # Get media type from device config (if no "type" key, device_name is the type)
+            media_type = cfg[device_name].get("type", device_name)
+            ctrl_id = controllers[idx] if idx < len(controllers) else 0
+
+            media_list.append({
+                "name": device_name,
+                "type": media_type,
+                "controller": ctrl_id
+            })
+
+    return media_list
 
 
 def gen_bytes(n, length):
@@ -1385,20 +1879,22 @@ def img_write_fw_header(imgfile, cfg, meta_area_size, file_area_size, ex_area_si
             param_str += "P={},B={};".format(item["page"].upper(), item["block"].upper())
         param_str = param_str[0:-1]
         nand_array_org = param_str
-    dev_id = 0
-    if "device_id" in cfg["image"]["info"]["media"]:
-        val = cfg["image"]["info"]["media"]["device_id"]
-        if isinstance(val, str):
-            dev_id = int(val)
-        else:
-            dev_id = val
+    # Get media info (support both old and new format)
+    media_list = _extract_media_info(cfg)
 
     magic = "AIC.FW"
     platform = str(cfg["image"]["info"]["platform"])
     product = str(cfg["image"]["info"]["product"])
     version = str(cfg["image"]["info"]["version"])
-    media_type = str(cfg["image"]["info"]["media"]["type"])
-    media_dev_id = dev_id
+    # media_type: join multiple types with semicolon
+    media_types = [str(m["type"]) for m in media_list]
+    media_type = ";".join(media_types)
+
+    # media_dev_id: pack controller IDs as bytes (max 4 devices)
+    dev_ids = [m["controller"] for m in media_list[:4]]
+    while len(dev_ids) < 4:
+        dev_ids.append(0)
+    media_dev_id = bytes(dev_ids)  # 4 bytes
     meta_offset = DATA_ALIGNED_SIZE
     meta_size = meta_area_size
     file_offset = DATA_ALIGNED_SIZE + meta_area_size
@@ -1412,7 +1908,7 @@ def img_write_fw_header(imgfile, cfg, meta_area_size, file_area_size, ex_area_si
     buff = buff + str_to_nbytes(product, 64)
     buff = buff + str_to_nbytes(version, 64)
     buff = buff + str_to_nbytes(media_type, 64)
-    buff = buff + int_to_uint32_bytes(media_dev_id)
+    buff = buff + media_dev_id  # Already 4 bytes
     buff = buff + str_to_nbytes(nand_array_org, 64)
     buff = buff + int_to_uint32_bytes(meta_offset)
     buff = buff + int_to_uint32_bytes(meta_size)
@@ -1643,12 +2139,18 @@ def img_write_fwc_meta_section(imgfile, cfg, sect, meta_off, file_off, datadir):
     else:
         return (meta_off, file_off)
 
-    media_type = cfg["image"]["info"]["media"]["type"]
+    # Build partition lookup table across all devices for validation
+    media_list = _extract_media_info(cfg)
+    all_partitions = {}
+    for media in media_list:
+        device_name = media["name"]
+        if device_name in cfg and "partitions" in cfg[device_name]:
+            all_partitions.update(cfg[device_name]["partitions"])
 
-    if media_type not in cfg:
-        print("Cannot find partitions for {}".format(media_type))
+    if not all_partitions:
+        print("Cannot find partitions for any device")
         return (-1, -1)
-    partitions = cfg[media_type]["partitions"]
+
     for fwc in fwcset:
         file_size = fwcset[fwc]["filesize"]
         if sect == "target":
@@ -1680,7 +2182,7 @@ def img_write_fwc_meta_section(imgfile, cfg, sect, meta_off, file_off, datadir):
 
         if "part" in fwcset[fwc]:
             partval = fwcset[fwc]["part"]
-            if check_partition_exist(partitions, partval) is False:
+            if check_partition_exist(all_partitions, partval) is False:
                 print("Partition {} not exist".format(partval))
                 return (-1, -1)
             if isinstance(partval, list):
@@ -1813,8 +2315,10 @@ def img_write_fwc_file_to_binfile(binfile, cfg, datadir):
             page_size = int(re.sub(r"[^0-9]", "", item["page"]))
             block_size = int(re.sub(r"[^0-9]", "", item["block"]))
 
-    media_type = str(cfg["image"]["info"]["media"]["type"])
-    media_size = size_str_to_int(cfg[media_type]["size"])
+    # Get media info - only use first device for burner bin file
+    media_list = _extract_media_info(cfg)
+    first_device_name = media_list[0]["name"]
+    media_size = size_str_to_int(cfg[first_device_name]["size"])
 
     if (media_size > BIN_FILE_MAX_SIZE):
         media_size = BIN_FILE_MAX_SIZE
@@ -1847,6 +2351,18 @@ def img_write_fwc_file_to_binfile(binfile, cfg, datadir):
                 if os.path.exists(path) is False:
                     print("File {} is not exist".format(path))
                     continue
+            # Get device-specific info from fwcset
+            device_name = fwcset[fwc].get("device_name", first_device_name)
+            media_type = fwcset[fwc].get("media_type", media_list[0]["type"])
+
+            # Skip targets that belong to other devices (not the first device)
+            if device_name != first_device_name:
+                if VERBOSE:
+                    msg = "\t\tSkipping " + os.path.split(path)[1]
+                    msg += " (belongs to " + device_name + ")"
+                    print(msg)
+                continue
+
             if VERBOSE:
                 print("\t\t" + os.path.split(path)[1])
             # Read fwc file content, and write to image file
@@ -1856,10 +2372,10 @@ def img_write_fwc_file_to_binfile(binfile, cfg, datadir):
             filesize = round_up(os.stat(path).st_size, DATA_ALIGNED_SIZE)
 
             # gen part table
-            if fwc == "spl" and cfg["image"]["info"]["media"]["type"] == "spi-nand":
+            if fwc == "spl" and media_type == "spi-nand":
                 filesize += page_table_size
 
-            if cfg["image"]["info"]["media"]["type"] == "spi-nand":
+            if media_type == "spi-nand":
                 start_block = part_offset // block_size // 1024
                 if filesize % (block_size * 1024) != 0:
                     used_block = filesize // block_size // 1024 + 1
@@ -1869,13 +2385,14 @@ def img_write_fwc_file_to_binfile(binfile, cfg, datadir):
                 if (total_block - used_block) <= (total_block // 50):
                     print("\t\tPart {} reserved blocks are less than 2%, \
                             bad blocks may cause burning failures".format(part_name))
+                    sys.exit(1)
 
                 last_block = start_block + total_block - 1
                 if last_block < (start_block + used_block - 1):
                     print("\t\tFile {} exceeds the part {} size".format(path, part_name))
                     sys.exit(1)
 
-            elif cfg["image"]["info"]["media"]["type"] == "spi-nor":
+            elif media_type == "spi-nor":
                 block_size = 64
                 start_block = part_offset // block_size // 1024
                 if filesize % (block_size * 1024) != 0:
@@ -1883,7 +2400,7 @@ def img_write_fwc_file_to_binfile(binfile, cfg, datadir):
                 else:
                     used_block = filesize // block_size // 1024
                 last_block = start_block + used_block - 1
-            elif cfg["image"]["info"]["media"]["type"] == "mmc":
+            elif media_type == "mmc":
                 block_size = 512
                 start_block = part_offset // block_size
                 if filesize % (block_size * 1024) != 0:
@@ -1897,7 +2414,7 @@ def img_write_fwc_file_to_binfile(binfile, cfg, datadir):
             buff = buff + int_to_uint32_bytes(used_block)
             buff = buff + int_to_uint32_bytes(0xFFFFFFFF)
 
-            if fwc == "spl" and cfg["image"]["info"]["media"]["type"] == "spi-nand":
+            if fwc == "spl" and media_type == "spi-nand":
                 part_offset += page_table_size
                 filesize -= page_table_size
             binfile.seek(part_offset, 0)
@@ -1965,79 +2482,92 @@ def img_get_fwc_file_size(cfg, datadir):
 
 
 def img_get_part_size(cfg, datadir):
-    part_name = ""
-    part_size = 0
-    part_offs = 0
-    total_siz = 0
-
     fwcset = cfg["image"]["target"]
-    media_type = cfg["image"]["info"]["media"]["type"]
-    if media_type == "spi-nand" or media_type == "spi-nor":
-        total_siz = size_str_to_int(cfg[media_type]["size"])
-        partitions = cfg[media_type]["partitions"]
-        if len(partitions) == 0:
-            print("Partition table is empty")
-            sys.exit(1)
 
+    # Get media info for all devices
+    media_list = _extract_media_info(cfg)
+
+    # Build a partition lookup table across all devices
+    partition_table = {}
+
+    for media in media_list:
+        device_name = media["name"]
+        media_type = media["type"]
+
+        if media_type not in ["spi-nand", "spi-nor", "mmc"]:
+            print("Not supported media type: {}".format(media_type))
+            return -1
+
+        if device_name not in cfg:
+            print("Device {} not found in config".format(device_name))
+            return -1
+
+        total_siz = size_str_to_int(cfg[device_name]["size"])
+        partitions = cfg[device_name]["partitions"]
+        if len(partitions) == 0:
+            continue
+
+        part_offs = 0
         for part in partitions:
             if "size" not in partitions[part]:
                 print("No size value for partition: {}".format(part))
+                return -1
+
             # get part size
             part_size = size_str_to_int(partitions[part]["size"])
             if partitions[part]["size"] == "-":
                 part_size = total_siz - part_offs
             if "offset" in partitions[part]:
                 part_offs = size_str_to_int(partitions[part]["offset"])
+
+            # Handle UBI volumes
             if "ubi" in partitions[part]:
                 volumes = partitions[part]["ubi"]
                 if len(volumes) == 0:
                     print("Volume of {} is empty".format(part))
-                    sys.exit(1)
+                    return -1
+                vol_offs = part_offs
                 for vol in volumes:
                     if "size" not in volumes[vol]:
                         print("No size value for ubi volume: {}".format(vol))
+                        return -1
                     vol_size = size_str_to_int(volumes[vol]["size"])
                     if volumes[vol]["size"] == "-":
                         vol_size = part_size
                     if "offset" in volumes[vol]:
-                        part_offs = size_str_to_int(volumes[vol]["offset"])
-                    part_name = part + ":" + vol
-                    for fwc in fwcset:
-                        if fwcset[fwc]["part"][0] == part_name:
-                            fwcset[fwc]["part_size"] = vol_size
-                            fwcset[fwc]["part_offset"] = part_offs
-                    part_offs += vol_size
+                        vol_offs = size_str_to_int(volumes[vol]["offset"])
+                    vol_name = part + ":" + vol
+                    partition_table[vol_name] = {
+                        "size": vol_size,
+                        "offset": vol_offs,
+                        "device_name": device_name,
+                        "media_type": media_type,
+                        "total_size": total_siz
+                    }
+                    vol_offs += vol_size
+                part_offs = vol_offs
             else:
-                part_name = part
-                for fwc in fwcset:
-                    if fwcset[fwc]["part"][0] == part_name:
-                        fwcset[fwc]["part_size"] = part_size
-                        fwcset[fwc]["part_offset"] = part_offs
+                partition_table[part] = {
+                    "size": part_size,
+                    "offset": part_offs,
+                    "device_name": device_name,
+                    "media_type": media_type,
+                    "total_size": total_siz
+                }
                 part_offs += part_size
-    elif media_type == "mmc":
-        total_siz = size_str_to_int(cfg[media_type]["size"])
-        partitions = cfg[media_type]["partitions"]
-        if len(partitions) == 0:
-            print("Partition table is empty")
-            sys.exit(1)
-        for part in partitions:
-            if "size" not in partitions[part]:
-                print("No size value for partition: {}".format(part))
-            # get part size
-            part_size = size_str_to_int(partitions[part]["size"])
-            if partitions[part]["size"] == "-":
-                part_size = total_siz - part_offs
-            if "offset" in partitions[part]:
-                part_offs = size_str_to_int(partitions[part]["offset"])
-            part_name = part
-            for fwc in fwcset:
-                if fwcset[fwc]["part"][0] == part_name:
-                    fwcset[fwc]["part_size"] = part_size
-                    fwcset[fwc]["part_offset"] = part_offs
-            part_offs += part_size
-    else:
-        print("Not supported media type: {}".format(media_type))
-        sys.exit(1)
+
+    # Match targets with partitions
+    for fwc in fwcset:
+        if fwcset[fwc]["part"][0] in partition_table:
+            part_info = partition_table[fwcset[fwc]["part"][0]]
+            fwcset[fwc]["part_size"] = part_info["size"]
+            fwcset[fwc]["part_offset"] = part_info["offset"]
+            fwcset[fwc]["device_name"] = part_info["device_name"]
+            fwcset[fwc]["media_type"] = part_info["media_type"]
+            fwcset[fwc]["total_size"] = part_info["total_size"]
+        else:
+            print("Partition {} not found in any device".format(fwcset[fwc]["part"][0]))
+            return -1
 
     return 0
 
@@ -2047,68 +2577,86 @@ def round_up(x, y):
 
 
 def aic_create_parts_for_env(cfg):
-    mtd = ""
-    ubi = ""
-    gpt = ""
+    mtd_list = []
+    ubi_list = []
+    gpt_list = []
 
     part_str = ""
-    media_type = cfg["image"]["info"]["media"]["type"]
-    if media_type == "spi-nand" or media_type == "spi-nor":
-        partitions = cfg[media_type]["partitions"]
-        mtd = "spi{}.0:".format(cfg["image"]["info"]["media"]["device_id"])
-        if len(partitions) == 0:
-            print("Partition table is empty")
+
+    # Get media info for all devices
+    media_list = _extract_media_info(cfg)
+
+    for media in media_list:
+        device_name = media["name"]
+        media_type = media["type"]
+        ctrl_id = media["controller"]
+
+        if media_type == "spi-nand" or media_type == "spi-nor":
+            partitions = cfg[device_name]["partitions"]
+            mtd = "spi{}.0:".format(ctrl_id)
+            if len(partitions) == 0:
+                print("Partition table is empty")
+                sys.exit(1)
+            ubi = ""
+            for part in partitions:
+                itemstr = ""
+                if "size" not in partitions[part]:
+                    print("No size value for partition: {}".format(part))
+                itemstr += partitions[part]["size"]
+                if "offset" in partitions[part]:
+                    itemstr += "@{}".format(partitions[part]["offset"])
+                itemstr += "({})".format(part)
+                mtd += itemstr + ","
+                if "ubi" in partitions[part]:
+                    volumes = partitions[part]["ubi"]
+                    if len(volumes) == 0:
+                        print("Volume of {} is empty".format(part))
+                        sys.exit(1)
+                    ubi = "{}:".format(part)
+                    for vol in volumes:
+                        itemstr = ""
+                        if "size" not in volumes[vol]:
+                            print("No size value for ubi volume: {}".format(vol))
+                        itemstr += volumes[vol]["size"]
+                        if "offset" in volumes[vol]:
+                            itemstr += "@{}".format(volumes[vol]["offset"])
+                        itemstr += "({})".format(vol)
+                        ubi += itemstr + ","
+                    ubi = ubi[0:-1]
+                    ubi_list.append(ubi)
+            mtd = mtd[0:-1]
+            mtd_list.append(mtd)
+        elif media_type == "mmc":
+            partitions = cfg[device_name]["partitions"]
+            if len(partitions) == 0:
+                print("Partition table is empty")
+                sys.exit(1)
+            gpt = ""
+            for part in partitions:
+                itemstr = ""
+                if "size" not in partitions[part]:
+                    print("No size value for partition: {}".format(part))
+                itemstr += partitions[part]["size"]
+                if "offset" in partitions[part]:
+                    itemstr += "@{}".format(partitions[part]["offset"])
+                itemstr += "({})".format(part)
+                gpt += itemstr + ","
+            gpt = gpt[0:-1]
+            gpt_list.append(gpt)
+        else:
+            print("Not supported media type: {}".format(media_type))
             sys.exit(1)
-        for part in partitions:
-            itemstr = ""
-            if "size" not in partitions[part]:
-                print("No size value for partition: {}".format(part))
-            itemstr += partitions[part]["size"]
-            if "offset" in partitions[part]:
-                itemstr += "@{}".format(partitions[part]["offset"])
-            itemstr += "({})".format(part)
-            mtd += itemstr + ","
-            if "ubi" in partitions[part]:
-                volumes = partitions[part]["ubi"]
-                if len(volumes) == 0:
-                    print("Volume of {} is empty".format(part))
-                    sys.exit(1)
-                ubi += "{}:".format(part)
-                for vol in volumes:
-                    itemstr = ""
-                    if "size" not in volumes[vol]:
-                        print("No size value for ubi volume: {}".format(vol))
-                    itemstr += volumes[vol]["size"]
-                    if "offset" in volumes[vol]:
-                        itemstr += "@{}".format(volumes[vol]["offset"])
-                    itemstr += "({})".format(vol)
-                    ubi += itemstr + ","
-                ubi = ubi[0:-1] + ";"
-        mtd = mtd[0:-1]
-        part_str = "MTD={}\n".format(mtd)
-        if len(ubi) > 0:
-            ubi = ubi[0:-1]
-            part_str += "UBI={}\n".format(ubi)
-    elif media_type == "mmc":
-        partitions = cfg[media_type]["partitions"]
-        if len(partitions) == 0:
-            print("Partition table is empty")
-            sys.exit(1)
-        for part in partitions:
-            itemstr = ""
-            if "size" not in partitions[part]:
-                print("No size value for partition: {}".format(part))
-            itemstr += partitions[part]["size"]
-            if "offset" in partitions[part]:
-                itemstr += "@{}".format(partitions[part]["offset"])
-            itemstr += "({})".format(part)
-            gpt += itemstr + ","
-        gpt = gpt[0:-1]
-        part_str = "GPT={}\nparts_mmc={}\n".format(gpt, gpt)
-        # parts_mmc will be deleted later, keep it just for old version AiBurn tool
-    else:
-        print("Not supported media type: {}".format(media_type))
-        sys.exit(1)
+
+    # Build final partition string
+    if mtd_list:
+        part_str = "MTD={}".format(";".join(mtd_list))
+        if ubi_list:
+            part_str += "\nUBI={}".format(";".join(ubi_list))
+        part_str += "\n"
+
+    if gpt_list:
+        gpt_str = ";".join(gpt_list)
+        part_str += "GPT={}\nparts_mmc={}\n".format(gpt_str, gpt_str)
 
     return part_str
 

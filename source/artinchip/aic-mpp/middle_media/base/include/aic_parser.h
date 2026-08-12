@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2024 ArtInChip Technology Co. Ltd
+ * Copyright (C) 2020-2026 ArtInChip Technology Co. Ltd
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -36,6 +36,8 @@ enum parse_command {
 
 #define PACKET_EOS PACKET_FLAG_EOS
 #define PACKET_EXTRA_DATA PACKET_FLAG_EXTRA_DATA
+#define PACKET_SOS PACKET_FLAG_SOS
+#define PACKET_KEY PACKET_FLAG_KEY
 
 #define aic_parser_stream_type aic_stream_type
 
@@ -74,42 +76,64 @@ struct aic_parser {
 	s32 (*init)(struct aic_parser *parser);
 };
 
-#define aic_parser_destroy(parser)\
-	    ((struct aic_parser*)parser)->destroy(parser)
+#define aic_parser_destroy(parser)														\
+	do {																				\
+		if (parser) {																	\
+			((struct aic_parser*)parser)->destroy(parser);								\
+		}																				\
+	} while(0)
 
-#define aic_parser_peek(          \
-		   parser,            \
-		   packet)            \
-	    ((struct aic_parser*)parser)->peek(parser,packet)
+#define aic_parser_peek(parser, packet)													\
+	({																					\
+		s32 _ret = -1;																	\
+		if (parser) {																	\
+			_ret = ((struct aic_parser*)parser)->peek(parser,packet);					\
+		}																				\
+		_ret;																			\
+	})
 
-#define aic_parser_read(          \
-		   parser,            \
-		   packet)            \
-	    ((struct aic_parser*)parser)->read(parser,packet)
+#define aic_parser_read(parser, packet)													\
+	({																					\
+		s32 _ret = -1;																	\
+		if (parser) {																	\
+			_ret = ((struct aic_parser*)parser)->read(parser,packet);					\
+		}																				\
+		_ret;																			\
+	})
 
-#define aic_parser_control(          \
-           parser,            \
-           cmd,               \
-           params)            \
-        { \
-            if (((struct aic_parser*)parser)->control) { \
-                ((struct aic_parser*)parser)->control(parser, cmd, params); \
-            } \
-        }
+#define aic_parser_control(parser, cmd, params)											\
+		do {																			\
+			if (parser && ((struct aic_parser*)parser)->control) { 						\
+				((struct aic_parser*)parser)->control(parser, cmd, params);				\
+			} 																			\
+		} while(0)
 
-#define aic_parser_seek(          \
-		   parser,            \
-		   time)            \
-	    ((struct aic_parser*)parser)->seek(parser,time)
+#define aic_parser_seek(parser, time)													\
+	({																					\
+		s32 _ret = -1;																	\
+		if (parser) {																	\
+			_ret = ((struct aic_parser*)parser)->seek(parser,time);						\
+		}																				\
+		_ret;																			\
+	})
 
-#define aic_parser_get_media_info(          \
-		   parser,            \
-		   media_info)            \
-	    ((struct aic_parser*)parser)->get_media_info(parser,media_info)
+#define aic_parser_get_media_info(parser, media_info)									\
+	({																					\
+		s32 _ret = -1;																	\
+		if (parser) {																	\
+			_ret = ((struct aic_parser*)parser)->get_media_info(parser, media_info);	\
+		}																				\
+		_ret;																			\
+	})
 
-#define aic_parser_init(          \
-		   parser)            \
-	    ((struct aic_parser*)parser)->init(parser)
+#define aic_parser_init(parser)															\
+	({																					\
+		s32 _ret = -1;																	\
+		if (parser) {																	\
+			_ret = ((struct aic_parser*)parser)->init(parser);							\
+		}																				\
+		_ret;																			\
+	})
 
 s32 aic_parser_create(unsigned char *uri, struct aic_parser **parser);
 

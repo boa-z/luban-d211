@@ -31,6 +31,7 @@ struct generic_ehci {
 #endif
 	int clock_count;
 	int reset_count;
+	u32 txpreempamptune;
 };
 
 #ifdef CONFIG_DM_REGULATOR
@@ -98,6 +99,33 @@ static void aic_ehci_set_phy_type(struct ehci_hccr *hccr, int phy_type)
 	}
 }
 #endif
+
+/* PHY_TUNE */
+#define USBPHYTUNE					(0x818)
+#define USBPHYTUNE_COMPDISTUNE_MASK			GENMASK(25, 23)
+#define USBPHYTUNE_COMPDISTUNE_SHIFT			23
+#define USBPHYTUNE_TXPREEMPAMPTUNE_MASK			GENMASK(1, 0)
+#define USBPHYTUNE_TXPREEMPAMPTUNE_SHIFT		0
+#define USBPHYTUNE_TXPREEMPAMPTUNE(_x)			((_x) << USBPHYTUNE_TXPREEMPAMPTUNE_SHIFT)
+#define USBPHYTUNE_TXPREEMPAMPTUNE_DISABLE		0x0	/* Pre-emphasis disabled, 600 uA */
+#define USBPHYTUNE_TXPREEMPAMPTUNE_1X			0x1	/* 1X pre-emphasis current */
+#define USBPHYTUNE_TXPREEMPAMPTUNE_2X			0x2	/* 2X pre-emphasis current */
+#define USBPHYTUNE_TXPREEMPAMPTUNE_3X			0x3	/* 3X pre-emphasis current */
+
+static void aic_ehci_set_phy_param(struct generic_ehci *priv, struct ehci_hccr *hccr)
+{
+	unsigned long regs = (unsigned long)hccr;
+
+	if (priv->txpreempamptune) {
+		u32 phytune = readl((void *)regs + USBPHYTUNE);
+
+		phytune &= ~USBPHYTUNE_TXPREEMPAMPTUNE_MASK;
+		phytune |= USBPHYTUNE_TXPREEMPAMPTUNE(priv->txpreempamptune);
+
+		writel(phytune, (void *)regs + USBPHYTUNE);
+		printf("EHCI set txpreempamptune: 0x%x\n", priv->txpreempamptune);
+	}
+}
 
 static int ehci_usb_probe(struct udevice *dev)
 {
@@ -168,6 +196,10 @@ static int ehci_usb_probe(struct udevice *dev)
 		}
 	}
 
+	priv->txpreempamptune = dev_read_u32_default(dev, "aic,txpreempamptune", 0);
+	if (priv->txpreempamptune)
+		dev_info(dev, "txpreempamptune = 0x%x\n", priv->txpreempamptune);
+
 	err = ehci_enable_vbus_supply(dev);
 	if (err)
 		goto reset_err;
@@ -183,6 +215,8 @@ static int ehci_usb_probe(struct udevice *dev)
 #ifndef CONFIG_FPGA_BOARD_ARTINCHIP
 	aic_ehci_set_phy_type(hccr, PHY_TYPE_UTMI);
 #endif
+
+	aic_ehci_set_phy_param(priv, hccr);
 
 	err = ehci_register(dev, hccr, hcor, NULL, 0, USB_INIT_HOST);
 	if (err)

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2023 ArtInChip Technology Co. Ltd
+ * Copyright (C) 2020-2026 ArtInChip Technology Co. Ltd
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -25,7 +25,8 @@ now only one dev
   0 -----DEV_SOUND_DEFAULT
 */
 
-#define DEV_SOUND_DEFAULT "default"
+/*change from "default" to "plug:dmix" for support multitrack mix*/
+#define DEV_SOUND_DEFAULT "plug:dmix"
 
 #define AIC_AUDIO_STATUS_PLAY 0
 #define AIC_AUDIO_STATUS_PAUSE 1
@@ -42,22 +43,22 @@ struct aic_alsa_audio_render{
 	int status;
 };
 
-s32 asla_volum_init(struct aic_audio_render *render)
+s32 asla_volum_init(struct aic_audio_render *render, const char *track_name)
 {
 	snd_mixer_t *handle;
 	snd_mixer_selem_id_t *sid;
 	snd_mixer_elem_t *elem;
 	const char *card = "default";
-	const char *selem_name = "AUDIO";
+	const char *selem_name = (NULL == track_name) ? "AUDIO" : track_name;
 	struct aic_alsa_audio_render *alsa_render = (struct aic_alsa_audio_render*)render;
 	long vol = 0;
-	if(!alsa_render){
+	if (!alsa_render) {
 		loge("param error!!!\n");
 		return -1;
 	}
 
 	snd_mixer_open(&handle, 0);
-	if(!handle){
+	if (!handle) {
 		loge("snd_mixer_open error!!!\n");
 		return -1;
 	}
@@ -69,8 +70,10 @@ s32 asla_volum_init(struct aic_audio_render *render)
 	snd_mixer_selem_id_set_index(sid, 0);
 	snd_mixer_selem_id_set_name(sid, selem_name);
 	elem = snd_mixer_find_selem(handle, sid);
-	if (!elem){
+	if (!elem) {
 		loge("Can't find volume elem\n");
+		snd_mixer_close(handle);
+		alsa_render->alsa_mixer_handle = NULL;
 		return -1;
 	}
 
@@ -79,27 +82,37 @@ s32 asla_volum_init(struct aic_audio_render *render)
 	alsa_render->vol = vol;
 	alsa_render->alsa_mixer_handle = handle;
 	alsa_render->alsa_mixer_elem = elem;
+
 	return 0;
 }
-
-
 
 s32 alsa_audio_render_init(struct aic_audio_render *render,s32 dev_id)
 {
 	struct aic_alsa_audio_render *alsa_render = (struct aic_alsa_audio_render*)render;
+	char device_name[64] = {0};
+	char track_name[32] = {0};
 
-	if(render == NULL){
+	if (render == NULL) {
 		loge("param error!!!\n");
 		return -1;
 	}
 
-	if(snd_pcm_open(&alsa_render->alsa_handle, DEV_SOUND_DEFAULT, SND_PCM_STREAM_PLAYBACK, 0) < 0){
+	if (0 <= dev_id && dev_id <= 7) {
+		snprintf(track_name, sizeof(track_name), "track%d", dev_id);
+		snprintf(device_name, sizeof(device_name), "plug:%s", track_name);
+	} else {
+		snprintf(device_name, sizeof(device_name), "%s", DEV_SOUND_DEFAULT);
+		snprintf(track_name, sizeof(track_name), "AUDIO");
+	}
+
+	if (snd_pcm_open(&alsa_render->alsa_handle, device_name, SND_PCM_STREAM_PLAYBACK, 0) < 0) {
 		loge("snd_pcm_open failed!!!\n");
 		return -1;
 	}
 
-	if(asla_volum_init(render) != 0)
-	{
+	if (asla_volum_init(render, track_name) != 0) {
+		snd_pcm_close(alsa_render->alsa_handle);
+		alsa_render->alsa_handle = NULL;
 		loge("asla_volum_init error\n");
 		return -1;
 	}
@@ -113,26 +126,32 @@ s32 alsa_audio_render_destroy(struct aic_audio_render *render)
 {
 	struct aic_alsa_audio_render *alsa_render = (struct aic_alsa_audio_render*)render;
 
-	if(render == NULL){
+	if (render == NULL) {
 		loge("param error!!!\n");
 		return -1;
 	}
-	if (alsa_render->alsa_handle){
+	if (alsa_render->alsa_handle) {
 		if (snd_pcm_drain(alsa_render->alsa_handle) < 0) {
-			loge("snd_pcm_drain failed");
+			logw("snd_pcm_drain failed");
 		}
-		if (snd_pcm_close(alsa_render->alsa_handle) < 0){
+		if (snd_pcm_close(alsa_render->alsa_handle) < 0) {
 			loge("snd_pcm_close failed!!!\n");
 			return -1;
-		}else{
+		} else {
 			alsa_render->alsa_handle = NULL;
 			logd("snd_pcm_close ok \n");
 		}
 	}
 
-	if(alsa_render->alsa_mixer_handle){
+	if (alsa_render->alsa_mixer_handle) {
 		snd_mixer_close(alsa_render->alsa_mixer_handle);
+		alsa_render->alsa_mixer_handle = NULL;
 	}
+
+	if (alsa_render->alse_hw_param) {
+        snd_pcm_hw_params_free(alsa_render->alse_hw_param);
+        alsa_render->alse_hw_param = NULL;
+    }
 
 	mpp_free(alsa_render);
 	return 0;
@@ -145,7 +164,7 @@ s32 alsa_audio_render_set_attr(struct aic_audio_render *render,struct aic_audio_
 	snd_pcm_hw_params_t *alse_hw_param;
 
 	struct aic_alsa_audio_render *alsa_render = (struct aic_alsa_audio_render*)render;
-	if(render == NULL || attr == NULL){
+	if (render == NULL || attr == NULL) {
 		loge("param error!!!\n");
 		return -1;
 	}
@@ -162,35 +181,35 @@ s32 alsa_audio_render_set_attr(struct aic_audio_render *render,struct aic_audio_
 		 ,alsa_render->attr.sample_rate
 		 ,alsa_render->attr.smples_per_frame);
 
-	if(!alsa_render->alse_hw_param){
+	if (!alsa_render->alse_hw_param) {
 		snd_pcm_hw_params_malloc(&alse_hw_param);
 		alsa_render->alse_hw_param = alse_hw_param;
 		logd("snd_pcm_hw_params_malloc\n");
-	}else{
+	} else {
 		return 0;
 	}
 
-	if(snd_pcm_hw_params_any(alsa_render->alsa_handle, alsa_render->alse_hw_param) < 0){
+	if (snd_pcm_hw_params_any(alsa_render->alsa_handle, alsa_render->alse_hw_param) < 0) {
 		loge("snd_pcm_hw_params_any failed!!!\n");
 		return -1;
 	}
 
-	if(snd_pcm_hw_params_set_access(alsa_render->alsa_handle, alsa_render->alse_hw_param,SND_PCM_ACCESS_RW_INTERLEAVED) < 0){
+	if (snd_pcm_hw_params_set_access(alsa_render->alsa_handle, alsa_render->alse_hw_param,SND_PCM_ACCESS_RW_INTERLEAVED) < 0) {
 		loge("snd_pcm_hw_params_set_access failed!!!\n");
 		return -1;
 	}
 
-	if(snd_pcm_hw_params_set_format(alsa_render->alsa_handle, alsa_render->alse_hw_param, SND_PCM_FORMAT_S16_LE) < 0){
+	if (snd_pcm_hw_params_set_format(alsa_render->alsa_handle, alsa_render->alse_hw_param, SND_PCM_FORMAT_S16_LE) < 0) {
 		loge("snd_pcm_hw_params_set_format failed!!!\n");
 		return -1;
 	}
 
-	if(snd_pcm_hw_params_set_channels(alsa_render->alsa_handle, alsa_render->alse_hw_param, alsa_render->attr.channels) < 0){
-		loge("snd_pcm_hw_params_set_channels failed!!!\n");
+	if (snd_pcm_hw_params_set_channels(alsa_render->alsa_handle, alsa_render->alse_hw_param, alsa_render->attr.channels) < 0) {
+		loge("snd_pcm_hw_params_set_channels %d failed!!!\n", alsa_render->attr.channels);
 		return -1;
 	}
 	rate = alsa_render->attr.sample_rate;
-	if(snd_pcm_hw_params_set_rate_near(alsa_render->alsa_handle, alsa_render->alse_hw_param, &rate, 0) < 0){
+	if (snd_pcm_hw_params_set_rate_near(alsa_render->alsa_handle, alsa_render->alse_hw_param, &rate, 0) < 0) {
 		loge("snd_pcm_hw_params_set_rate_near failed!!!\n");
 		return -1;
 	}
@@ -200,19 +219,19 @@ s32 alsa_audio_render_set_attr(struct aic_audio_render *render,struct aic_audio_
 
 	period_size = alsa_render->attr.smples_per_frame;
 
-	if(snd_pcm_hw_params_set_period_size_near(alsa_render->alsa_handle, alsa_render->alse_hw_param, &period_size, 0) < 0){
+	if (snd_pcm_hw_params_set_period_size_near(alsa_render->alsa_handle, alsa_render->alse_hw_param, &period_size, 0) < 0) {
 		loge("snd_pcm_hw_params_set_period_size_near failed!!!\n");
 		return -1;
 	}
 
 	period_size = 4*period_size;
 
-	if(snd_pcm_hw_params_set_buffer_size_near(alsa_render->alsa_handle, alsa_render->alse_hw_param, &period_size) < 0){
+	if (snd_pcm_hw_params_set_buffer_size_near(alsa_render->alsa_handle, alsa_render->alse_hw_param, &period_size) < 0) {
 		loge("snd_pcm_hw_params_set_period_size_near failed!!!\n");
 		return -1;
 	}
 
-	if(snd_pcm_hw_params(alsa_render->alsa_handle, alsa_render->alse_hw_param) < 0){
+	if (snd_pcm_hw_params(alsa_render->alsa_handle, alsa_render->alse_hw_param) < 0) {
 		loge("Unable to install hw params:");
 		return -1;
 	}
@@ -224,7 +243,7 @@ s32 alsa_audio_render_set_attr(struct aic_audio_render *render,struct aic_audio_
 s32 alsa_audio_render_get_attr(struct aic_audio_render *render,struct aic_audio_render_attr *attr)
 {
 	struct aic_alsa_audio_render *alsa_render = (struct aic_alsa_audio_render*)render;
-	if(render == NULL || attr == NULL){
+	if (render == NULL || attr == NULL) {
 		loge("param error!!!\n");
 		return -1;
 	}
@@ -250,7 +269,7 @@ s32 alsa_audio_render_rend(struct aic_audio_render *render, void* pData, s32 nDa
 	s32 count = 0;
 	s32 pos = 0;
 
-	if(alsa_render == NULL || pData == NULL || nDataSize == 0){
+	if (alsa_render == NULL || pData == NULL || nDataSize == 0) {
 		loge("param error!!!\n");
 		return -1;
 	}
@@ -266,8 +285,8 @@ s32 alsa_audio_render_rend(struct aic_audio_render *render, void* pData, s32 nDa
 				loge("Can't recovery from underrun, prepare failed: %s\n", snd_strerror(ret));
 			ret = 0;
 			logi("snd_pcm_prepare!!!\n");
-		} else if(ret == -ESTRPIPE){
-			while ((ret = snd_pcm_resume(alsa_render->alsa_handle)) == -EAGAIN){
+		} else if(ret == -ESTRPIPE) {
+			while ((ret = snd_pcm_resume(alsa_render->alsa_handle)) == -EAGAIN) {
 				usleep(1000);
 				logi("snd_pcm_resume!!!\n");
 			}
@@ -291,27 +310,28 @@ s64 alsa_audio_render_get_cached_time(struct aic_audio_render *render)
 	snd_pcm_sframes_t delayp;
 	s64 delay_us;
 	s32 ret = snd_pcm_delay(alsa_render->alsa_handle,&delayp);
-	if(ret == 0){
+	if (ret == 0) {
 		delay_us = (s64)(((float) delayp * 1000000)/alsa_render->attr.sample_rate);
-	}else{
+	} else {
 		delay_us = 0;
 	}
 	return delay_us;
 }
 
-s32 alsa_audio_render_pause(struct aic_audio_render *render){
+s32 alsa_audio_render_pause(struct aic_audio_render *render)
+{
 	struct aic_alsa_audio_render *alsa_render = (struct aic_alsa_audio_render*)render;
 	int ret = 0;
-	if(alsa_render->status == AIC_AUDIO_STATUS_PLAY){
+	if (alsa_render->status == AIC_AUDIO_STATUS_PLAY) {
 		logd("AIC_AUDIO_STATUS_PLAY,snd_pcm_hw_params_can_pause:%d\n",snd_pcm_hw_params_can_pause(alsa_render->alse_hw_param));
 		ret = snd_pcm_pause(alsa_render->alsa_handle, 1);
-		if(ret == 0){
+		if (ret == 0) {
 			alsa_render->status = AIC_AUDIO_STATUS_PAUSE;
 			logd("enter AIC_AUDIO_STATUS_PAUSE\n");
-		}else{
+		} else {
 			loge("snd_pcm_pause fail,ret:%d\n",ret);
 		}
-	}else if(alsa_render->status == AIC_AUDIO_STATUS_PAUSE){
+	} else if(alsa_render->status == AIC_AUDIO_STATUS_PAUSE) {
 		logd("AIC_AUDIO_STATUS_PAUSE");
 		//while(snd_pcm_resume(alsa_render->alsa_handle)== -EAGAIN){
 			//usleep(10*1000);
@@ -319,9 +339,10 @@ s32 alsa_audio_render_pause(struct aic_audio_render *render){
 		ret = snd_pcm_pause(alsa_render->alsa_handle, 0);
 		alsa_render->status = AIC_AUDIO_STATUS_PLAY;
 
-	}else{
+	} else {
 		loge("invaild state\n");
 	}
+
 	return ret;
 }
 
@@ -329,11 +350,11 @@ s32 alsa_audio_render_get_volume(struct aic_audio_render *render)
 {
 	long min, max;
 	struct aic_alsa_audio_render *alsa_render = (struct aic_alsa_audio_render*)render;
-	if(!alsa_render->alsa_mixer_elem){
+	if (!alsa_render->alsa_mixer_elem) {
 		return -1;
 	}
 	snd_mixer_selem_get_playback_volume_range(alsa_render->alsa_mixer_elem, &min, &max);
-	if(min == max){
+	if (min == max) {
 		return -1;
 	}
 
@@ -346,16 +367,17 @@ s32 alsa_audio_render_set_volume(struct aic_audio_render *render,s32 vol)
 	long min, max;
 	struct aic_alsa_audio_render *alsa_render = (struct aic_alsa_audio_render*)render;
 	logd("alsa_audio_render_set_volume:%d\n",vol);
-	if(alsa_render->alsa_mixer_handle && alsa_render->alsa_mixer_elem){
+	if (alsa_render->alsa_mixer_handle && alsa_render->alsa_mixer_elem) {
     	snd_mixer_selem_get_playback_volume_range(alsa_render->alsa_mixer_elem, &min, &max);
-		vol = vol*(max-min)/100; //[0,100] ---> [min,max]
+		vol = min + vol * (max - min) / 100; //[0,100] ---> [min,max]
 		logd("vol:[%ld,%ld:%d]\n",min,max,vol);
     	snd_mixer_selem_set_playback_volume_all(alsa_render->alsa_mixer_elem, vol);
 		alsa_render->vol = vol;
-	}else{
+	} else {
 		loge("alsa_mixer_handle or alsa_mixer_elem are null \n");
 		return -1;
 	}
+
 	return 0;
 }
 
@@ -363,7 +385,7 @@ s32 alsa_audio_render_clear_cache(struct aic_audio_render *render)
 {
 	struct aic_alsa_audio_render *alsa_render = (struct aic_alsa_audio_render*)render;
 	// int frames;
-	if (alsa_render->alsa_handle){
+	if (alsa_render->alsa_handle) {
 
 		if (snd_pcm_drop(alsa_render->alsa_handle) < 0) {
 			loge("snd_pcm_drop failed");
@@ -401,11 +423,13 @@ s32 aic_audio_render_create(struct aic_audio_render **render)
 {
 	struct aic_alsa_audio_render * alsa_render;
 	alsa_render = mpp_alloc(sizeof(struct aic_alsa_audio_render));
-	if(alsa_render == NULL){
+
+	if (alsa_render == NULL) {
 		loge("mpp_alloc alsa_render fail!!!\n");
 		*render = NULL;
 		return -1;
 	}
+
 	memset(alsa_render,0x00,sizeof(struct aic_alsa_audio_render));
 	alsa_render->status = AIC_AUDIO_STATUS_STOP;
 	alsa_render->base.init = alsa_audio_render_init;
@@ -418,6 +442,7 @@ s32 aic_audio_render_create(struct aic_audio_render **render)
 	alsa_render->base.get_volume = alsa_audio_render_get_volume;
 	alsa_render->base.clear_cache = alsa_audio_render_clear_cache;
 	*render = &alsa_render->base;
+
 	return 0;
 }
 

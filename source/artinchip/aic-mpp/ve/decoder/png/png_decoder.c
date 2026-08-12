@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2022 Artinchip Technology Co. Ltd
+ * Copyright (C) 2020-2026 ArtInChip Technology Co. Ltd
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -330,22 +330,24 @@ static int decode_fctl_chunk(struct png_dec_ctx *s, uint32_t length)
 	return 0;
 }
 
-static int compat_hw_bug(struct png_dec_ctx *s)
+#ifdef AIC_VE_DRV_V10
+static int memset_last_row_data(struct png_dec_ctx *s)
 {
-	// fix hw error if filter type of first line > 1.
-	// memset the last row buffer
-	unsigned char* hw_data = mmap(NULL, s->stride*s->height,
+	// memset the last row buffer for error case: filter type of first line > 1.
+	int stride = s->curr_frame->mpp_frame.buf.stride[0];
+	unsigned char* hw_data = mmap(NULL, stride*s->height,
 		PROT_WRITE, MAP_SHARED, s->curr_frame->mpp_frame.buf.fd[0], 0);
-	memset(hw_data + s->stride*(s->height-1), 0, s->stride);
+	memset(hw_data + stride*(s->height-1), 0, stride);
 	dmabuf_sync_range(s->curr_frame->mpp_frame.buf.fd[0],
-		hw_data + s->stride*(s->height-1), s->stride, CACHE_CLEAN);
-	munmap(hw_data, s->stride*s->height);
+		hw_data + stride*(s->height-1), stride, CACHE_CLEAN);
+	munmap(hw_data, stride*s->height);
 	// ----- end ----------
 
 	return 0;
 }
+#endif
 
-static int decode_frame_common(struct png_dec_ctx *s)
+static int process_png_chunks(struct png_dec_ctx *s)
 {
 	uint32_t tag, length;
 	int decode_next_dat = 0;
@@ -357,7 +359,7 @@ static int decode_frame_common(struct png_dec_ctx *s)
 
 		logd("decode frame left %d", length);
 		if (length <= 0) {
-			goto exit_loop;
+			break;
 		}
 
 		length = bytestream2_get_be32(&s->gb);
@@ -384,14 +386,14 @@ static int decode_frame_common(struct png_dec_ctx *s)
 			decode_next_dat = 1;
 			break;
 		case SHOW_TAG('f', 'd', 'A', 'T'):
-		// not support apng, skip it now
-				goto skip_tag;
+			// not support apng, skip it now
+			goto skip_tag;
 			if (!decode_next_dat) {
 				return -1;
 			}
 			bytestream2_get_be32(&s->gb);
 			length -= 4;
-			/* fallthrough */
+
 		case SHOW_TAG('I', 'D', 'A', 'T'):
 			if ((ret = decode_idat_chunk(s, length)) < 0)
 				return ret;
@@ -414,16 +416,20 @@ static int decode_frame_common(struct png_dec_ctx *s)
 			bytestream2_skip(&s->gb, 4); /* crc */
 			goto exit_loop;
 		default:
-			/* skip tag */
+		/* skip tag */
 		skip_tag:
 			bytestream2_skip(&s->gb, length + 4);
 			break;
 		}
 	}
 exit_loop:
+	return 0;
+}
 
+static int setup_frame_format(struct png_dec_ctx *s)
+{
 	if(s->pix_fmt == MPP_FMT_ABGR_8888 || s->pix_fmt == MPP_FMT_ARGB_8888 ||
-	   s->pix_fmt == MPP_FMT_BGRA_8888 || s->pix_fmt == MPP_FMT_RGBA_8888)
+		s->pix_fmt == MPP_FMT_BGRA_8888 || s->pix_fmt == MPP_FMT_RGBA_8888)
 		s->stride = ALIGN_8B(s->width*4);
 	else if(s->pix_fmt == MPP_FMT_BGR_888 || s->pix_fmt == MPP_FMT_RGB_888)
 		s->stride = ALIGN_8B(s->width*3);
@@ -432,7 +438,7 @@ exit_loop:
 
 	if(s->decoder.fm == NULL) {
 		struct frame_manager_init_cfg cfg;
-		cfg.frame_count = 1;
+		cfg.frame_count = 1 + s->extra_frame_num;
 		cfg.height = s->height;
 		cfg.width = s->width;
 		cfg.stride = s->stride;
@@ -442,14 +448,20 @@ exit_loop:
 		s->decoder.fm = fm_create(&cfg);
 	}
 
+	return 0;
+}
+
+static int prepare_and_decode_frame(struct png_dec_ctx *s)
+{
 	s->curr_frame = fm_decoder_get_frame(s->decoder.fm);
 	if(s->curr_frame == NULL) {
 		pm_reclaim_ready_packet(s->decoder.pm, s->curr_packet);
 		return DEC_NO_EMPTY_FRAME;
 	}
 
-	compat_hw_bug(s);
-
+#ifdef AIC_VE_DRV_V10
+	memset_last_row_data(s);
+#endif
 	logd("png_hardware_decode vir:%p phy: %x %zu", s->idat_mpp_buf->vir_addr,
 		s->idat_mpp_buf->phy_addr,s->idat_mpp_buf->size);
 
@@ -457,6 +469,11 @@ exit_loop:
 	s->vbv_offset = 2;
 	png_hardware_decode(s, s->idat_mpp_buf->vir_addr + 2, s->idat_data_size - 6);
 
+	return 0;
+}
+
+static int finalize_frame_output(struct png_dec_ctx *s)
+{
 	if(s->curr_packet->flag & PACKET_FLAG_EOS)
 		s->curr_frame->mpp_frame.flags |= FRAME_FLAG_EOS;
 	s->curr_frame->mpp_frame.buf.crop_en = 1;
@@ -467,6 +484,29 @@ exit_loop:
 
 	fm_decoder_frame_to_render(s->decoder.fm, s->curr_frame, 1);
 	fm_decoder_put_frame(s->decoder.fm, s->curr_frame);
+
+	return 0;
+}
+
+static int decode_frame_common(struct png_dec_ctx *s)
+{
+	int ret;
+
+	ret = process_png_chunks(s);
+	if (ret < 0)
+		return ret;
+
+	ret = setup_frame_format(s);
+	if (ret < 0)
+		return ret;
+
+	ret = prepare_and_decode_frame(s);
+	if (ret < 0)
+		return ret;
+
+	ret = finalize_frame_output(s);
+	if (ret < 0)
+		return ret;
 
 	return 0;
 }
@@ -544,6 +584,7 @@ static int __png_decode_init(struct mpp_decoder *ctx, struct decode_config *conf
 	cfg.buffer_size = config->bitstream_buffer_size;
 	cfg.packet_count = config->packet_count;
 	s->decoder.pm = pm_create(&cfg);
+	s->extra_frame_num = config->extra_frame_num;
 
 	return 0;
 }

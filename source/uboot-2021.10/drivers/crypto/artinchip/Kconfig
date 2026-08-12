@@ -1,5 +1,6 @@
 config ARTINCHIP_CE
 	tristate "ArtInChip's crypto engine driver"
+	select MD5_HW_ACCEL
 	select SHA_HW_ACCEL
 	# hw_sha1() under drivers/crypto, and needed with SHA_HW_ACCEL
 	depends on ARCH_ARTINCHIP

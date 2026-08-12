@@ -2,7 +2,7 @@
 /*
  * The video-device part of ArtInChip DVP controller driver.
  *
- * Copyright (C) 2020-2022 ArtInChip Technology Co., Ltd.
+ * Copyright (C) 2020-2025 ArtInChip Technology Co., Ltd.
  * Authors:  Matteo <duanmt@artinchip.com>
  */
 
@@ -258,6 +258,9 @@ static int aic_dvp_release(struct file *file)
 	struct aic_dvp *dvp = video_drvdata(file);
 
 	mutex_lock(&dvp->lock);
+
+	if (dvp->streaming)
+		aic_dvp_wait_streaming(dvp);
 
 	aic_dvp_enable(dvp, 0);
 	reset_control_assert(dvp->rst);

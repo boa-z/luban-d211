@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 /*
- * Copyright (C) 2020-2021 Artinchip Technology Co., Ltd.
+ * Copyright (C) 2020-2025 ArtInChip Technology Co., Ltd.
  * Authors:  Xiong Hao <hao.xiong@artinchip.com>
  */
 
@@ -35,5 +35,7 @@ int aic_rsa_pub_dec(int flen, unsigned char *from, unsigned char *to,
 
 int aic_hwp_rsa_priv_enc(int flen, unsigned char *from, unsigned char *to,
 			struct ak_options *opts, char *algo);
-
+			
+int aic_hwp_rsa_priv_dec(int flen, unsigned char *from, unsigned char *to,
+                         struct ak_options *opts, char *algo);
 #endif

@@ -2,7 +2,7 @@
 /*
  * The buffer management of ArtInChip DVP controller driver.
  *
- * Copyright (C) 2020-2022 ArtInChip Technology Co., Ltd.
+ * Copyright (C) 2020-2026 ArtInChip Technology Co., Ltd.
  * Authors:  Matteo <duanmt@artinchip.com>
  */
 
@@ -11,6 +11,7 @@
 #include <linux/list.h>
 #include <linux/mutex.h>
 #include <linux/spinlock.h>
+#include <linux/module.h>
 #include <media/videobuf2-dma-contig.h>
 #include <media/videobuf2-v4l2.h>
 
@@ -18,6 +19,16 @@
 
 #define DVP_FIRST_BUF		0
 #define BUF_IS_INVALID(index)	(((index) < 0) || ((index) >= DVP_MAX_BUF))
+
+static uint interlaced;
+module_param(interlaced, uint, 0644);
+MODULE_PARM_DESC(debug, "Enable the interlaced mode");
+static uint sfield;
+module_param(sfield, uint, 0444);
+MODULE_PARM_DESC(sfield, "Whether the sfield mode is enabled");
+static uint field_active;
+module_param(field_active, uint, 0644);
+MODULE_PARM_DESC(field_active, "Adjust the POL of field active");
 
 static inline struct aic_dvp_buf *vb2_v4l2_to_dvp_buffer(
 					const struct vb2_v4l2_buffer *p)
@@ -182,6 +193,8 @@ static int aic_dvp_frame_done(struct aic_dvp *dvp, u32 err)
 	list_del(&cur_buf->list);
 	aic_dvp_buf_mark_done(dvp, &cur_buf->vb, dvp->sequence, err);
 
+	if (!dvp->streaming)
+		complete(&dvp->finished);
 	return 0;
 }
 
@@ -233,9 +246,11 @@ static int aic_dvp_update_addr(struct aic_dvp *dvp)
 		aic_dvp_buf_reload(dvp, next_buf);
 		dvp->sequence++;
 	} else {
-		/* This should never happened! */
-		dev_err(dvp->dev, "%s() - So weird! DVP is using two buf!\n",
-			__func__);
+		if (dvp->sequence == 1)
+			return 0;
+
+		if (V4L2_FIELD_IS_INTERLACED(dvp->cfg.field))
+			dev_err(dvp->dev, "%s() - Weird! DVP is using two buf!\n", __func__);
 		return -1;
 	}
 
@@ -285,7 +300,14 @@ static int aic_dvp_start_streaming(struct vb2_queue *vq, unsigned int count)
 	dev_dbg(dvp->dev, "Starting capture\n");
 
 	dvp->sequence = 0;
-	aic_dvp_field_tag_clr();
+
+	dvp->cfg.field = interlaced ? V4L2_FIELD_INTERLACED : 0;
+	if (V4L2_FIELD_IS_INTERLACED(dvp->cfg.field)) {
+		aic_dvp_field_tag_clr();
+#ifdef DVP_SFIELD_MODE
+		sfield = true;
+#endif
+	}
 
 	ret = media_pipeline_start(&dvp->vdev.entity, &dvp->vdev.pipe);
 	if (ret < 0)
@@ -294,6 +316,8 @@ static int aic_dvp_start_streaming(struct vb2_queue *vq, unsigned int count)
 	spin_lock_irqsave(&dvp->qlock, flags);
 
 	aic_dvp_set_cfg(dvp);
+
+	dvp->cfg.field_active = field_active;
 	aic_dvp_set_pol(dvp);
 	writel(0x80000000, dvp->regs + DVP_OUT_FRA_NUM(dvp->ch));
 
@@ -335,14 +359,25 @@ err_clear_dma_queue:
 	return ret;
 }
 
+void aic_dvp_wait_streaming(struct aic_dvp *dvp)
+{
+	if (!dvp->streaming)
+		return;
+
+	dvp->streaming = false;
+	dev_dbg(&dvp->vdev.dev, "Wait streaming done\n");
+	if (wait_for_completion_timeout(&dvp->finished, msecs_to_jiffies(200)) == 0)
+		dev_warn(&dvp->vdev.dev, "Wait for stop streaming timeout!\n");
+}
+
 static void aic_dvp_stop_streaming(struct vb2_queue *vq)
 {
 	struct aic_dvp *dvp = vb2_get_drv_priv(vq);
 	unsigned long flags;
 
 	dev_dbg(dvp->dev, "Stopping capture\n");
+	aic_dvp_wait_streaming(dvp);
 
-	v4l2_subdev_call(dvp->src_subdev, video, s_stream, 0);
 	aic_dvp_enable_int(dvp, 0);
 	aic_dvp_capture_stop(dvp);
 	aic_dvp_update_ctl(dvp);
@@ -353,7 +388,8 @@ static void aic_dvp_stop_streaming(struct vb2_queue *vq)
 	spin_unlock_irqrestore(&dvp->qlock, flags);
 
 	media_pipeline_stop(&dvp->vdev.entity);
-	dvp->streaming = 0;
+
+	v4l2_subdev_call(dvp->src_subdev, video, s_stream, 0);
 }
 
 static const struct vb2_ops aic_dvp_qops = {
@@ -400,14 +436,20 @@ static irqreturn_t aic_dvp_isr(int irq, void *data)
 
 			if (aic_dvp_is_top_field()) {
 				recv_first_field = 1;
+#ifdef DVP_SFIELD_MODE
+			} else {
+				/* Ignore the bottom field */
 				return IRQ_HANDLED;
 			}
 		}
-
+#else
+				return IRQ_HANDLED;
+			}
+		}
+#endif
 		spin_lock_irqsave(&dvp->qlock, flags);
 		if (aic_dvp_frame_done(dvp, err))
-			dev_warn(dvp->dev, "%s() - Failed to complete buf\n",
-				 __func__);
+			dev_warn(dvp->dev, "%s() - Failed to complete buf\n", __func__);
 		spin_unlock_irqrestore(&dvp->qlock, flags);
 	}
 	if (sta & DVP_IRQ_STA_HNUM) {
@@ -448,6 +490,7 @@ int aic_dvp_buf_register(struct aic_dvp *dvp)
 
 	spin_lock_init(&dvp->qlock);
 	mutex_init(&dvp->lock);
+	init_completion(&dvp->finished);
 
 	INIT_LIST_HEAD(&dvp->buf_list);
 	for (i = 0; i < DVP_MAX_BUF; i++)
@@ -482,6 +525,14 @@ int aic_dvp_buf_register(struct aic_dvp *dvp)
 		dev_err(dvp->dev, "Couldn't register our interrupt\n");
 		goto err_unregister_device;
 	}
+
+	interlaced = dvp->cfg.field;
+	if (interlaced) {
+#ifdef DVP_SFIELD_MODE
+		sfield = true;
+#endif
+	}
+	field_active = dvp->cfg.field_active;
 
 	return 0;
 

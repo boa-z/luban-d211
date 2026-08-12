@@ -1,10 +1,10 @@
 /*
- * Copyright (C) 2020-2023 ArtInChip Technology Co. Ltd
+ * Copyright (C) 2020-2026 ArtInChip Technology Co. Ltd
  *
  * SPDX-License-Identifier: Apache-2.0
  *
- *  author: <qi.xu@artinchip.com>
- *  Desc: jpeg encoder hal
+ * Author: <qi.xu@artinchip.com>
+ * Desc: jpeg encoder hal
  */
 
 #include <stdlib.h>
@@ -52,12 +52,19 @@ static void config_header_info(struct jpeg_ctx *s)
 	write_reg_u32(s->regs_base + JPG_MCU_INFO_REG, val);
 
 	val = 12 / total_blks;
+#ifndef AIC_VE_DRV_V10
+	val = val > 4 ? 3 : val -1;
+#endif
 	write_reg_u32(s->regs_base + JPG_HANDLE_NUM_REG, val);
 
 	write_reg_u32(s->regs_base + JPG_UV_REG, s->uv_interleave);
 	write_reg_u32(s->regs_base + JPG_FRAME_IDX_REG, 0);
 	write_reg_u32(s->regs_base + JPG_RST_INTERVAL_REG, 0);
+#ifdef AIC_VE_DRV_V10
 	write_reg_u32(s->regs_base + JPG_INTRRUPT_EN_REG, 0);
+#else
+	write_reg_u32(s->regs_base + JPG_INTRRUPT_EN_REG, 7);
+#endif
 }
 
 static void config_picture_info_register(struct jpeg_ctx *s)
@@ -85,6 +92,8 @@ static void config_picture_info_register(struct jpeg_ctx *s)
 	write_reg_u32(s->regs_base + PIC_INFO_START_REG + 8, s->phy_addr[0]);
 	write_reg_u32(s->regs_base + PIC_INFO_START_REG + 12, s->phy_addr[1]);
 	write_reg_u32(s->regs_base + PIC_INFO_START_REG + 16, s->phy_addr[2]);
+
+	write_reg_u32(s->regs_base + PIC_INFO_WRITE_END_REG, 0);
 }
 
 /*
@@ -100,7 +109,7 @@ static void ve_config_quant_matrix(struct jpeg_ctx *s)
 		write_reg_u32(s->regs_base + JPG_QMAT_INFO_REG, (comp << 6) | 3);
 		write_reg_u32(s->regs_base + JPG_QMAT_ADDR_REG, comp << 6);
 		for (i = 0; i < 64; i++) {
-			j = zigzag_direct[i];
+			j = zigzag_dir[i];
 			// qmatrix should be  (1<<19)/q
 			val = (1 << QUANT_FIXED_POINT_BITS) / quant_tab[comp][j];
 			write_reg_u32(s->regs_base + JPG_QMAT_VAL_REG, val);
@@ -210,7 +219,7 @@ int jpeg_hw_encode(struct jpeg_ctx *s)
 	write_reg_u32(s->regs_base + JPG_STATUS_REG, 0xf);
 	write_reg_u32(s->regs_base + JPG_START_REG, 1);
 
-	if (ve_wait(&status) < 0) {
+	if (ve_wait((unsigned int*)&status) < 0) {
 		loge("ve wait irq timeout");
 		logi("read JPG_STATUS_REG  %x", read_reg_u32(s->regs_base + JPG_STATUS_REG));
 
@@ -233,7 +242,7 @@ int jpeg_hw_encode(struct jpeg_ctx *s)
 	end_addr = read_reg_u32(s->regs_base + JPG_STREAM_WRITE_PTR_REG);
 	s->encode_data_len = end_addr - s->bitstream_phy_addr;
 
-	logi("cycles: %d, data len: %d", cycles, s->encode_data_len);
+	logi("cycles: %"PRIu32", data len: %d", cycles, s->encode_data_len);
 
 	// disable jpeg module
 	write_reg_u32(s->regs_base + VE_JPG_EN_REG, 0);

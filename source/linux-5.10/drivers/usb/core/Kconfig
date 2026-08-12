@@ -70,7 +70,7 @@ config USB_OTG
 	  connector.
 
 config USB_AIC_OTG
-	bool "Support for ArtInChip on-chip OTG Switch"
+	tristate "Support for ArtInChip on-chip OTG Switch"
 	depends on USB_OTG
 	select USB_PHY
 	default n

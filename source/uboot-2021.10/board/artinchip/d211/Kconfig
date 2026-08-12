@@ -6,4 +6,17 @@ config SYS_BOARD
 config SYS_CONFIG_NAME
 	default "d211"
 
+config D211_MANUAL_DDR_SIZE
+	bool "Manually specify DDR size"
+	default n
+	help
+	  Enable this option to override the DDR size detected from eFuse or RTC.
+
+config D211_DDR_SIZE
+	hex "Manual DDR size"
+	depends on D211_MANUAL_DDR_SIZE
+	default 0x4000000
+	help
+	  Specify the DDR size in bytes when manual DDR size override is enabled.
+
 endif

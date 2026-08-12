@@ -46,7 +46,7 @@ config AIC_DISP_MIPI_DBI
 	help
 	  ArtInChip display mipi-dbi support
 
-config AIC_DSI_LEGACY_PACKET_CONFIG
+config AIC_DSI_LEGACY_PACKET
 	bool "enable MIPI-DSI legacy packet config"
 	depends on AIC_DISP_MIPI_DSI
 	default n

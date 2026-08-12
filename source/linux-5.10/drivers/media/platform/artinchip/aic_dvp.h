@@ -2,7 +2,7 @@
 /*
  * Define the register and struct for ArtInChip DVP controller.
  *
- * Copyright (C) 2020-2022 ArtInChip Technology Co., Ltd.
+ * Copyright (C) 2020-2025 ArtInChip Technology Co., Ltd.
  * Authors:  Matteo <duanmt@artinchip.com>
  */
 
@@ -23,36 +23,7 @@
 #define DVP_MAX_PLANE		2
 #define DVP_MAX_HEIGHT		4096U
 #define DVP_MAX_WIDTH		4096U
-
-enum dvp_input {
-	DVP_IN_RAW	= 0,
-	DVP_IN_YUV422	= 1,
-	DVP_IN_BT656	= 2,
-};
-
-enum dvp_output {
-	DVP_OUT_RAW_PASSTHROUGH		= 0,
-	DVP_OUT_YUV422_COMBINED_NV16	= 1,
-	DVP_OUT_YUV420_COMBINED_NV12	= 2,
-};
-
-enum dvp_input_yuv_seq {
-	DVP_YUV_DATA_SEQ_YUYV	= 0,
-	DVP_YUV_DATA_SEQ_YVYU	= 1,
-	DVP_YUV_DATA_SEQ_UYVY	= 2,
-	DVP_YUV_DATA_SEQ_VYUY	= 3,
-};
-
-enum dvp_capture_mode {
-	DVP_CAPTURE_PICTURE = 0,
-	DVP_CAPTURE_VIDEO = 1
-};
-
-enum dvp_subdev_pads {
-	DVP_SUBDEV_SINK = 0,
-	DVP_SUBDEV_SOURCE,
-	DVP_SUBDEV_PAD_NUM,
-};
+#define DVP_SFIELD_MODE
 
 #define DVP_CH_BASE(ch)			(0x100 * ((ch) + 1))
 #define DVP_CTL				0x0
@@ -127,6 +98,36 @@ enum dvp_subdev_pads {
 #define DVP_OUT_CTL_CAP_OFF_IMMEDIATELY	BIT(1)
 #define DVP_OUT_CTL_CAP_ON		BIT(0)
 
+enum dvp_input {
+	DVP_IN_RAW	= 0,
+	DVP_IN_YUV422	= 1,
+	DVP_IN_BT656	= 2,
+};
+
+enum dvp_output {
+	DVP_OUT_RAW_PASSTHROUGH		= 0,
+	DVP_OUT_YUV422_COMBINED_NV16	= 1,
+	DVP_OUT_YUV420_COMBINED_NV12	= 2,
+};
+
+enum dvp_input_yuv_seq {
+	DVP_YUV_DATA_SEQ_YUYV	= 0,
+	DVP_YUV_DATA_SEQ_YVYU	= 1,
+	DVP_YUV_DATA_SEQ_UYVY	= 2,
+	DVP_YUV_DATA_SEQ_VYUY	= 3,
+};
+
+enum dvp_capture_mode {
+	DVP_CAPTURE_PICTURE = 0,
+	DVP_CAPTURE_VIDEO = 1
+};
+
+enum dvp_subdev_pads {
+	DVP_SUBDEV_SINK = 0,
+	DVP_SUBDEV_SOURCE,
+	DVP_SUBDEV_PAD_NUM,
+};
+
 extern const struct v4l2_subdev_ops aic_dvp_subdev_ops;
 
 /**
@@ -194,6 +195,7 @@ struct aic_dvp {
 	spinlock_t			qlock;
 	unsigned int			sequence;
 	unsigned int			streaming;
+	struct completion		finished;
 };
 
 struct aic_dvp_buf {
@@ -205,6 +207,8 @@ struct aic_dvp_buf {
 
 int aic_dvp_buf_register(struct aic_dvp *dvp);
 void aic_dvp_buf_unregister(struct aic_dvp *dvp);
+void aic_dvp_wait_streaming(struct aic_dvp *dvp);
+
 int aic_dvp_video_register(struct aic_dvp *dvp);
 
 /* Some API of register, Defined in aic_dvp_hw.c */

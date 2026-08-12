@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (c) 2021-2025, Artinchip Technology Co., Ltd
+ * Copyright (c) 2021-2026, Artinchip Technology Co., Ltd
  * Author: Dehuang Wu <dehuang.wu@artinchip.com>
  */
 
@@ -50,6 +50,7 @@ enum spi_mode_type {
 #define QUAD_OUTPUT_MODE	0x01010104U
 #define QUAD_IO_MODE		0x01040404U
 #define QPI_MODE		0x04040404U
+#define AIC_SPI_MEM_HEAD_MAX	16
 
 #define SPI_DUAL_MODE		1
 #define SPI_QUAD_MODE		2
@@ -115,24 +116,15 @@ static inline void spi_cltr_cfg_tc(u32 mode, void __iomem *base_addr)
 {
 	u32 val = readl(base_addr + SPI_REG_TCR);
 
-	/* only support mode0 & mode2 */
-	if ((mode & SPI_CPHA) && !(mode & SPI_CPOL)) {
-		val &= ~TCR_BIT_CPHA;
+	if (mode & SPI_CPOL)
 		val |= TCR_BIT_CPOL;
-	} else if ((mode & SPI_CPHA) && (mode & SPI_CPOL)) {
-		val &= ~TCR_BIT_CPHA;
+	else
 		val &= ~TCR_BIT_CPOL;
-	} else {
-		if (mode & SPI_CPOL)
-			val |= TCR_BIT_CPOL;
-		else
-			val &= ~TCR_BIT_CPOL;
 
-		if (mode & SPI_CPHA)
-			val |= TCR_BIT_CPHA;
-		else
-			val &= ~TCR_BIT_CPHA;
-	}
+	if (mode & SPI_CPHA)
+		val |= TCR_BIT_CPHA;
+	else
+		val &= ~TCR_BIT_CPHA;
 
 	if (mode & SPI_CS_HIGH)
 		val &= ~TCR_BIT_SPOL;
@@ -498,7 +490,6 @@ static int aic_spi_bit_mode_transfer_one(struct spi_controller *ctlr,
 	return 1; /* In progress */
 }
 
-
 static inline u32 spi_ctlr_set_clk(u32 spiclk, u32 mclk, void __iomem *base_addr)
 {
 	u32 val, cdr, div;
@@ -528,6 +519,17 @@ static inline u32 spi_ctlr_set_clk(u32 spiclk, u32 mclk, void __iomem *base_addr
 	writel(val, base_addr + SPI_REG_CCR);
 
 	return freq;
+}
+
+static inline u32 aic_spi_set_clk(u32 spiclk, u32 mclk, struct spi_device *spi)
+{
+	struct aic_spi *aicspi = spi_controller_get_devdata(spi->controller);
+	void __iomem *base_addr = aicspi->base_addr;
+
+	if ((spi->mode & SPI_MODE_1) || (spi->mode & SPI_MODE_3))
+		return spi_ctlr_set_clk(mclk, mclk, base_addr);
+
+	return spi_ctlr_set_clk(spiclk, mclk, base_addr);
 }
 
 static inline void spi_ctlr_start_xfer(void __iomem *base_addr)
@@ -1032,7 +1034,6 @@ static void spi_ctlr_set_rx_delay(struct aic_spi *aicspi, u32 speed_hz)
 static int spi_ctlr_cfg_xfer(struct aic_spi *aicspi, struct spi_device *spi,
 			     struct spi_transfer *t)
 {
-	void __iomem *base_addr = aicspi->base_addr;
 
 	if (aicspi->mode_type != MODE_TYPE_NULL)
 		return -EINVAL;
@@ -1055,11 +1056,9 @@ static int spi_ctlr_cfg_xfer(struct aic_spi *aicspi, struct spi_device *spi,
 	}
 
 	if (aicspi->freq_dividor != 0)
-		aicspi->freq = spi_ctlr_set_clk(aicspi->freq, clk_get_rate(aicspi->mclk),
-											base_addr);
+		aicspi->freq = aic_spi_set_clk(aicspi->freq, clk_get_rate(aicspi->mclk), spi);
 	else
-		aicspi->freq = spi_ctlr_set_clk(t->speed_hz, clk_get_rate(aicspi->mclk),
-											base_addr);
+		aicspi->freq = aic_spi_set_clk(t->speed_hz, clk_get_rate(aicspi->mclk), spi);
 
 	spi_ctlr_set_rx_delay(aicspi, aicspi->freq);
 
@@ -1553,7 +1552,7 @@ static int aic_spi_hw_init(struct aic_spi *aicspi,
 	spi_ctlr_enable_bus(base_addr);
 	spi_ctlr_set_cs_num(0, base_addr);
 	spi_ctlr_set_master_mode(base_addr);
-	aicspi->freq = spi_ctlr_set_clk(24000000, src_clk, base_addr);
+	aicspi->freq = spi_ctlr_set_clk(src_clk, src_clk, base_addr);
 	spi_cltr_cfg_tc(SPI_MODE_0, base_addr);
 	spi_ctlr_set_tx_delay_mode(base_addr, true);
 	spi_ctlr_enable_tp(base_addr);
@@ -1736,6 +1735,10 @@ static void aic_spi_remove_sysfs(struct platform_device *_pdev)
 
 bool aic_spi_mem_supports_op(struct spi_mem *mem, const struct spi_mem_op *op)
 {
+	if (op->cmd.nbytes + op->addr.nbytes + op->dummy.nbytes >
+	    AIC_SPI_MEM_HEAD_MAX)
+		return false;
+
 #ifndef CONFIG_SPI_SUPPORT_QUADIO_ARTINCHIP
 	if ((op->addr.buswidth == 4) && (op->dummy.buswidth == 4) &&
 	    (op->data.buswidth == 4))
@@ -1751,22 +1754,131 @@ bool aic_spi_mem_supports_op(struct spi_mem *mem, const struct spi_mem_op *op)
  * dummy 1 bit          1 bit         2 bit      1 bit         4 bit      4 bit
  * data  1 bit          2 bit         2 bit      4 bit         4 bit      4 bit
  */
+static void aic_spi_mem_prepare_xfer(struct aic_spi *aicspi)
+{
+	void __iomem *base_addr = aicspi->base_addr;
+
+	spi_ctlr_pending_irq_clr(ISR_BIT_ALL_MSK, base_addr);
+	reinit_completion(&aicspi->ctlr->xfer_completion);
+	spi_ctlr_irq_enable(ICR_BIT_TC | ICR_BIT_ERRS, base_addr);
+	spi_ctlr_reset_fifo(base_addr);
+}
+
+static int aic_spi_mem_wait_done(struct spi_mem *mem, struct aic_spi *aicspi,
+				 u32 xfer_len, const char *phase)
+{
+	unsigned long long tmo;
+
+	tmo = 8LL * xfer_len * MSEC_PER_SEC;
+	do_div(tmo, mem->spi->max_speed_hz);
+	tmo += tmo + 200;
+	if (tmo > UINT_MAX)
+		tmo = UINT_MAX;
+
+	if (!wait_for_completion_timeout(&aicspi->ctlr->xfer_completion,
+					 msecs_to_jiffies(tmo))) {
+		dev_err(aicspi->dev,
+			"wait %s xfer done timeout.len: %u, tmo: %llu\n",
+			phase, xfer_len, tmo);
+		return -ETIMEDOUT;
+	}
+
+	return 0;
+}
+
+static void aic_spi_mem_cfg_head_xfer(struct aic_spi *aicspi,
+				      const struct spi_mem_op *op,
+				      unsigned long mode, u32 head_len)
+{
+	void __iomem *base_addr = aicspi->base_addr;
+	u32 tx_single;
+
+	switch (mode) {
+	case SINGLE_MODE:
+	case DUAL_OUTPUT_MODE:
+	case QUAD_OUTPUT_MODE:
+		tx_single = head_len;
+		spi_ctlr_dual_disable(base_addr);
+		spi_ctlr_quad_disable(base_addr);
+		break;
+	case DUAL_IO_MODE:
+		tx_single = op->cmd.nbytes;
+		spi_ctlr_quad_disable(base_addr);
+		spi_ctlr_dual_enable(base_addr);
+		break;
+	case QUAD_IO_MODE:
+		tx_single = op->cmd.nbytes;
+		spi_ctlr_dual_disable(base_addr);
+		spi_ctlr_quad_enable(base_addr);
+		break;
+	case QPI_MODE:
+	default:
+		tx_single = 0;
+		spi_ctlr_dual_disable(base_addr);
+		spi_ctlr_quad_enable(base_addr);
+		break;
+	}
+
+	spi_ctlr_set_xfer_cnt(base_addr, head_len, 0, tx_single, 0);
+}
+
+static void aic_spi_mem_cfg_data_xfer(struct aic_spi *aicspi,
+				      unsigned long mode, u32 tx_dlen,
+				      u32 rx_dlen)
+{
+	void __iomem *base_addr = aicspi->base_addr;
+	u32 tx_single = 0;
+
+	switch (mode) {
+	case SINGLE_MODE:
+		tx_single = tx_dlen;
+		spi_ctlr_dual_disable(base_addr);
+		spi_ctlr_quad_disable(base_addr);
+		break;
+	case DUAL_OUTPUT_MODE:
+	case DUAL_IO_MODE:
+		spi_ctlr_quad_disable(base_addr);
+		spi_ctlr_dual_enable(base_addr);
+		break;
+	case QUAD_OUTPUT_MODE:
+	case QUAD_IO_MODE:
+	case QPI_MODE:
+	default:
+		spi_ctlr_dual_disable(base_addr);
+		spi_ctlr_quad_enable(base_addr);
+		break;
+	}
+
+	spi_ctlr_set_xfer_cnt(base_addr, tx_dlen, rx_dlen, tx_single, 0);
+}
+
+static void aic_spi_mem_dma_issue_pending(struct aic_spi *aicspi,
+					  struct dma_chan *chan)
+{
+#ifdef CONFIG_ARTINCHIP_DDMA
+	if (aicspi->id == 0)
+		aic_ddma_transfer(chan);
+	else
+#endif
+		dma_async_issue_pending(chan);
+}
 static int aic_spi_mem_exec_op(struct spi_mem *mem, const struct spi_mem_op *op)
 {
-	u32 head_len, tx_total, tx_dlen, tx_single, rx_dlen, use_dma;
-	u8 tx_head[16], *rx_buf;
+	u32 head_len, tx_dlen, rx_dlen, use_dma;
+	u8 tx_head[AIC_SPI_MEM_HEAD_MAX], *rx_buf;
 	void __iomem *base_addr;
 	struct aic_spi *aicspi;
 	const u8 *tx_buf;
 	struct sg_table sg;
 	unsigned long mode;
-	unsigned long long tmo;
 	int ret = 0, i;
 
 	aicspi = spi_controller_get_devdata(mem->spi->controller);
 	base_addr = aicspi->base_addr;
 
 	head_len = op->cmd.nbytes + op->addr.nbytes + op->dummy.nbytes;
+	if (head_len > sizeof(tx_head))
+		return -ENOTSUPP;
 
 	tx_buf = NULL;
 	tx_dlen = 0;
@@ -1775,12 +1887,11 @@ static int aic_spi_mem_exec_op(struct spi_mem *mem, const struct spi_mem_op *op)
 	if (op->data.dir == SPI_MEM_DATA_IN) {
 		rx_buf = op->data.buf.in;
 		rx_dlen = op->data.nbytes;
-	} else {
+	} else if (op->data.dir == SPI_MEM_DATA_OUT) {
 		tx_buf = op->data.buf.out;
 		tx_dlen = op->data.nbytes;
 	}
 
-	tx_total = head_len + tx_dlen;
 	use_dma = aic_spi_use_dma(aicspi, tx_buf, rx_buf, op->data.nbytes);
 
 	if (op->cmd.nbytes)
@@ -1813,120 +1924,81 @@ static int aic_spi_mem_exec_op(struct spi_mem *mem, const struct spi_mem_op *op)
 	switch (mode) {
 	case SINGLE_MODE:
 		dev_dbg(aicspi->dev, "Single mode\n");
-		tx_single = tx_total;
-		spi_ctlr_dual_disable(base_addr);
-		spi_ctlr_quad_disable(base_addr);
-		spi_ctlr_set_xfer_cnt(base_addr, tx_total, rx_dlen, tx_single, 0);
 		break;
 	case DUAL_OUTPUT_MODE:
 		dev_dbg(aicspi->dev, "DUAL OUTPUT\n");
-		tx_single = head_len;
-		spi_ctlr_quad_disable(base_addr);
-		spi_ctlr_dual_enable(base_addr);
-		spi_ctlr_set_xfer_cnt(base_addr, tx_total, rx_dlen, tx_single, 0);
 		break;
 	case DUAL_IO_MODE:
 		dev_dbg(aicspi->dev, "DUAL I/O\n");
-		tx_single = op->cmd.nbytes;
-		spi_ctlr_quad_disable(base_addr);
-		spi_ctlr_dual_enable(base_addr);
-		spi_ctlr_set_xfer_cnt(base_addr, tx_total, rx_dlen, tx_single, 0);
 		break;
 	case QUAD_OUTPUT_MODE:
 		dev_dbg(aicspi->dev, "QUAD OUTPUT\n");
-		tx_single = head_len;//op->cmd.nbytes + op->addr.nbytes;
-		spi_ctlr_dual_disable(base_addr);
-		spi_ctlr_quad_enable(base_addr);
-		spi_ctlr_set_xfer_cnt(base_addr, tx_total, rx_dlen, tx_single, 0);
 		break;
 	case QUAD_IO_MODE:
 		dev_dbg(aicspi->dev, "QUAD I/O\n");
-		tx_single = op->cmd.nbytes;
-		spi_ctlr_dual_disable(base_addr);
-		spi_ctlr_quad_enable(base_addr);
-		spi_ctlr_set_xfer_cnt(base_addr, tx_total, rx_dlen, tx_single, 0);
 		break;
 	case QPI_MODE:
 		dev_dbg(aicspi->dev, "QPI\n");
-		tx_single = 0;
-		spi_ctlr_dual_disable(base_addr);
-		spi_ctlr_quad_enable(base_addr);
-		spi_ctlr_set_xfer_cnt(base_addr, tx_total, rx_dlen, tx_single, 0);
 		break;
 	}
 
 	if (aicspi->freq_dividor != 0)
-		aicspi->freq = spi_ctlr_set_clk(aicspi->freq, clk_get_rate(aicspi->mclk),
-											base_addr);
+		aicspi->freq = aic_spi_set_clk(aicspi->freq, clk_get_rate(aicspi->mclk), mem->spi);
 	else
-		aicspi->freq = spi_ctlr_set_clk(mem->spi->max_speed_hz, clk_get_rate(aicspi->mclk),
-											base_addr);
+		aicspi->freq = aic_spi_set_clk(mem->spi->max_speed_hz, clk_get_rate(aicspi->mclk), mem->spi);
 
 	spi_ctlr_set_rx_delay(aicspi, aicspi->freq);
-	spi_ctlr_set_cs_enable(aicspi, true);
-	spi_ctlr_pending_irq_clr(ISR_BIT_ALL_MSK, base_addr);
-	reinit_completion(&aicspi->ctlr->xfer_completion);
-	spi_ctlr_irq_enable(ICR_BIT_TC | ICR_BIT_ERRS, base_addr);
-	spi_ctlr_reset_fifo(base_addr);
+
 	if (use_dma) {
-		/* Config DMA first */
 		ret = spi_controller_dma_map_mem_op_data(aicspi->ctlr, op, &sg);
 		if (ret)
-			goto out;
+			return ret;
+	}
 
-		spi_ctlr_start_xfer(base_addr);
-		if (head_len)
-			spi_ctlr_fifo_write(aicspi, tx_head, head_len);
+	spi_ctlr_set_cs_enable(aicspi, true);
 
+	aic_spi_mem_cfg_head_xfer(aicspi, op, mode, head_len);
+	aic_spi_mem_prepare_xfer(aicspi);
+	spi_ctlr_start_xfer(base_addr);
+	if (head_len)
+		spi_ctlr_fifo_write(aicspi, tx_head, head_len);
+
+	ret = aic_spi_mem_wait_done(mem, aicspi, head_len, "head");
+	if (ret)
+		goto out;
+
+	if (!tx_dlen && !rx_dlen)
+		goto out;
+
+	aic_spi_mem_cfg_data_xfer(aicspi, mode, tx_dlen, rx_dlen);
+	aic_spi_mem_prepare_xfer(aicspi);
+
+	if (use_dma) {
 		if (rx_buf) {
-			/* FIFO mode xfer head, then enalbe dma to xfer data */
 			spi_ctlr_irq_disable(ICR_BIT_TC, base_addr);
-
 			spi_ctlr_dma_rx_enable(aicspi->base_addr);
 			ret = aic_spi_dma_rx_cfg(aicspi, sg.sgl, sg.nents);
 			if (ret < 0)
 				goto out;
-#ifdef CONFIG_ARTINCHIP_DDMA
-			if (aicspi->id == 0)
-				aic_ddma_transfer(aicspi->dma_rx);
-			else
-#endif
-				dma_async_issue_pending(aicspi->dma_rx);
-
+			spi_ctlr_start_xfer(base_addr);
+			aic_spi_mem_dma_issue_pending(aicspi, aicspi->dma_rx);
 		} else {
 			spi_ctlr_dma_tx_enable(aicspi->base_addr);
 			ret = aic_spi_dma_tx_cfg(aicspi, sg.sgl, sg.nents);
 			if (ret < 0)
 				goto out;
-#ifdef CONFIG_ARTINCHIP_DDMA
-			if (aicspi->id == 0)
-				aic_ddma_transfer(aicspi->dma_tx);
-			else
-#endif
-				dma_async_issue_pending(aicspi->dma_tx);
-
+			spi_ctlr_start_xfer(base_addr);
+			aic_spi_mem_dma_issue_pending(aicspi, aicspi->dma_tx);
 		}
 	} else {
 		spi_ctlr_start_xfer(base_addr);
-		if (head_len)
-			spi_ctlr_fifo_write(aicspi, tx_head, head_len);
 		if (tx_buf)
 			spi_ctlr_fifo_write(aicspi, tx_buf, tx_dlen);
 		if (rx_buf)
 			spi_ctlr_fifo_read(aicspi, rx_buf, rx_dlen);
 	}
 
-	tmo = 8LL * (tx_total + rx_dlen) * MSEC_PER_SEC;
-	do_div(tmo, mem->spi->max_speed_hz);
-	tmo += tmo + 200;
-	if (tmo > UINT_MAX)
-		tmo = UINT_MAX;
-	if (!wait_for_completion_timeout(&aicspi->ctlr->xfer_completion,
-					 msecs_to_jiffies(tmo))) {
-		dev_err(aicspi->dev, "wait data xfer done timeout.\n");
-		ret = -ETIMEDOUT;
-		goto out;
-	}
+	ret = aic_spi_mem_wait_done(mem, aicspi, tx_dlen + rx_dlen, "data");
 out:
 	if (use_dma)
 		spi_controller_dma_unmap_mem_op_data(aicspi->ctlr, op, &sg);

@@ -267,6 +267,9 @@ struct dma_buf_ops {
 
 	void *(*vmap)(struct dma_buf *);
 	void (*vunmap)(struct dma_buf *, void *vaddr);
+#ifdef CONFIG_ARCH_ARTINCHIP
+	int (*get_phy_addr)(struct dma_buf *dmabuf, unsigned int *phy_addr);
+#endif
 };
 
 /**

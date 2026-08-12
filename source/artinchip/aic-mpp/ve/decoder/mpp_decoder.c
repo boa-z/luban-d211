@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2024 ArtInChip Technology Co. Ltd
+ * Copyright (C) 2020-2026 ArtInChip Technology Co. Ltd
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -16,19 +16,41 @@ extern struct mpp_decoder* create_png_decoder();
 extern struct mpp_decoder* create_h264_decoder();
 extern struct mpp_decoder* create_aicp_wrapper();
 extern int destroy_aicp_wrapper();
+#ifdef MPEG12_DECODER
+extern struct mpp_decoder *create_mpeg12_decoder();
+#endif
+#ifdef MPEG4_DECODER
+extern struct mpp_decoder *create_mpeg4_decoder();
+extern struct mpp_decoder *create_mpeg4_311_decoder();
+#endif
 
 struct mpp_decoder* mpp_decoder_create(enum mpp_codec_type type)
 {
-	if (type == MPP_CODEC_VIDEO_DECODER_MJPEG)
-		return create_jpeg_decoder();
-	else if (type == MPP_CODEC_VIDEO_DECODER_H264)
-		return create_h264_decoder();
-	else if (type == MPP_CODEC_VIDEO_DECODER_PNG)
-		return create_png_decoder();
-	else if (type == MPP_CODEC_VIDEO_DECODER_AICP)
-		return create_aicp_wrapper();
+	struct mpp_decoder *decoder = NULL;
 
-	return NULL;
+	if (type == MPP_CODEC_VIDEO_DECODER_MJPEG)
+		decoder = create_jpeg_decoder();
+	else if (type == MPP_CODEC_VIDEO_DECODER_H264)
+		decoder = create_h264_decoder();
+	else if (type == MPP_CODEC_VIDEO_DECODER_PNG)
+		decoder = create_png_decoder();
+	else if (type == MPP_CODEC_VIDEO_DECODER_AICP)
+		decoder = create_aicp_wrapper();
+#ifdef MPEG12_DECODER
+	else if (type == MPP_CODEC_VIDEO_DECODER_MPEG12)
+		decoder = create_mpeg12_decoder();
+#endif
+#ifdef MPEG4_DECODER
+	else if (type == MPP_CODEC_VIDEO_DECODER_MPEG4)
+		decoder = create_mpeg4_decoder();
+	else if (type == MPP_CODEC_VIDEO_DECODER_MPEG4_311)
+		decoder = create_mpeg4_311_decoder();
+#endif
+
+	if (decoder)
+		decoder->type = type;
+
+	return decoder;
 }
 
 void mpp_decoder_destory(struct mpp_decoder* decoder)
@@ -37,7 +59,8 @@ void mpp_decoder_destory(struct mpp_decoder* decoder)
 		return;
 
 	decoder->ops->destory(decoder);
-	destroy_aicp_wrapper();
+	if (decoder->type == MPP_CODEC_VIDEO_DECODER_AICP)
+		destroy_aicp_wrapper();
 }
 
 int mpp_decoder_init(struct mpp_decoder *decoder, struct decode_config *config)
@@ -95,6 +118,12 @@ int mpp_decoder_control(struct mpp_decoder* decoder, int cmd, void *param)
 		decoder->output_x = pos->output_pos_x;
 		decoder->output_y = pos->output_pos_y;
 		return 0;
+	case MPP_DEC_GET_READY_PACKET_NUMBER:
+		*(int *)param = pm_get_ready_packet_num(decoder->pm);
+		return 0;
+	case MPP_DEC_GET_RENDER_FRAME_NUMBER:
+		*(int *)param = fm_get_render_frame_num(decoder->fm);
+		return 0;
 	default:
 		break;
 	}
@@ -126,6 +155,14 @@ int mpp_decoder_put_packet(struct mpp_decoder* decoder, struct mpp_packet* packe
 		return DEC_ERR_NULL_PTR;
 
 	return pm_enqueue_ready_packet(decoder->pm, packet);
+}
+
+int mpp_decoder_return_packet(struct mpp_decoder* decoder, struct mpp_packet* packet)
+{
+	if(decoder == NULL || packet == NULL || decoder->pm == NULL)
+		return DEC_ERR_NULL_PTR;
+
+	return pm_return_empty_packet(decoder->pm, packet);
 }
 
 int mpp_decoder_get_frame(struct mpp_decoder* decoder, struct mpp_frame* frame)

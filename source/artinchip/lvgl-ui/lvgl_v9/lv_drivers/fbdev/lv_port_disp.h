@@ -36,6 +36,7 @@ typedef struct {
     bool flush_act;
     uint8_t *buf; /* draw buffer */
     int fd; /* draw buffer fd */
+    unsigned int draw_addr;
     int buf_id;
     bool rotate_en;
     int rotate_degree;

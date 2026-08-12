@@ -500,6 +500,13 @@ $(BUILD_DIR)/%/.stamp_target_installed:
 	@$(call MESSAGE,"Installing to target")
 	$(foreach hook,$($(PKG)_PRE_INSTALL_TARGET_HOOKS),$(call $(hook))$(sep))
 	+$($(PKG)_INSTALL_TARGET_CMDS)
+	$(Q)if [ `echo $(PKG) | grep "TEST_"` ]; then \
+		for sh in $$(find $($(PKG)_SRCDIR)/ -name "*.sh"); do \
+			echo Installing: $${sh}; \
+			mkdir -p $(TARGET_DIR)/usr/local/bin/; \
+			cp $${sh} $(TARGET_DIR)/usr/local/bin/; \
+		done; \
+	fi
 	$(if $(BR2_INIT_SYSV)$(BR2_INIT_BUSYBOX),\
 		$($(PKG)_INSTALL_INIT_SYSV))
 	$(foreach hook,$($(PKG)_POST_INSTALL_TARGET_HOOKS),$(call $(hook))$(sep))

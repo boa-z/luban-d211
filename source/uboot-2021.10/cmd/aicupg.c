@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0+
 /*
- * Copyright (C) 2021-2024 ArtInChip Technology Co., Ltd
+ * Copyright (C) 2021-2026 ArtInChip Technology Co., Ltd
  * Author: Dehuang Wu <dehuang.wu@artinchip.com>
  */
 
@@ -367,7 +367,7 @@ static int do_fat_upg(int intf, char *const blktype)
 			goto err;
 		}
 
-#ifdef CONFIG_VIDEO_ARTINCHIP
+#if defined(CONFIG_VIDEO_ARTINCHIP) && defined(CONFIG_AICUPG_DISP_LOGO_BOOT_DEVICE_SDFAT32)
 		ret = aic_disp_logo("udiskburn", BD_SDFAT32);
 		if (ret)
 			pr_err("Display udisk burn logo failed!\n");;
@@ -422,7 +422,7 @@ static int do_fat_upg(int intf, char *const blktype)
 #ifdef CONFIG_VIDEO_ARTINCHIP
 #ifdef CONFIG_PROGRESS_BAR
 	ret = 0;
-#else
+#elif defined(CONFIG_AICUPG_DISP_LOGO_BOOT_DEVICE_SDFAT32)
 	ret = aic_disp_logo("burn_done", BD_SDFAT32);
 	if (ret)
 		pr_err("display burn done logo failed\n");
@@ -465,14 +465,17 @@ static int do_aicupg(struct cmd_tbl *cmdtp, int flag, int argc, char *const argv
 	char *devtype = NULL;
 	int intf, ret = CMD_RET_USAGE;
 
+	if(!argv)
+		return ret;
+
 	if (argc <= 2) {
 		if (argc == 1)
 			do_brom_upg("aicusb");
 		else
-			do_brom_upg(argv[1]);
+			do_brom_upg(argv[1] ? argv[1] : "aicusb");
 		return 0;
 	}
-	if ((argc < 3) || (argc > AICUPG_ARGS_MAX))
+	if (argc > AICUPG_ARGS_MAX)
 		return ret;
 
 	devtype = argv[1]; /* mmc  usb fat */

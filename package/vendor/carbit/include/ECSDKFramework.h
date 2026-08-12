@@ -3,8 +3,8 @@
 #pragma once
 
 #include "ECSDKTypes.h"
-#define EC_VERSION_STRING "1.1.19.1"
 
+#define EC_VERSION_KEY "1.2.5-1.1.3.2"
 
 namespace ECSDKFrameWork {
 
@@ -107,7 +107,8 @@ public:
 	 void setUUID(const string& uuid);
 	 void setVersion(const string& version);
 	 void setWorkSpace(const string& writableDir);
-	
+     void setLinkPhoneApp(uint32_t type); //0:Domestic version;    1:overseas version.
+
 	 void setCommonConfig(const string& cfgName, const string& cfgValue);
 	 void setCommonConfig(const string& cfgName, uint32_t cfgValue);
 	 void setCommonConfig(const string& cfgName, bool cfgValue);
@@ -270,7 +271,27 @@ public:
 	*/
 	virtual void       unbindTransportDevice(ECTransportType type) = 0;
 
+	/**
+	* @brief  Bind the transport with a wifi device.
+	*
+	* @param  type  The transport to be unbound.
+	*
+	* @param  phoneIp the device ip.
+	*
+	* @return EC_OK on success, others on fail.
+	*/
 	virtual int32_t	   bindTransportWifiDevice(ECTransportType type, const string& phoneIp) = 0;
+
+	/**
+	* @brief  Bind the transport with a wifi device.
+	*
+	* @param  type  The transport to be unbound.
+	*
+	* @param  phoneIp the device ip.
+	*
+	* @return EC_OK on success, others on fail.
+	*/
+	virtual int32_t	  resetECConfig(const string& config) = 0;
 
 protected:
     /*!

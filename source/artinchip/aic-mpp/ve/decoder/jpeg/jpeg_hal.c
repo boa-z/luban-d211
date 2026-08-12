@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2022 ArtInChip Technology Co. Ltd
+ * Copyright (C) 2020-2026 ArtInChip Technology Co. Ltd
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -35,6 +35,7 @@ static void ve_config_ve_top_reg(struct mjpeg_dec_ctx *s)
 	write_reg_u32(s->regs_base + VE_INIT_REG, 1);
 	write_reg_u32(s->regs_base + VE_IRQ_REG, 1);
 	write_reg_u32(s->regs_base + VE_JPG_EN_REG, 1);
+	write_reg_u32(s->regs_base + 0x20, 1);
 }
 
 static void ve_config_pp_register(struct mjpeg_dec_ctx *s)
@@ -68,14 +69,7 @@ static void ve_config_pp_register(struct mjpeg_dec_ctx *s)
 		else if (rotate == MPP_ROTATION_90)
 			reg_list->_1c_rotmir_reg.rotate = 3;
 
-		if (flip_v)
-			reg_list->_1c_rotmir_reg.mirror = 1;
-		else if (flip_h)
-			reg_list->_1c_rotmir_reg.mirror = 2;
-		else if(flip_v && flip_h)
-			reg_list->_1c_rotmir_reg.mirror = 3;
-		else
-			reg_list->_1c_rotmir_reg.mirror = 0;
+		reg_list->_1c_rotmir_reg.mirror = (flip_v ? 1 : 0) | (flip_h ? 2 : 0);
 
 		pval = (u32 *)&reg_list->_1c_rotmir_reg;
 		write_reg_u32(s->regs_base + JPG_ROTMIR_REG, *pval);
@@ -87,12 +81,16 @@ static void ve_config_bitstream_register(struct mjpeg_dec_ctx *s,  int offset, i
 	int busy = 1;
 	int bit_offset = 0;
 	// Note: if it is the last stream, we need add 1 here, or it will halt
-	int stream_num = (s->curr_packet->size + 255) / 256 +1;
+	int stream_num = 0;
+#ifdef AIC_VE_DRV_V10
+	stream_num = (s->curr_packet->size + 255) / 256 +1;
+#else
+	stream_num = (s->curr_packet->size + 255) / 256 +2;
+#endif
 
 	u32 packet_base_addr = s->curr_packet->phy_base + s->curr_packet->phy_offset;
 	u32 base_addr = (packet_base_addr + offset) & (~7);
 	bit_offset = ((packet_base_addr + offset) - base_addr)*8;
-
 
 	// stream read ptr
 	write_reg_u32(s->regs_base + JPG_STREAM_READ_PTR_REG, 0);
@@ -124,61 +122,24 @@ static void ve_config_bitstream_register(struct mjpeg_dec_ctx *s,  int offset, i
 		busy = read_reg_u32(s->regs_base + JPG_BUSY_REG);
 	} while(busy == 1);
 
-	// init sub module before start
-	write_reg_u32(s->regs_base + JPG_SUB_CTRL_REG, 4);
-	write_reg_u32(s->regs_base + JPG_RBIT_OFFSET_REG, bit_offset);
-	write_reg_u32(s->regs_base + JPG_SUB_CTRL_REG, 2);
-}
-
-#ifdef COPY_DATA
-static void ve_config_bitstream_sos(struct mjpeg_dec_ctx *s)
-{
-	u32 val;
-	int busy = 1;
-
-	// Note: if it is the last stream, we need add 1 here, or it will halt
-	int stream_num = (s->sos_length + 255) / 256 +1;
-
-	// stream end address, 256 byte align
-	val = s->sos_buf->phy_addr + (stream_num * 256);
-	write_reg_u32(s->regs_base + JPG_STREAM_END_ADDR_REG, val);
-
-	// stream read ptr
-	write_reg_u32(s->regs_base + JPG_STREAM_READ_PTR_REG, 0);
-
-	// bas address
-	write_reg_u32(s->regs_base + JPG_BAS_ADDR_REG, s->sos_buf->phy_addr);
-
-	// start address of bitstream
-	write_reg_u32(s->regs_base + JPG_STREAM_START_ADDR_REG, s->sos_buf->phy_addr);
-
-	write_reg_u32(s->regs_base + JPG_STREAM_INT_ADDR_REG, 0);
-
-	// read data cnt 64x32bit
-	write_reg_u32(s->regs_base + JPG_DATA_CNT_REG, 64);
-
-	// bit request enable
-	write_reg_u32(s->regs_base + JPG_BITREQ_EN_REG, 1);
-
-	write_reg_u32(s->regs_base + JPG_CUR_POS_REG, 0);
-	write_reg_u32(s->regs_base + JPG_STREAM_NUM_REG, stream_num);
-
-	write_reg_u32(s->regs_base + JPG_MEM_SA_REG, 0);
-	write_reg_u32(s->regs_base + JPG_MEM_EA_REG, 0x7f);
-	write_reg_u32(s->regs_base + JPG_MEM_IA_REG, 0);
-	write_reg_u32(s->regs_base + JPG_MEM_HA_REG, 0);
-
-	write_reg_u32(s->regs_base + JPG_STATUS_REG, 0xf);
+#ifndef AIC_VE_DRV_V10
 	write_reg_u32(s->regs_base + JPG_REQ_REG, 1);
 	do {
 		busy = read_reg_u32(s->regs_base + JPG_BUSY_REG);
 	} while(busy == 1);
+#endif
 
 	// init sub module before start
+#ifdef AIC_VE_DRV_V10
 	write_reg_u32(s->regs_base + JPG_SUB_CTRL_REG, 4);
+	write_reg_u32(s->regs_base + JPG_RBIT_OFFSET_REG, bit_offset);
 	write_reg_u32(s->regs_base + JPG_SUB_CTRL_REG, 2);
-}
+#else
+	write_reg_u32(s->regs_base + JPG_SUB_CTRL_REG, 2);
+	write_reg_u32(s->regs_base + JPG_RBIT_OFFSET_REG, bit_offset);
+	write_reg_u32(s->regs_base + JPG_SUB_CTRL_REG, 1);
 #endif
+}
 
 /*
 quant matrix should be stored in zigzag order, it is also the order parse from DQT
@@ -468,6 +429,10 @@ static void config_jpeg_picture_info_register(struct mjpeg_dec_ctx *s)
 	write_reg_u32(s->regs_base + FRAME_YADDR_REG(0), s->curr_frame->phy_addr[0]);
 	write_reg_u32(s->regs_base + FRAME_CBADDR_REG(0), s->curr_frame->phy_addr[1]);
 	write_reg_u32(s->regs_base + FRAME_CRADDR_REG(0), s->curr_frame->phy_addr[2]);
+
+#ifndef AIC_VE_DRV_V10
+	write_reg_u32(s->regs_base + PIC_INFO_WRITE_END_REG, 0);
+#endif
 }
 
 static void config_header_info(struct mjpeg_dec_ctx *s)
@@ -476,7 +441,9 @@ static void config_header_info(struct mjpeg_dec_ctx *s)
 	u32 *pval;
 
 	write_reg_u32(s->regs_base + JPG_START_POS_REG, 0);
-
+#ifndef AIC_VE_DRV_V10
+	reg_list->_10_ctrl_reg.wresp = 1;
+#endif
 	reg_list->_10_ctrl_reg.encode = 0;
 	reg_list->_10_ctrl_reg.dir = 0;
 	reg_list->_10_ctrl_reg.use_huff_en = s->have_dht;
@@ -508,13 +475,26 @@ static void config_header_info(struct mjpeg_dec_ctx *s)
 	pval = (u32 *)&reg_list->_18_mcu_reg;
 	write_reg_u32(s->regs_base + JPG_MCU_INFO_REG, *pval);
 
+	reg_buf_num buf_num = {0};
 	int num = 12 / tatal_blks;
-	write_reg_u32(s->regs_base + JPG_HANDLE_NUM_REG,  num > 4? 4: num);
+#ifdef AIC_VE_DRV_V10
+	buf_num.req_num = num;
+#else
+	buf_num.buf_num = 2;
+	buf_num.slice_num = 1;
+	buf_num.req_num = num > 4 ? 3 : num - 1;
+#endif
+	pval = (u32 *)&buf_num;
+	write_reg_u32(s->regs_base + JPG_HANDLE_NUM_REG,  *pval);
 
 	write_reg_u32(s->regs_base + JPG_UV_REG, s->uv_interleave);
 	write_reg_u32(s->regs_base + JPG_FRAME_IDX_REG, 0);
 	write_reg_u32(s->regs_base + JPG_RST_INTERVAL_REG, s->restart_interval);
+#ifdef AIC_VE_DRV_V10
 	write_reg_u32(s->regs_base + JPG_INTRRUPT_EN_REG, 0);
+#else
+	write_reg_u32(s->regs_base + JPG_INTRRUPT_EN_REG, 7);
+#endif
 }
 
 int ve_decode_jpeg(struct mjpeg_dec_ctx *s, int byte_offset)
@@ -523,6 +503,7 @@ int ve_decode_jpeg(struct mjpeg_dec_ctx *s, int byte_offset)
 
 	ve_get_client();
 
+	ve_reset();
 	// 1. config ve top
 	ve_config_ve_top_reg(s);
 
@@ -542,12 +523,10 @@ int ve_decode_jpeg(struct mjpeg_dec_ctx *s, int byte_offset)
 	ve_config_pp_register(s);
 
 	// 6. config bitstream
-#ifdef COPY_DATA
-	ve_config_bitstream_sos(s);
-#else
 	ve_config_bitstream_register(s, byte_offset, 1);
-#endif
 
+	logi("======= config all regs ==========");
+	//dump_regs(s);
 	// 7. decode start
 	write_reg_u32(s->regs_base + JPG_START_REG, 1);
 

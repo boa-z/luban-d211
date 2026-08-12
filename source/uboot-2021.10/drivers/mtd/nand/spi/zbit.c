@@ -99,6 +99,15 @@ static const struct spinand_info zbit_spinand_table[] = {
 					      &update_cache_variants),
 		     SPINAND_HAS_QE_BIT,
 		     SPINAND_ECCINFO(&zb35q01a_ooblayout, zb35q01a_ecc_get_status)),
+	SPINAND_INFO("ZB35Q01C",
+		     SPINAND_ID(0xc1),
+		     NAND_MEMORG(1, 2048, 128, 64, 4096, 1, 1, 1),
+		     NAND_ECCREQ(8, 528),
+		     SPINAND_INFO_OP_VARIANTS(&read_cache_variants,
+					      &write_cache_variants,
+					      &update_cache_variants),
+		     SPINAND_HAS_QE_BIT,
+		     SPINAND_ECCINFO(&zb35q01a_ooblayout, zb35q01a_ecc_get_status)),
 };
 
 static int zbit_spinand_detect(struct spinand_device *spinand)

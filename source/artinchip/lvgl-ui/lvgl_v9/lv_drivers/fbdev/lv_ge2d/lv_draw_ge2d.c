@@ -101,10 +101,12 @@ void lv_draw_ge2d_rotate(const void *src_buf, void *dest_buf, int32_t src_width,
 
     // set src buf
     blt.src_buf.buf_type = disp_buf_type();
-    if (blt.src_buf.buf_type == MPP_PHY_ADDR)
+    if (blt.src_buf.buf_type == MPP_PHY_ADDR) {
         blt.src_buf.phy_addr[0] = disp_buf_phy_addr((uint8_t *)src_buf);
-    else
-        blt.src_buf.fd[0] = disp_buf_fd((uint8_t *)src_buf);
+    } else {
+        blt.src_buf.buf_type = MPP_PHY_ADDR;
+        blt.src_buf.phy_addr[0] = disp_buf_draw_addr((uint8_t *)src_buf);
+    }
 
     blt.src_buf.stride[0] = src_stride;
     blt.src_buf.size.width = src_width;
@@ -170,7 +172,7 @@ static bool ge2d_draw_img_supported(const lv_draw_image_dsc_t *draw_dsc)
     if (draw_dsc->rotation % 900 && scale)
         return false;
 
-    if (draw_dsc->header.w * draw_dsc->header.h < LV_GE2D_FILL_OPA_SIZE_LIMIT) {
+    if (draw_dsc->header.w * draw_dsc->header.h < LV_GE2D_BLIT_OPA_SIZE_LIMIT) {
         if (lv_image_src_get_type(draw_dsc->src) == LV_IMAGE_SRC_FILE) {
             if (!strcmp(lv_fs_get_ext(draw_dsc->src), "fake")) {
                 return true;
@@ -276,6 +278,7 @@ static int32_t ge2d_evaluate(lv_draw_unit_t *u, lv_draw_task_t *t)
 
 static inline void execute_drawing_unit(lv_draw_sw_unit_t *u)
 {
+    LV_PROFILER_BEGIN;
     ge2d_execute_drawing(u);
 
     u->task_act->state = LV_DRAW_TASK_STATE_READY;
@@ -283,6 +286,7 @@ static inline void execute_drawing_unit(lv_draw_sw_unit_t *u)
 
     /*The draw unit is free now. Request a new dispatching as it can get a new task*/
     lv_draw_dispatch_request();
+    LV_PROFILER_END;
 }
 
 static int32_t ge2d_dispatch(lv_draw_unit_t *draw_unit, lv_layer_t *layer)
@@ -345,6 +349,7 @@ static int32_t ge2d_delete(lv_draw_unit_t *draw_unit)
 #endif
 }
 
+#if LV_INVALIDATE_CACHE_BEFORE_GE2D == 1
 static inline void lv_invalid_nomal_area(lv_draw_unit_t *draw_unit,
                                          const lv_area_t *draw_area,
                                          lv_layer_t *layer)
@@ -376,24 +381,34 @@ static inline void lv_invalid_image_area(lv_draw_unit_t *draw_unit,
     else
         lv_invalid_nomal_area(draw_unit, draw_area, layer);
 }
+#endif // LV_INVALIDATE_CACHE_BEFORE_GE2D
 
 static void ge2d_execute_drawing(lv_draw_ge2d_unit_t *u)
 {
     lv_draw_task_t *t = u->task_act;
     lv_draw_unit_t *draw_unit = (lv_draw_unit_t *)u;
+
+#if LV_INVALIDATE_CACHE_BEFORE_GE2D == 1
     lv_layer_t *layer = draw_unit->target_layer;
+#endif
 
     switch (t->type) {
         case LV_DRAW_TASK_TYPE_FILL:
+#if LV_INVALIDATE_CACHE_BEFORE_GE2D == 1
             lv_invalid_nomal_area(draw_unit, &t->area, layer);
+#endif
             lv_draw_ge2d_fill(draw_unit, t->draw_dsc, &t->area);
             break;
         case LV_DRAW_TASK_TYPE_IMAGE:
+#if LV_INVALIDATE_CACHE_BEFORE_GE2D == 1
             lv_invalid_image_area(draw_unit, t->draw_dsc, &t->area, layer);
+#endif
             lv_draw_ge2d_img(draw_unit, t->draw_dsc, &t->area);
             break;
         case LV_DRAW_TASK_TYPE_LAYER:
+#if LV_INVALIDATE_CACHE_BEFORE_GE2D == 1
             lv_invalid_clip_area(draw_unit, layer);
+#endif
             lv_draw_ge2d_layer(draw_unit, t->draw_dsc, &t->area);
             break;
         default:

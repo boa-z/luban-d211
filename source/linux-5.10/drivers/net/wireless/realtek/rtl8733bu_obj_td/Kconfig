@@ -1,0 +1,7 @@
+config RTL8733BU_OBJ_TD
+	depends on USB
+	tristate "Realtek 8733B USB WiFi from TD"
+	help
+	  Realtek RTL8733BU chipset driver
+	  802.11ac USB wireless network adapter
+

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2024 ArtInChip Technology Co. Ltd
+ * Copyright (C) 2020-2026 ArtInChip Technology Co. Ltd
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -504,8 +504,12 @@ int flv_read_metadata(struct aic_flv_parser *s)
     logi("type:%d, size:%d, pos:%" PRId64 "\n",
          type, size, aic_stream_tell(s->stream));
 
-    if (aic_stream_tell(s->stream) >= aic_stream_size(s->stream))
-        return PARSER_EOS;
+    if (!s->live_stream) {
+        if (aic_stream_tell(s->stream) >= aic_stream_size(s->stream)) {
+            logi("reach the end of stream.\n");
+            return PARSER_EOS;
+        }
+    }
 
     aic_stream_skip(s->stream, 3); /* stream id, always 0 */
     next = size + aic_stream_tell(s->stream);
@@ -829,11 +833,14 @@ retry:
     dts |= (unsigned)aic_stream_r8(s->stream) << 24;
     flv->cur_pts = dts;
 
-    if (aic_stream_tell(s->stream) >= aic_stream_size(s->stream)) {
-        pkt->flag = PACKET_EOS;
-        pkt->size = 0;
-        return PARSER_EOS;
+    if (!s->live_stream) {
+        if (aic_stream_tell(s->stream) >= aic_stream_size(s->stream)) {
+            pkt->flag = PACKET_EOS;
+            pkt->size = 0;
+            return PARSER_EOS;
+        }
     }
+
     flv->orig_size = size;
     flv->cur_pos = pos;
     logd("type:%d, size:%d, last:%d, dts:%"PRId64", pos:%"PRId64", packet_cnt:%u\n",

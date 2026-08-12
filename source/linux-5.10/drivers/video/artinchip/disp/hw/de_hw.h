@@ -230,6 +230,7 @@
 #define TIMING_SYNC_PLUSE            (TIMING_BASE + 0x01c)
 #define TIMING_POL_SET               (TIMING_BASE + 0x020)
 #define TIMING_DEBUG                 (TIMING_BASE + 0x024)
+#define TIMING_OUTPUT_LINE           (TIMING_BASE + 0x024)
 
 /* ch = 0, 1 */
 #define SCALER0_CH0_H_COEF(n)        (0x400 + 4 * (n))
@@ -325,6 +326,8 @@ int get_rgb_hsbc_csc_coefs(int bright, int contrast, int saturation, int hue,
 
 void de_set_ui_layer_size(void __iomem *base_addr, u32 w, u32 h,
 			  u32 x_offset, u32 y_offset);
+
+void de_ui_bg_blending_enable(void __iomem *base_addr, u32 enable);
 
 /**
  *@ g_alpha (0~255)

@@ -40,3 +40,12 @@ config SND_SOC_AIC_AC107
 	help
 	  Say Y or M here if you want to add support for SoC audio on ArtInChip
 	  boards using the AC107 codec.
+
+config SND_SOC_AIC_DUMMY
+	tristate "ArtInChip Dummy Codec Audio Support"
+	depends on ARCH_ARTINCHIP || COMPILE_TEST
+	select SND_SOC_AIC_I2S
+	select SND_SOC_DUMMY_CODEC
+	help
+	  Machine driver for I2S framework validation using a dummy codec.
+	  No real audio hardware is required.

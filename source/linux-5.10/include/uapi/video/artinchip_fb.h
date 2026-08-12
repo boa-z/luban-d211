@@ -245,6 +245,8 @@ struct aicfb_disp_prop {
 /** get display property */
 #define AICFB_GET_DISP_PROP _IOR(IOC_TYPE_FB, 0x61, struct aicfb_disp_prop)
 
+#define AICFB_RELEASE_FRAMEBUFFER _IOR(IOC_TYPE_FB, 0x65, unsigned int)
+
 #if defined(__cplusplus)
 }
 #endif

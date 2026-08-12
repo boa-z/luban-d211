@@ -1,6 +1,6 @@
 //SPDX-License-Identifier: GPL-2.0+
 /*
- * Copyright (C) 2022 Artinchip Technology Co.,Ltd
+ * Copyright (C) 2022-2025 Artinchip Technology Co.,Ltd
  */
 
 #include <common.h>
@@ -62,6 +62,7 @@ struct png_ctx {
 	int width;
 	int height;
 	int color_type;
+	unsigned int output_format;
 	unsigned int palette[256];
 	unsigned char *buf_start;
 	unsigned char *ptr;
@@ -76,6 +77,8 @@ static inline int format_pixel_byte(int format)
 	case RGBA8888:
 	case BGRA8888:
 		return 4;
+	case RGB888:
+		return 3;
 	default:
 		break;
 	};
@@ -186,7 +189,7 @@ static int config_output_info(struct udevice *dev, struct png_ctx *ctx)
 	struct video_priv *uc_priv;
 	struct udevice *vdev;
 	uchar *dst_buf;
-	int ret, x, y;
+	int ret, x, y, bpix;
 
 	ret = uclass_find_first_device(UCLASS_VIDEO, &vdev);
 	if (ret) {
@@ -205,17 +208,48 @@ static int config_output_info(struct udevice *dev, struct png_ctx *ctx)
 
 	x = (uc_priv->xsize - ctx->width) / 2;
 	y = (uc_priv->ysize - ctx->height) / 2;
+	bpix = uc_priv->line_length / uc_priv->xsize;
 
 	dst_buf = (uchar *)(uc_priv->fb +
-			y * uc_priv->line_length + x * VNBYTES(uc_priv->bpix));
+			y * uc_priv->line_length + x * bpix);
 
-	write_reg_u32(reg_base + PNG_FORMAT_REG, OUTPUT_FORMAT);
+	write_reg_u32(reg_base + PNG_FORMAT_REG, ctx->output_format);
 	write_reg_u32(reg_base + PNG_STRIDE_REG, uc_priv->line_length);
 
 	write_reg_u32(reg_base + OUTPUT_BUFFER_REG, (uintptr_t)dst_buf);
 	write_reg_u32(reg_base + OUTPUT_LENGTH_REG, uc_priv->fb_size);
 
 	return 0;
+}
+
+static unsigned int get_output_format(void)
+{
+	struct video_priv *uc_priv;
+	struct udevice *vdev;
+	unsigned int bpix, format;
+	int ret;
+
+	ret = uclass_find_first_device(UCLASS_VIDEO, &vdev);
+	if (ret) {
+		pr_err("Failed to find aicfb udevice\n");
+		return ret;
+	}
+	uc_priv = dev_get_uclass_priv(vdev);
+
+	bpix = uc_priv->line_length / uc_priv->xsize;
+
+	switch (bpix) {
+	case 4:
+		format = ARGB8888;
+		break;
+	case 3:
+		format = RGB888;
+		break;
+	default:
+		format = ARGB8888;
+		break;
+	};
+	return format;
 }
 
 static int decode_idat(struct udevice *dev, struct png_ctx *ctx, int length)
@@ -226,6 +260,7 @@ static int decode_idat(struct udevice *dev, struct png_ctx *ctx, int length)
 	int left_len = ctx->length - offset;
 	void *lz77_buf = NULL, *filter_buf = NULL, *pal_buf = NULL;
 	uintptr_t input_start, input_end, filter_buf_len;
+	unsigned int output_format;
 	int ret = -1;
 
 	lz77_buf = memalign(DECODE_ALIGN, LZ77_BUF_SIZE);
@@ -235,7 +270,13 @@ static int decode_idat(struct udevice *dev, struct png_ctx *ctx, int length)
 	}
 	flush_dcache_range((uintptr_t)lz77_buf, (uintptr_t)LZ77_BUF_SIZE);
 
-	filter_buf_len = ALIGN_64B(ctx->width * format_pixel_byte(OUTPUT_FORMAT));
+	output_format = get_output_format();
+	if (output_format < 0)
+		goto out;
+
+	ctx->output_format = output_format;
+
+	filter_buf_len = ALIGN_64B(ctx->width * format_pixel_byte(output_format));
 	filter_buf = memalign(DECODE_ALIGN, filter_buf_len);
 	if (!filter_buf) {
 		pr_err("failed to alloc filter_buf\n");

@@ -28,6 +28,8 @@ function _clear_env()
 	unset mc
 	unset aicupg
 	unset addboard
+	unset csys
+	_unalias cs
 	_unalias m
 	_unalias ab
 	_unalias ma
@@ -85,7 +87,7 @@ function lunch()
 	if [ "${keyword}" != "" ]; then
 		select_item=$(echo "${defconfigs}" | grep "${keyword}")
 	fi
-	if [ "${keyword}" == "" -o "${select_item}" != "${keyword}" ]; then
+	if [ "${keyword}" == "" ] || [ "${select_item}" != "${keyword}" ]; then
 		_display_list_init "${defconfigs}"
 		select_item=
 		_search_in_list "${keyword}"
@@ -338,7 +340,7 @@ function build_one_solution()
 	LOG_FILE=${LOG_DIR}/${DEFCONFIG_NAME_SHORT}.log
 	echo
 	echo --------------------------------------------------------------
-	echo Build $DEFCONFIG_NAME_SHORT
+	echo ${SOLUTION_CNT}/${SOLUTION_TOTAL}. Build $DEFCONFIG_NAME_SHORT
 	echo --------------------------------------------------------------
 
 	make $DEFCONFIG_NAME
@@ -364,6 +366,7 @@ function build_one_solution()
 
 			echo >> $WARNING_FILE
 		fi
+		SOLUTION_OK_CNT=$(expr $SOLUTION_OK_CNT + 1)
 	else
 		printf "%2s) %-28s is failed. Time: %s\n" \
 			$BUILD_CNT $DEFCONFIG_NAME_SHORT $INTERVAL >> $RESULT_FILE
@@ -385,10 +388,19 @@ function build_check_all()
 
 	defconfigs=$(_get_defconfig_list)
 
+	SOLUTION_TOTAL=$(echo $defconfigs | grep -o defconfig | wc -l)
+	SOLUTION_CNT=0
+	SOLUTION_OK_CNT=0
+	WAR_SUM=0
 	for config in $defconfigs
 	do
+		SOLUTION_CNT=$(expr $SOLUTION_CNT + 1)
 		build_one_solution $config $1
+		WAR_SUM=$(expr $WAR_SUM + $WAR_CNT)
 	done
+	echo -------------------------------------------------------------- >> $RESULT_FILE
+	printf "Total: %d, Success: %d, Failed: %d, Warning: %d\n" \
+		$SOLUTION_TOTAL $SOLUTION_OK_CNT "$(expr $SOLUTION_TOTAL - $SOLUTION_OK_CNT)" $WAR_SUM >> $RESULT_FILE
 
 	echo
 	echo --------------------------------------------------------------
@@ -756,13 +768,13 @@ function _get_dir_list()
 
 function _mark_topdir()
 {
-	# User may source this file in Luban top dir, or in envsetup.sh dir
-	if [ -f tools/envsetup.sh ]; then
+	# User may source this file in Luban top dir, or in onestep.sh dir
+	if [ -f tools/onestep.sh ]; then
 		LUBAN_PRJ_TOP_DIR=$(pwd)
-	elif [ -f ../tools/envsetup.sh ]; then
+	elif [ -f ../tools/onestep.sh ]; then
 		LUBAN_PRJ_TOP_DIR=$(cd .. && pwd)
 	else
-		echo 'Please "source tools/envsetup.sh" in Luban SDK Root directory'
+		echo 'Please "source tools/onestep.sh" in Luban SDK Root directory'
 		return
 	fi
 	if [ -f ${LUBAN_PRJ_TOP_DIR}/tools/scripts/bin/fff ]; then
@@ -878,7 +890,7 @@ function _key_loop()
 
 			# Enter/Return/Tab
 			""|$'\t')
-				array=(${display_list[@]})
+				array=("${display_list[@]}")
 				select_item=${array[$scroll]}
 				return
 			;;
@@ -929,13 +941,13 @@ function _update_display_with_kw()
 		match_list=`echo "${backup_list}" | sed -n '/'"${kw}"'/p'`
 		# debug
 		# echo "${match_list}" >match.list
-		display_list=(${match_list[@]})
+		IFS=$'\n' read -d '' -ra display_list <<< "${match_list}"
 		# ((display_list_total=${#display_list[@]}-1))
 		((display_list_total=${#display_list[@]}))
 
 	else
 		match_list=${backup_list}
-		display_list=(${match_list[@]})
+		IFS=$'\n' read -d '' -ra display_list <<< "${match_list}"
 		# ((display_list_total=${#display_list[@]}-1))
 		((display_list_total=${#display_list[@]}))
 	fi
@@ -954,7 +966,7 @@ function _display_list_init()
 function _display_list_clear()
 {
 	backup_list=""
-	display_list=""
+	unset display_list
 	display_list_total=0
 }
 

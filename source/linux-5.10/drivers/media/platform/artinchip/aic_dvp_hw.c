@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * Copyright (C) 2020-2022 ArtInChip Technology Co., Ltd.
+ * Copyright (C) 2020-2026 ArtInChip Technology Co., Ltd.
  * Authors:  matteo <duanmt@artinchip.com>
  */
 
@@ -25,10 +25,6 @@ void aic_dvp_reg_enable(void __iomem *base,
 
 void aic_dvp_enable(struct aic_dvp *dvp, int enable)
 {
-	if (!dvp->cfg.field) {
-		aic_dvp_reg_enable(dvp->regs, DVP_CTL, DVP_CTL_DROP_FRAME_EN,
-				   enable);
-	}
 	aic_dvp_reg_enable(dvp->regs, DVP_CTL, DVP_CTL_EN, enable);
 }
 
@@ -91,8 +87,13 @@ void aic_dvp_set_cfg(struct aic_dvp *dvp)
 	WARN_ON((dvp->cfg.stride[0] == 0) || (dvp->cfg.stride[1] == 0));
 	if (dvp->cfg.field) {
 		height  = dvp->cfg.height / 2;
+#ifdef DVP_SFIELD_MODE
+		stride0 = dvp->cfg.stride[0];
+		stride1 = dvp->cfg.stride[1];
+#else
 		stride0 = dvp->cfg.stride[0] * 2;
 		stride1 = dvp->cfg.stride[1] * 2;
+#endif
 	} else {
 		height  = dvp->cfg.height;
 		stride0 = dvp->cfg.stride[0];

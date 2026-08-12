@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 /*
- * Copyright (C) 2020-2025 ArtInChip Technology Co., Ltd.
+ * Copyright (C) 2020-2026 ArtInChip Technology Co., Ltd.
  * Authors:  Matteo <duanmt@artinchip.com>
  */
 #ifndef _SAMPLES_BASE_H_
@@ -12,12 +12,14 @@ extern "C" {
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdbool.h>
 #include <string.h>
 #include <errno.h>
 #include <time.h>
 #include <unistd.h>
 #include <stdarg.h>
 #include <getopt.h>
+#include <stdbool.h>
 
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -54,14 +56,29 @@ extern "C" {
 
 #define US_PER_SEC      1000000
 
+#ifndef ARRAY_SIZE
+#define ARRAY_SIZE(a) (sizeof(a) / sizeof(a[0]))
+#endif /*ARRAY_SIZE*/
+
+#define __ALIGN_MASK(x, mask)    (((x) + (mask)) & ~(mask))
+#define ALIGN_UP(x, a)           __ALIGN_MASK((x), (typeof(x))(a) - 1)
+#define ALIGN_DOWN(x, a)         ((x) & (~((typeof(x))(a) - 1)))
+
+#define BIT(s)			(1U << (s))
+
+#define GENMASK(h, l)	(((~(0U)) - ((1U) << (l)) + 1) & \
+						(~(0U) >> (BITS_PER_LONG - 1 - (h))))
+
 /* Base data type */
 
-typedef int		s32;
+typedef long long	s64;
+typedef int			s32;
 typedef short		s16;
 typedef char		s8;
-typedef unsigned int	u32;
-typedef unsigned short	u16;
-typedef unsigned char	u8;
+typedef unsigned long long	u64;
+typedef unsigned int		u32;
+typedef unsigned short		u16;
+typedef unsigned char		u8;
 
 /* Struct */
 

@@ -351,10 +351,9 @@ static int setup_dest_addr(void)
 	gd->ram_top = gd->ram_base + get_effective_memsize();
 	gd->ram_top = board_get_usable_ram_top(gd->mon_len);
 #ifdef CONFIG_DRAM_TAIL_RESERVE_SIZE
-	gd->relocaddr = gd->ram_top - CONFIG_DRAM_TAIL_RESERVE_SIZE;
-#else
-	gd->relocaddr = gd->ram_top;
+	gd->ram_top -= CONFIG_DRAM_TAIL_RESERVE_SIZE;
 #endif
+	gd->relocaddr = gd->ram_top;
 	debug("Ram top: %08lX\n", (ulong)gd->ram_top);
 #if defined(CONFIG_MP) && (defined(CONFIG_MPC86xx) || defined(CONFIG_E500))
 	/*

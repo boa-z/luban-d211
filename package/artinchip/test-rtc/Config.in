@@ -1,0 +1,3 @@
+menuconfig BR2_PACKAGE_TEST_RTC
+	bool "test-rtc"
+	default n

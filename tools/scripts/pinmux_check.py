@@ -20,6 +20,40 @@ def print_warning(string):
     print("\t\033[1;33;40m" + string + "\033[0m")
 
 
+def is_rtss_pinctrl_node(node_path):
+    path_lower = node_path.lower()
+
+    # Check if the node path contains "pinctrl@0" or "pinctrl@00"
+    # Example: RTSS: /soc/pinctrl@01700000, Normal: /soc/pinctrl@10700000
+    if 'pinctrl@0' in path_lower or 'pinctrl@00' in path_lower:
+        return True
+    # Check if the node path contains "r_pinctrl"
+    if 'r_pinctrl' in path_lower:
+        return True
+    return False
+
+
+def decode_pin_name(pinmux_value, node_path):
+    port = pinmux_value >> 16
+    pin = (pinmux_value >> 8) & 0xff
+
+    is_rtss = is_rtss_pinctrl_node(node_path)
+
+    if is_rtss:
+        # RTSS: port range is A~R, so need to adjust port by adding 32
+        port_char = chr(ord('R') + port)
+        adjusted_port = port + 32
+    else:
+        # Normal: port range is A~P
+        port_char = chr(ord('A') + port)
+        adjusted_port = port
+
+    pin_index = (adjusted_port << 8) | pin
+    pin_name = f"P{port_char}{pin}"
+
+    return pin_index, pin_name, is_rtss
+
+
 def check_pinmux(dtbname):
     if not os.path.isfile(dtbname):
         return
@@ -84,6 +118,7 @@ def check_pinmux(dtbname):
             if pinctrl:
                 for i in range(0, len(pinctrl.data)):
                     func_node = dt1.get_node(phandle_dict[pinctrl.data[i]])
+                    func_node_path = func_node.path if hasattr(func_node, 'path') else ""
 
                     pinmux = []
 
@@ -92,19 +127,19 @@ def check_pinmux(dtbname):
                             pinmux += pins.get_property('pinmux')
 
                     for j in range(0, len(pinmux)):
-                        port = pinmux[j] >> 16
-                        pin = pinmux[j] >> 8 & 0xff
-                        pin_index = pinmux[j] >> 8
+                        pin_index, pin_name, is_rtss = decode_pin_name(
+                            pinmux[j], func_node_path
+                        )
 
                         if pin_index in pinmux_dict:
                             if path == pinmux_dict[pin_index]:
                                 continue
                             pinmux_conflict = True
-                            print_error(node.name + \
-                                        " pinmux conflicts with " + \
+                            print_error(node.name +
+                                        " pinmux conflicts with " +
                                         pinmux_dict[pin_index])
-                            print_error("\tThe conflicting pin: P" + \
-                                        chr(ord('A') + port) + str(pin))
+                            print_error("\tThe conflicting pin: " + pin_name)
+
                         else:
                             pinmux_dict[pin_index] = path
 

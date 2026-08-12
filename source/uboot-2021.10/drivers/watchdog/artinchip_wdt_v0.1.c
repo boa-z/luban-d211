@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0+ OR BSD-3-Clause
 /*
- * Copyright (C) 2021 ArtInChip Technology Co.,Ltd.
+ * Copyright (C) 2021-2026 ArtInChip Technology Co.,Ltd.
  */
 
 #define LOG_CATEGORY UCLASS_WDT
@@ -146,7 +146,7 @@ static int aic_wdt_probe(struct udevice *dev)
 		return ret;
 	}
 
-	dev_info(dev, "%s done\n", __func__);
+	dev_dbg(dev, "%s done\n", __func__);
 
 	return 0;
 }

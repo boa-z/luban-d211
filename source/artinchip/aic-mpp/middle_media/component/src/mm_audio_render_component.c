@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2024 ArtInChip Technology Co. Ltd
+ * Copyright (C) 2020-2026 ArtInChip Technology Co. Ltd
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -69,6 +69,7 @@ typedef struct mm_audio_render_data {
     MM_BOOL flags;
     MM_BOOL frame_fisrt_show_flag;
     MM_BOOL wait_ready_frame_flag;
+    MM_BOOL debug_en;
 
     u32 receive_frame_num;
     u32 show_frame_ok_num;
@@ -81,6 +82,7 @@ typedef struct mm_audio_render_data {
     s64 pre_frame_pts;
     s64 first_frame_pts;
     s64 pre_correct_media_time;
+    s64 cur_correct_media_time;
 
 #ifdef AUDIO_RENDRE_DUMP_ENABLE
     s32 dump_audio_fd;
@@ -90,7 +92,7 @@ typedef struct mm_audio_render_data {
 } mm_audio_render_data;
 
 static void *mm_audio_render_component_thread(void *p_thread_data);
-
+static void mm_audio_render_show_debug_info(mm_audio_render_data *p_audio_render_data);
 
 
 static s32 mm_audio_render_send_command(mm_handle h_component,
@@ -173,6 +175,12 @@ static s32 mm_audio_render_set_parameter(mm_handle h_component,
 
             break;
         }
+
+        case MM_INDEX_PARAM_PRINT_DEBUG_INFO:
+            p_audio_render_data->debug_en = ((mm_param_u32 *)p_param)->u32;
+            mm_audio_render_show_debug_info(p_audio_render_data);
+            break;
+
         default:
             break;
     }
@@ -180,10 +188,29 @@ static s32 mm_audio_render_set_parameter(mm_handle h_component,
 }
 
 static s32 mm_audio_render_get_config(mm_handle h_component,
-                                      MM_INDEX_TYPE index, void *p_config)
+                                      MM_INDEX_TYPE index,
+                                      void *p_config)
 {
     s32 error = MM_ERROR_NONE;
+    mm_audio_render_data *p_audio_render_data;
 
+    if (!h_component || !p_config) {
+        loge("h_component or p_config is null.\n");
+        return MM_ERROR_NULL_POINTER;
+    }
+
+    p_audio_render_data =
+        (mm_audio_render_data *)(((mm_component *)h_component)->p_comp_private);
+
+    switch (index) {
+        case MM_INDEX_CONFIG_TIME_CUR_MEDIA_TIME:
+            ((mm_time_config_timestamp*)p_config)->timestamp =
+                p_audio_render_data->cur_correct_media_time;
+            break;
+
+        default:
+            break;
+    }
     return error;
 }
 
@@ -211,8 +238,6 @@ static s32 mm_audio_render_set_config(mm_handle h_component,
             mm_time_config_clock_state *p_state =
                 (mm_time_config_clock_state *)p_config;
             p_audio_render_data->clock_state = p_state->state;
-            printf("[%s:%d]p_audio_render_data->clock_state:%d\n", __FUNCTION__,
-                   __LINE__, p_audio_render_data->clock_state);
             break;
         }
 
@@ -624,6 +649,7 @@ static int mm_process_audio_sync(mm_audio_render_data *p_audio_render_data,
                       MM_INDEX_CONFIG_TIME_CUR_MEDIA_TIME, &timestamp);
         diff_time =
             timestamp.timestamp - p_audio_render_data->pre_correct_media_time;
+        p_audio_render_data->cur_correct_media_time = real_audio_time;
         // correct ref clock per 10s
         if (diff_time > CORRECT_REF_CLOCK_TIME
             || MPP_ABS(real_audio_time,timestamp.timestamp) > CORRECT_REF_CLOCK_TIME) { //correct ref time
@@ -836,26 +862,28 @@ static void mm_audio_render_set_attr(mm_audio_render_data *p_audio_render_data)
         logd("volume :%d\n", p_audio_render_data->volume);
     }
 
-    printf("[%s:%d]bits_per_sample:%d,channels:%d,sample_rate:%d,pts:"FMT_d64"\n",
-           __FUNCTION__, __LINE__, p_audio_render_data->frame.bits_per_sample,
+    logd("bits_per_sample:%d,channels:%d,sample_rate:%d,pts:"FMT_d64"\n",
+           p_audio_render_data->frame.bits_per_sample,
            p_audio_render_data->frame.channels,
            p_audio_render_data->frame.sample_rate,
            p_audio_render_data->frame.pts);
 }
 
 
-void mm_audio_render_frame_count_print(mm_audio_render_data *p_audio_render_data)
+static void mm_audio_render_show_debug_info(mm_audio_render_data *p_audio_render_data)
 {
-    printf("[%s:%d]receive_frame_num:%u,"
-           "show_frame_ok_num:%u,"
-           "show_frame_fail_num:%u,"
-           "giveback_frame_ok_num:%u,"
-           "giveback_frame_fail_num:%u\n",
-           __FUNCTION__, __LINE__, p_audio_render_data->receive_frame_num,
+    if (!p_audio_render_data->debug_en)
+        return;
+
+    printf("************************Audio_render comp info************************\n");
+    printf("receive    show_ok    show_fail    give_ok    give_fail\n");
+    printf("%7u    %7u    %9u    %7u   %9u\n",
+           p_audio_render_data->receive_frame_num,
            p_audio_render_data->show_frame_ok_num,
            p_audio_render_data->show_frame_fail_num,
            p_audio_render_data->giveback_frame_ok_num,
            p_audio_render_data->giveback_frame_fail_num);
+    printf("\nstate: %s\n\n", mm_component_sta_to_str(p_audio_render_data->state));
 }
 
 
@@ -943,8 +971,6 @@ static void *mm_audio_render_component_thread(void *p_thread_data)
                                          10 * 1000);
                     goto _AIC_MSG_GET_;
                 }
-                printf("[%s:%d]video start time arrive\n", __FUNCTION__,
-                       __LINE__);
             }
 
             ret = 0;
@@ -1008,7 +1034,7 @@ static void *mm_audio_render_component_thread(void *p_thread_data)
                 if (p_audio_render_data->frame.flag & FRAME_FLAG_EOS) {
                     p_audio_render_data->flags |=
                         AUDIO_RENDER_INPORT_SEND_ALL_FRAME_FLAG;
-                    printf("[%s:%d]receive frame_end_flag\n", __FUNCTION__, __LINE__);
+                    logi("receive frame_end_flag\n");
                 }
 
                 mm_audio_render_calc_frame_num(p_audio_render_data);
@@ -1033,8 +1059,7 @@ _EXIT:
         aic_audio_render_destroy(p_audio_render_data->render);
         p_audio_render_data->render = NULL;
     }
-    mm_audio_render_frame_count_print(p_audio_render_data);
-    printf("[%s:%d]mm_audio_render_component_thread exit\n",__FUNCTION__,
-           __LINE__);
+    mm_audio_render_show_debug_info(p_audio_render_data);
+
     return (void *)MM_ERROR_NONE;
 }
