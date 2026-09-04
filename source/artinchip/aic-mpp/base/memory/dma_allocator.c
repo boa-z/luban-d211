@@ -250,11 +250,6 @@ int mpp_buf_alloc(int dma_fd, struct mpp_buf* buf)
 			loge("dmabuf(%d) alloc failed, need %d bytes", i, mem_size[i]);
 			goto failed;
 		}
-
-		if (ioctl(buf->fd[i], DMA_BUF_IOCTL_GET_PHY_ADDR, &buf->phy_addr[i]) < 0)
-			loge("dmabuf(%d) get phy addr failed, use fd type", buf->fd[i]);
-		else
-			buf->buf_type = MPP_PHY_ADDR;
 	}
 
 	return 0;
@@ -316,11 +311,6 @@ int dmabuf_alloc_planar(int dma_fd, unsigned int width, unsigned int height,
 		fd[i] = dmabuf_alloc(dma_fd, mem_size[i]);
 		if(fd[i] < 0) {
 			loge("dmabuf(%d) alloc failed, need %d bytes", i, mem_size[i]);
-			goto failed;
-		}
-
-		if (ioctl(fd[i], DMA_BUF_IOCTL_GET_PHY_ADDR, &phy_addr[i]) < 0) {
-			loge("dmabuf(%d) get phy addr failed", fd[i]);
 			goto failed;
 		}
 	}
