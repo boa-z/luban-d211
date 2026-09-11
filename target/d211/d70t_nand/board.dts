@@ -50,9 +50,9 @@
 #include <dt-bindings/input/linux-event-codes.h>
 
 / {
-	model = "ArtInChip DEMO QFN88 with SPI NAND";
+	model = "D70T D211DBV with SPI NAND";
 	compatible = "artinchip,d211";
-	package = "QFN88";
+	package = "QFN100";
 
 	aliases {
 		gpio0 = &gpio_a;
