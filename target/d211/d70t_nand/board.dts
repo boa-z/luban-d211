@@ -185,7 +185,6 @@
 		compatible = "artinchip,aic-general-rgb-panel";
 		u-boot,dm-pre-reloc;
 
-		sleep-gpios = <&gpio_e 15 GPIO_ACTIVE_HIGH>;
 #if 0
 		switch-gpios = <&gpio_f 14 GPIO_ACTIVE_HIGH>;
 #endif
@@ -208,29 +207,15 @@
 		display-timings {
 			native-mode = <&timing0>;
 			u-boot,dm-pre-reloc;
-			timing0: 1024x600 {
-				clock-frequency = <52000000>;
-				hactive = <1024>;
-				vactive = <600>;
-				hback-porch = <140>;
-				hfront-porch = <160>;
-				hsync-len = <20>;
-				vback-porch = <12>;
-				vfront-porch = <20>;
-				vsync-len = <3>;
-				de-active = <1>;
-				pixelclk-active = <1>;
-				u-boot,dm-pre-reloc;
-			};
-			timing1: 800x480 {
-				clock-frequency = <52000000>;
+			timing0: 800x480 {
+				clock-frequency = <25000000>;
 				hactive = <800>;
 				vactive = <480>;
-				hback-porch = <160>;
-				hfront-porch = <160>;
+				hback-porch = <80>;
+				hfront-porch = <80>;
 				hsync-len = <20>;
-				vback-porch = <12>;
-				vfront-porch = <20>;
+				vback-porch = <32>;
+				vfront-porch = <13>;
 				vsync-len = <3>;
 				de-active = <1>;
 				pixelclk-active = <1>;
@@ -719,8 +704,8 @@
  */
 
 &fb0 {
-	artinchip,uboot-logo-on=<1>;
-	height-virtual = <1200>;
+	artinchip,uboot-logo-on=<0>;
+	height-virtual = <960>;
 	u-boot,dm-pre-reloc;
 	port {
 		u-boot,dm-pre-reloc;
@@ -885,7 +870,7 @@
 	status = "okay";
 	u-boot,dm-pre-reloc;
 	pinctrl-names = "default";
-	pinctrl-0 = <&pwm3_pins_d>;
+	pinctrl-0 = <&pwm3_pins_a_0>;
 	/* mode: up-count, down-count, up-down-count
 	   action: none, low, high, inverse */
 	pwm0 {
