@@ -376,9 +376,27 @@
 };
 
 &i2c2 {
-	pinctrl-names = "default";
-	pinctrl-0 = <&i2c2_pins_a>;
-	status = "disabled";
+    pinctrl-names = "default";
+    pinctrl-0 = <&i2c2_pins_a>;
+    status = "okay";
+
+    gt9xx@5d {
+        status = "okay";
+        compatible = "goodix,gt9xx";
+        reg = <0x5d>;
+
+        reset-gpios = <&gpio_f 8 GPIO_ACTIVE_LOW>;
+        irq-gpios = <&gpio_f 9 GPIO_ACTIVE_HIGH>;
+        irq-flags = <2>;
+
+        touchscreen-max-id = <11>;
+        touchscreen-size-x = <800>;
+        touchscreen-size-y = <480>;
+        touchscreen-max-w = <512>;
+        touchscreen-max-p = <512>;
+
+        goodix,int-sync = <1>;
+    };
 };
 
 &i2c3 {
@@ -405,24 +423,6 @@
 			};
 		};
 	};
-
-	gt9xx@5d {
-		status = "okay";
-		compatible = "goodix,gt9xx";
-		reg = <0x5d>;
-		reset-gpios = <&gpio_a 8 GPIO_ACTIVE_LOW>;
-		irq-gpios = <&gpio_a 9 GPIO_ACTIVE_HIGH>;
-		irq-flags = <2>;
-
-		touchscreen-max-id = <11>;
-		touchscreen-size-x = <1024>;
-		touchscreen-size-y = <600>;
-		touchscreen-max-w = <512>;
-		touchscreen-max-p = <512>;
-
-		goodix,int-sync = <1>;
-	};
-
 };
 
 &dvp0 {
