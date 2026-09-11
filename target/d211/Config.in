@@ -21,6 +21,9 @@ config LUBAN_BOARD_D211_DEMO88_NAND
 	bool "demo88_nand"
 	depends on LUBAN_CHIP_D211
 
+config LUBAN_BOARD_D211_D70T_NAND
+    bool "d70t_nand"
+
 config LUBAN_BOARD_D211_PER1_MMC_SECURE_BOOT
 	bool "per1_mmc_secure_boot"
 	depends on LUBAN_CHIP_D211
@@ -90,4 +93,5 @@ config LUBAN_BOARD_OF_D211
 	default "ota" if LUBAN_BOARD_D211_OTA
 	default "per2_spinand" if LUBAN_BOARD_D211_PER2_SPINAND
 	default "qc132_nand" if LUBAN_BOARD_D211_QC132_NAND
+	default "d70t_nand" if LUBAN_BOARD_D211_D70T_NAND
 
