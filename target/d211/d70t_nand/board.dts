@@ -498,7 +498,7 @@
 
 &sdmc1 {
 	pinctrl-names = "default";
-	pinctrl-0 = <&sdmc1_pins>;
+	pinctrl-0 = <&d70t_sdmc1_pins>;
 	bus-width = <4>;
 	cap-sd-highspeed;
 	status = "okay";
@@ -579,6 +579,21 @@
 
 &pinctrl {
 	u-boot,dm-pre-reloc;
+
+	d70t_sdmc1_pins: sdmc1-d70t {
+        pins {
+            pinmux = <AIC_PINMUX('C', 0, 2)>,
+                 <AIC_PINMUX('C', 1, 2)>,
+                 <AIC_PINMUX('C', 2, 2)>,
+                 <AIC_PINMUX('C', 3, 2)>,
+                 <AIC_PINMUX('C', 4, 2)>,
+                 <AIC_PINMUX('C', 5, 2)>;
+
+                bias-pull-up;
+                drive-strength = <3>;
+        };
+	};
+
 	gmac0_local_pins: gmac0-2 {
 		pins {
 			pinmux = <AIC_PINMUX('E', 0, 6)>,
