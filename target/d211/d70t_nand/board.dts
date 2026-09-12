@@ -315,10 +315,11 @@
 	u-boot,dm-pre-reloc;
 };
 
+/* UART1: SoC<->MCU 链路（GPD_P6/P7，115200 8N1；协议见参考工程 UART1） */
 &uart1 {
 	pinctrl-names = "default";
-	pinctrl-0 = <&uart1_pins_a>;
-	status = "disabled";
+	pinctrl-0 = <&uart1_pins_c>;
+	status = "okay";
 };
 
 &uart2 {
@@ -339,12 +340,19 @@
 	status = "disabled";
 };
 
+/* 4G 模组电源使能：GPF_P7 上电（参考工程 PWR_PIN "PF.7"） */
+&gpio_f {
+	modem-pwr-hog {
+		gpio-hog;
+		gpios = <7 GPIO_ACTIVE_HIGH>;
+		output-high;
+		line-name = "4g-pwr-en";
+	};
+};
+
+/* UART5 (PF0/PF1) 未接外设：RS485 由 MCU 驱动，禁用后让位给 SDMC2 Wi-Fi */
 &uart5 {
-	pinctrl-names = "default";
-	pinctrl-0 = <&uart5_pins_a>;
-	linux,rs485-enabled-at-boot-time;
-	aic,rs485-compact-io-mode;
-	status = "okay";
+	status = "disabled";
 };
 
 &uart6 {
@@ -505,10 +513,16 @@
 	u-boot,dm-pre-reloc;
 };
 
+/* SDMC2: AIC8800 Wi-Fi module (SDIO 4-bit, onboard) */
 &sdmc2 {
 	pinctrl-names = "default";
 	pinctrl-0 = <&sdmc2_pins>;
-	status = "disabled";
+	bus-width = <4>;
+	no-mmc;
+	no-sd;
+	non-removable;
+	cap-sdio-irq;
+	status = "okay";
 };
 
 /* case 1: USB0 = OTG Enable */
@@ -576,6 +590,18 @@
 };
 #endif
 #endif
+
+/* USB1: EG800K 4G module (PU2/PU3), host-only controller */
+&usbh1 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&usb1_pins_a>;
+	aic,usb-ext-resistance = <0x40>;
+	status = "okay";
+};
+
+&ohci1 {
+	status = "okay";
+};
 
 &pinctrl {
 	u-boot,dm-pre-reloc;
