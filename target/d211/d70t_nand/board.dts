@@ -245,6 +245,8 @@
 		status = "okay";
 	};
 
+#if 0
+    /* PD6/PD7 are used by uart1_pins_c, the power key cannot claim PD6 */
     keys: gpio-keys {
         compatible = "gpio-keys";
 
@@ -255,6 +257,7 @@
             linux,code = <KEY_POWER>;
         };
     };
+#endif
 };
 
 &crypto {
