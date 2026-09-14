@@ -6,7 +6,9 @@ MKENVIMAGE=${HOST_DIR}/bin/mkenvimage
 PINMUXCHECKPY=tools/scripts/pinmux_check.py
 DTBDIR=${BINARIES_DIR}/u-boot.dtb
 PACKAGECHECKPY=tools/scripts/package_check.py
-KERNEL_HEADER_DIR=${TOPDIR}/source/linux-5.10/include
+BR2_CONFIG_FILE=${BR2_CONFIG:-${TOPDIR}/.config}
+KERNEL_VER=$(sed -n 's/^BR2_LINUX_KERNEL_VERSION="\(.*\)"$/\1/p' ${BR2_CONFIG_FILE})
+KERNEL_HEADER_DIR=${TOPDIR}/source/linux-${KERNEL_VER}/include
 UBOOT_HEADER_DIR=${TOPDIR}/source/uboot-2021.10/include
 
 COLOR_BEGIN="\033["
