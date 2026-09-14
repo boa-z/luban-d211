@@ -151,7 +151,9 @@
 			reg = <0>;
 			status = "okay";
 			compatible = "riscv";
-			riscv,isa = "rv64gcxthead";
+			riscv,isa = "rv64imafdcxthead";
+			riscv,isa-base = "rv64i";
+			riscv,isa-extensions = "i", "m", "a", "f", "d", "c";
 			mmu-type = "riscv,sv39";
 			cpu-icache = "32KB";
 			cpu-dcache = "32KB";
