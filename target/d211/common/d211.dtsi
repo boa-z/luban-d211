@@ -49,6 +49,15 @@
 	#address-cells = <2>;
 	#size-cells = <2>;
 
+	/*
+	 * The ArtInChip SoCs do not snoop the CPU caches from their DMA
+	 * masters.  Since Linux 6.11 RISC-V assumes DMA-coherent devices by
+	 * default (ARCH_DMA_DEFAULT_COHERENT), so without this property the
+	 * DMA API hands out cached, coherent-looking buffers and e.g. the DE
+	 * scans out stale framebuffer contents.
+	 */
+	dma-noncoherent;
+
 	chosen {
 		opensbi-domains {
 			compatible = "opensbi,domain,config";
