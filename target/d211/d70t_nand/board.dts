@@ -523,7 +523,12 @@
 	bus-width = <4>;
 	no-mmc;
 	no-sd;
-	non-removable;
+	/*
+	 * Poll instead of a one-shot probe: the module needs a few seconds
+	 * after a cold power-on before its SDIO interface answers, and a
+	 * non-removable card is only scanned once during boot.
+	 */
+	broken-cd;
 	cap-sdio-irq;
 	status = "okay";
 };
