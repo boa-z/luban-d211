@@ -333,7 +333,7 @@ state.aicSoundCard {
 	control.29 {
 		iface MIXER
 		name 'MIXER0 audoutl switch'
-		value false
+		value true
 		comment {
 			access 'read write'
 			type BOOLEAN
@@ -393,7 +393,7 @@ state.aicSoundCard {
 	control.35 {
 		iface MIXER
 		name 'MIXER1 audoutr switch'
-		value false
+		value true
 		comment {
 			access 'read write'
 			type BOOLEAN
