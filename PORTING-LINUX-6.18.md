@@ -172,6 +172,12 @@ git push origin artinchip-6.18-lts v6.18.XX-d211-rN   # 单次 ~0.2 GiB，不触
 - 修复：`drivers/spi/spi-artinchip.c`（`aic_spi_mem_exec_op` 首次调用做 U-Boot 式
   软复位 + 全量重配，之后每次传输前清粘滞位并重读 READ ID 直到 `0xEF`）。
   内核识别到 **Winbond W25N01KV（`EF AA 21`）**。
+  - 2026-09-16 补记（6.18.52 回归）：M1 的清除掩码漏了 **TCR BIT(10)（RPSM）**——
+    内核与 U-Boot 都不编程该位，CMU 硬复位与 GCR 软复位都不清它；一旦 U-Boot
+    交接时它是 1（与所读 kernel.itb 尺寸/模式有关，换个镜像就时好时坏），之后
+    所有 PIO 读都采样恒零但传输正常完成（`unknown raw ID 0000000000`，
+    `-95`）。定位时能跑版与全零版 try 时刻寄存器仅差这一位（`0x49c4` vs
+    `0x4dc4`）。修复：在 `aic_spi_hw_init` 清一次 + 重试循环掩码加上 `BIT(10)`。
 
 #### 2.1.2 `riscv,isa` 丢失 I/M/A/F/D（用户态 SIGILL）
 
