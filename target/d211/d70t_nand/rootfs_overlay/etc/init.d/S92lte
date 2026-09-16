@@ -1,0 +1,54 @@
+#!/bin/sh
+#
+# Bring up the 4G modem's network interface (Quectel EG800K as RNDIS).
+#
+# The modem enumerates as usb0 (rndis_host binds automatically).  Its
+# power enable is a gpio-hog in the device tree, so once the module has
+# booted the interface just needs DHCP.
+#
+
+IFACE="${LTE_IFACE:-usb0}"
+WAIT_IFACE="${LTE_WAIT:-15}"
+
+start() {
+	i=0
+	while [ ! -e "/sys/class/net/$IFACE" ] && [ $i -lt "$WAIT_IFACE" ]; do
+		sleep 1
+		i=$((i + 1))
+	done
+
+	[ -e "/sys/class/net/$IFACE" ] || {
+		echo "S92lte: $IFACE not present, skip"
+		return 0
+	}
+
+	printf "Starting 4G network on %s: " "$IFACE"
+	ifconfig "$IFACE" up
+	udhcpc -b -i "$IFACE" -R -n -q >/dev/null 2>&1
+	echo "OK"
+}
+
+stop() {
+	printf "Stopping 4G network: "
+	ifconfig "$IFACE" down
+	echo "OK"
+}
+
+case "$1" in
+	start)
+		start
+		;;
+	stop)
+		stop
+		;;
+	restart | reload)
+		stop
+		start
+		;;
+	*)
+		echo "Usage: $0 {start|stop|restart}"
+		exit 1
+		;;
+esac
+
+exit $?
