@@ -31,6 +31,20 @@
 > （提交序列与改动内容逐字节一致：427 文件 / 172874 插入行），并已通过编译与
 > SDK 全量构建；**6.18.52 镜像尚未上板回归**，回归清单见 6.10。
 
+### 1.1.1 暂无硬件验证条件的项（编译通过，未上板）
+
+| 功能 | 缺的硬件/条件 | 备注 |
+|------|---------------|------|
+| SPI-NOR 加密钩子 | 无 NOR Flash 可测（参考板只有 NAND） | enc 读写分支只走编译；`aic,encrypt` 默认关闭 |
+| USB WiFi（AIC8800 USB） | 无 USB 网卡 | get_tx_power 按 SDIO 侧同改 mirror；vendor bulk 未动 |
+| DVP 摄像头 + GM7150/XS9950 | 无 sensor 模组 | `MEDIA_SUPPORT` 整机关闭，属死代码 |
+| EPWM | 无外设用户 | 刚迁到新 PWM API（apply），仅编译验证 |
+| CIR | DT 里 disabled，无遥控器 | 驱动在，默认不使能 |
+| I2C slave | 需外部 master | 驱动在，默认不使能 |
+| SPIENC 运行时 | 需 NOR + 加密镜像联调 | 见上 |
+| PM 挂起 | 待一条命令 | `echo mem > /sys/power/state` 即可测，已接线待跑 |
+| GE 真加速 | 待查 `/dev/ge` | probe 侧刚修完 misc 注册顺序，fillrect 测试待写 |
+
 ### 1.2 构建链关键事实
 
 - 内核目录由版本号决定：`source/linux-<BR2_LINUX_KERNEL_VERSION>`；本移植用
