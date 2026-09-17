@@ -44,6 +44,7 @@
 | SPIENC 运行时 | 需 NOR + 加密镜像联调 | 见上 |
 | PM 挂起 | 待一条命令 | `echo mem > /sys/power/state` 即可测，已接线待跑 |
 | GE 真加速 | 待查 `/dev/ge` | probe 侧刚修完 misc 注册顺序，fillrect 测试待写 |
+| RISCV_CPUIDLE / CRYPTO_USER_API_AKCIPHER | 评估后不做 | 5.10 有、6.18 无的仅剩两项有用符号；前者需 SBI 配合验证，后者暂无 RSA 用户态测试需求，保持现状 |
 
 ### 1.2 构建链关键事实
 
