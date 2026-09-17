@@ -23,7 +23,7 @@
 | WiFi（AIC8800D80，SDMC2） | ✅ | 冷启动枚举 + 关联 + DHCP；脚本 `S91wifi` |
 | CE 加密引擎 | ✅ 注册/启动；AES 待复测 | `02b229623` + `dc68dcd97`（panic 修复） |
 | 音频（内部 codec + PA） | ⏳ 待听音确认 | `78e8e7d12`、`236d91726`、`6cbf3d26d` |
-| thermal（tsen） | ⏳ 读数 0，待 5.10 对照 | `a595df1f2`、`944c895fc` |
+| thermal（tsen） | 数学层已对齐 5.10；sensor 通路 railed 待查（见下） | `a595df1f2`、`944c895fc` + cell 掩码修复 |
 | PM 挂起 | 已移植未验证 | `546b0f6be` |
 | MPP dma-buf heap / 私有 ioctl | ✅ | `fb9cab674`、`c2492b1d1` |
 
