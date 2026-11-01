@@ -1,0 +1,7 @@
+config BR2_PACKAGE_FLAC
+	bool "flac"
+	help
+	  FLAC is a free lossless audio codec library, supporting encoding,
+	  decoding and metadata manipulation of FLAC streams.
+
+	  https://xiph.org/flac/

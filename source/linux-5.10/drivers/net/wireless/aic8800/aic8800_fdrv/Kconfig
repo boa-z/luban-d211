@@ -1,0 +1,22 @@
+config AIC8800_SDIO_WLAN_SUPPORT
+	tristate "AIC8800 wlan Support"
+	help
+	  This is support for aic wifi driver.
+
+config ONE_TXQ
+	bool "Use single netdev TX queue"
+	depends on AIC8800_SDIO_WLAN_SUPPORT
+	default n
+	help
+	  Enable single netdev TX queue mode. The driver will select the
+	  hardware TX queue internally instead of using the kernel's
+	  multi-queue mechanism. Reduces resource usage by allocating
+	  fewer TX queues in the firmware.
+config RWNX_ROC_DUR_MAX
+	int "Maximum Remain on Channel duration (ms)"
+	depends on AIC8800_SDIO_WLAN_SUPPORT
+	default 500
+	range 100 1000
+	help
+	  Set the maximum duration for remain on channel operation in milliseconds.
+

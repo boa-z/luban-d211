@@ -1,0 +1,37 @@
+menuconfig AIC_SDIO_WLAN_SUPPORT
+	bool "AIC Sdio wireless Support"
+	default n
+	help
+	  This is support for aic wireless chip (SDIO).
+
+if AIC_SDIO_WLAN_SUPPORT
+
+source "drivers/net/wireless/aic8800/aic8800_fdrv/Kconfig"
+
+if AIC8800_SDIO_WLAN_SUPPORT
+
+config AIC_FW_PATH
+	string "Firmware & config file path"
+	default "/etc/firmware"
+	help
+	  Path to the firmware & config file.
+
+config AIC_WLAN_DEBUG
+	bool "AIC wireless Debug"
+	default n
+
+config RWNX_MON_RXFILTER
+	bool "Enable RX filter in monitor mode"
+	default n
+	help
+	  This option enables RX filter functionality when the device is in
+	  monitor mode. When enabled, the driver will apply additional filtering
+	  rules to received frames, which can help reduce unnecessary processing
+	  and improve performance in monitor mode scenarios.
+	  If unsure, say N.
+
+endif # AIC8800_SDIO_WLAN_SUPPORT
+
+source "drivers/net/wireless/aic8800/aic8800_btlpm/Kconfig"
+
+endif # AIC_SDIO_WLAN_SUPPORT

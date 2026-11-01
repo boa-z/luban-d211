@@ -1,0 +1,1337 @@
+// SPDX-License-Identifier: GPL-2.0
+/*
+ * Copyright (C) 2020-2026 ArtInChip Technology Co.,Ltd
+ * Author: Dehuang Wu <dehuang.wu@artinchip.com>
+ */
+
+#include <common.h>
+#include <cpu_func.h>
+#include <dm.h>
+#include <dm/uclass.h>
+#include <dm/uclass-internal.h>
+#include <dm/device-internal.h>
+#include <video.h>
+#include <artinchip/artinchip_fb.h>
+#include <artinchip_ve.h>
+#include <mmc.h>
+#include <env.h>
+#include <spl.h>
+#include <hang.h>
+#include <init.h>
+#include <spi.h>
+#include <spi_flash.h>
+#include <linux/io.h>
+#include <debug_uart.h>
+#include <fdt_support.h>
+#include <asm/arch/boot_param.h>
+#include <asm/arch/usb_detect.h>
+#include <serial.h>
+#include <linux/delay.h>
+#include <linux/ctype.h>
+#include <asm/unaligned.h>
+#include <userid.h>
+#include <log_buf.h>
+
+#if defined(CONFIG_ARTINCHIP_THERMAL) && defined(CONFIG_SPL_THERMAL)
+#include <thermal.h>
+#endif
+
+#define usleep_range(a, b) udelay((b))
+
+#define RTC_CMU_REG               ((void *)0x18020908)
+#define RTC_CMU_BUS_EN_MSK        (0x1000)
+
+#define BASE_RTC                     ((void *)0x19030000)
+#define RTC_WRITE_KEY_REG            (BASE_RTC + 0x0FC)
+#define RTC_WRITE_KEY_VALUE          (0xAC)
+
+#define RTC_BOOTINFO1_REG            (BASE_RTC + 0x100)
+#define BOOTINFO1_REASON_SHIFT         (4)
+#define BOOTINFO1_REASON_MSK         (0xF << 4)
+#define RTC_REBOOT_REASON_UPGRADE    (4)
+#define RTC_REBOOT_REASON_BL_UPGRADE (5)
+
+#define RTC_SYS_BAK_BASE             (BASE_RTC + 0x104)
+#define RTC_SYS_BAK_REG(id)          (RTC_SYS_BAK_BASE + (id) * 0x04)
+#define RTC_DDRINFO_REG		     RTC_SYS_BAK_REG(0)
+#define RTC_DDR_SIZE_OFS	     (0)
+#define RTC_DDR_SIZE_MSK	     (0x3F)
+#define RTC_DDR_TYPE_OFS	     (6)
+#define RTC_DDR_TYPE_MAK	     (0x3 << RTC_DDR_TYPE_OFS)
+
+
+#ifdef CONFIG_SPL_SPI_NAND_TINY
+#include <artinchip_spinand.h>
+#endif
+
+#ifdef CONFIG_AUTO_CALCULATE_PART_CONFIG
+#include <generated/image_cfg_part_config.h>
+#endif
+
+DECLARE_GLOBAL_DATA_PTR;
+
+#define MAX_MTDIDS 64
+#define MAX_MTDPARTS 256
+
+#define EFUSE_CMU_REG ((void *)0x18020904)
+#define EFUSE_SHADOW_FEATURE_REG ((void *)0x19010224)
+#define DDR2_32MB 0xA
+#define DDR2_64MB 0xB
+#define DDR3_128MB 0xC
+#define DDR3_256MB 0xD
+
+#ifdef CONFIG_DEBUG_UART_BOARD_INIT
+
+#define USE_UART0
+
+#define GPIO_CMU_CFG_REG     ((void *)(0x1802083C))
+#define CMU_PLL_INT1_CFG_REG ((void *)(0x18020004))
+
+#ifdef USE_UART1
+#define UART1_CMU_CFG_REG    ((void *)(0x18020844))
+#define UART1_LSR_REG        ((void *)(0x18711014))
+#define UART1_IER_REG        ((void *)(0x18711004))
+#define GPIO_PA4_PIN_CFG_REG ((void *)0x18700090)
+#define GPIO_PA5_PIN_CFG_REG ((void *)0x18700094)
+#endif
+#ifdef USE_UART0
+#define UART0_CMU_CFG_REG    ((void *)(0x18020840))
+#define UART0_LSR_REG        ((void *)(0x18710014))
+#define UART0_IER_REG        ((void *)(0x18710004))
+
+#define GPIO_PN0_PIN_CFG_REG ((void *)0x18700E80)
+#define GPIO_PN1_PIN_CFG_REG ((void *)0x18700E84)
+#endif
+
+#define LSR_TX_EMP_BIT       BIT(6)
+
+void board_debug_uart_init(void)
+{
+	u32 val = 0;
+
+	/* Reset and Gating GPIO */
+	writel(0x3100, GPIO_CMU_CFG_REG);
+	writel(0x88153100, CMU_PLL_INT1_CFG_REG);
+
+#ifdef USE_UART1
+	writel(0x325, GPIO_PA4_PIN_CFG_REG);
+	writel(0x325, GPIO_PA5_PIN_CFG_REG);
+
+	val = readl(UART1_CMU_CFG_REG);
+	if (val & 0x3100) {
+		/* Wait for UART Tx FIFO to be empty, if UART already enabled */
+		while ((readl(UART1_LSR_REG) & LSR_TX_EMP_BIT) == 0)
+			;
+		writel(0, UART1_CMU_CFG_REG);
+	};
+	/* Reset and Gating UART */
+	writel(0x3118, UART1_CMU_CFG_REG);
+#endif
+
+#ifdef USE_UART0
+	writel(0x324, GPIO_PN0_PIN_CFG_REG);
+	writel(0x324, GPIO_PN1_PIN_CFG_REG);
+
+	val = readl(UART0_CMU_CFG_REG);
+	if (val & 0x3100) {
+		/* Wait for UART Tx FIFO to be empty, if UART already enabled */
+		while ((readl(UART0_LSR_REG) & LSR_TX_EMP_BIT) == 0)
+			;
+		writel(0, UART0_CMU_CFG_REG);
+	};
+	/* Reset and Gating UART */
+	writel(0x3118, UART0_CMU_CFG_REG);
+#endif
+}
+#endif
+
+#if defined(CONFIG_SPL_BUILD)
+void board_init_f(ulong dummy)
+{
+	int ret;
+
+#ifdef CONFIG_ARTINCHIP_DEBUG_BOOT_TIME
+	u32 *p = (u32 *)BOOT_TIME_SPL_START;
+	/* SPL start time */
+	*p = aic_timer_get_us();
+#endif
+	log_buf_init();
+#ifdef CONFIG_DEBUG_UART
+	/*
+	 * For SPL, Use DEBUG UART to enable serial output,
+	 * don't use dm serial driver, because it spend too much time to
+	 * initialize driver.
+	 */
+	log_notice("\nspl:debug uart enabled in %s\n", __func__);
+#endif
+	ret = spl_early_init();
+	if (ret)
+		panic("spl_early_init() failed: %d\n", ret);
+
+	riscv_cpu_setup(NULL, NULL);
+
+	preloader_console_init();
+
+	ret = spl_board_init_f();
+	if (ret)
+		panic("spl_board_init_f() failed: %d\n", ret);
+}
+
+void spl_board_init(void)
+{
+	enable_caches();
+}
+
+void spl_board_prepare_for_linux(void)
+{
+	usb_dev_connection_check_end(0);
+}
+#endif
+
+int board_init(void)
+{
+	return 0;
+}
+
+static void setup_boot_device(void)
+{
+	enum boot_device bd;
+
+	/*
+	 * Boot ROM detects Boot device and pass it to SPL,
+	 * SPL pass it to U-Boot.
+	 */
+	bd = aic_get_boot_device();
+	switch (bd) {
+	case BD_SDMC0:
+		env_set("boot_device", "mmc");
+		env_set("boot_devnum", "0");
+		debug("Booting from eMMC...\n");
+		break;
+	case BD_SDMC1:
+		env_set("boot_device", "mmc");
+		env_set("boot_devnum", "1");
+		debug("Booting from SD Card...\n");
+		break;
+	case BD_SDFAT32:
+		env_set("boot_device", "fat");
+		env_set("boot_devnum", "1");
+		debug("Booting from SD Card FATFS...\n");
+		break;
+	case BD_SPINOR:
+		env_set("boot_device", "nor");
+		env_set("boot_devnum", "0");
+		debug("Booting from SPI NOR...\n");
+		break;
+	case BD_SPINAND:
+		env_set("boot_device", "nand");
+		env_set("boot_devnum", "0");
+		debug("Booting from SPI NAND...\n");
+		break;
+	case BD_USB:
+		env_set("boot_device", "usb");
+		env_set("boot_devnum", "0");
+		debug("Booting from USBUPG...\n");
+		break;
+	default:
+		pr_err("Unknown boot device id %d...\n", (int)bd);
+		break;
+	}
+}
+
+#if CONFIG_IS_ENABLED(OF_CONTROL) && defined(CONFIG_FIT_SIGNATURE)
+static int set_dev_part(const void *blob, char *propname)
+{
+	struct disk_partition info;
+	struct blk_desc *desc;
+	char *media, *devnum, dev_name[16];
+	const char *part_name;
+	int part, ret;
+
+	media = env_get("boot_device");
+	devnum = env_get("boot_devnum");
+	/* get part name */
+	part_name = fdtdec_get_chosen_prop(blob, propname);
+	if (part_name) {
+		/* get dev desc  */
+		ret = blk_get_device_by_str(media, devnum, &desc);
+		if (ret < 0)
+			return ret;
+
+		/* get part number  */
+		part = part_get_info_by_name(desc, part_name, &info);
+		if (part < 0)
+			return -1;
+		snprintf(dev_name, sizeof(dev_name), "/dev/mmcblk%sp%d",
+					devnum, part);
+
+		env_set(propname, dev_name);
+	}
+
+	return 0;
+}
+
+static int setup_dm_verity_part(void)
+{
+	int ret;
+
+	ret = set_dev_part(gd->fdt_blob, "root_part");
+	if (ret < 0)
+		return ret;
+
+	ret = set_dev_part(gd->fdt_blob, "hash_part");
+	if (ret < 0)
+		return ret;
+
+	return 0;
+}
+#endif
+
+int aic_disp_logo(const char *name, int boot_param)
+{
+	int ret = 0;
+
+	switch (boot_param) {
+	case BD_SDMC0:
+		ret = aic_mmc_load_logo(name, 0);
+		break;
+	case BD_SDMC1:
+		ret = aic_mmc_load_logo(name, 1);
+		break;
+	case BD_SPINAND:
+		ret = aic_spinand_load_logo(name);
+		break;
+	case BD_SPINOR:
+		ret = aic_spinor_load_logo(name);
+		break;
+	case BD_SDFAT32:
+		ret = aic_fat_load_logo(name);
+		break;
+	case BD_BOOTROM:
+		ret = aic_bootrom_load_logo(name);
+		break;
+	default:
+		pr_err("Do not support boot device id: %d\n", boot_param);
+		return -EINVAL;
+	}
+
+	return ret;
+}
+
+#ifdef CONFIG_VIDEO_ARTINCHIP
+static int board_prepare_logo(struct udevice *dev)
+{
+	enum boot_device bd;
+	int ret = -EINVAL;
+
+	bd = aic_get_boot_device();
+	switch (bd) {
+	case BD_SDMC0:
+	case BD_SDMC1:
+	case BD_SPINAND:
+	case BD_SPINOR:
+		ret = aic_disp_logo("boot", bd);
+		break;
+	case BD_SDFAT32:
+#ifdef CONFIG_PROGRESS_BAR
+		ret = 0;
+#else
+		ret = aic_disp_logo("sdburn", bd);
+#endif
+		break;
+	case BD_BOOTROM:
+		ret = aic_disp_logo("usbburn", bd);
+		break;
+	default:
+		pr_err("Unknown boot device id %d...\n", (int)bd);
+		return ret;
+	}
+
+	return ret;
+}
+
+static int board_show_logo(void)
+{
+	struct udevice *dev;
+	int ret;
+
+	ret = uclass_first_device(UCLASS_VIDEO, &dev);
+	if (ret) {
+		pr_err("Failed to find aicfb udevice\n");
+		return ret;
+	}
+
+#ifdef CONFIG_PROGRESS_BAR
+	struct video_priv *priv = dev_get_uclass_priv(dev);
+	memset(priv->fb, 0xffffff, priv->fb_size);
+	flush_dcache_range((uintptr_t)&priv->fb, (uintptr_t)(&priv->fb_size));
+#endif
+
+	ret = board_prepare_logo(dev);
+	if (!ret) {
+		aicfb_update_ui_layer(dev);
+		aicfb_startup_panel(dev);
+	}
+	return ret;
+}
+#endif /* CONFIG_VIDEO_ARTINCHIP  */
+
+static u64 efuse_get_ddr_size(void)
+{
+	u32 val, mem;
+	u64 size = 0;
+
+#ifdef CONFIG_D211_MANUAL_DDR_SIZE
+	return CONFIG_D211_DDR_SIZE;
+#endif
+
+	writel(0x1100, EFUSE_CMU_REG);
+	val = readl(EFUSE_SHADOW_FEATURE_REG);
+
+	mem = (val >> 20) & 0xF;
+	switch (mem) {
+	case DDR2_32MB:
+		pr_info("DDR2 32MB\n");
+		size = 0x2000000;
+		break;
+	case DDR2_64MB:
+		pr_info("DDR2 64MB\n");
+		size = 0x4000000;
+		break;
+	case DDR3_128MB:
+		pr_info("DDR3 128MB\n");
+		size = 0x8000000;
+		break;
+	case DDR3_256MB:
+		pr_info("DDR3 256MB\n");
+		size = 0x10000000;
+		break;
+	default:
+		pr_info("No DDR info in eFuse\n");
+	}
+
+	return size;
+}
+
+static void rtc_get_ddr_info(u8 *type, u64 *size)
+{
+	u32 val = 0;
+
+	val = readl(RTC_DDRINFO_REG);
+	if (type != NULL)
+		*type = (val & RTC_DDR_TYPE_MAK) >> RTC_DDR_TYPE_OFS;
+	if (size != NULL)
+		*size = ((val & RTC_DDR_SIZE_MSK) << 5) * 0x100000;
+	if (val)
+		pr_info("DDR%d %dMB\n", ((val & RTC_DDR_TYPE_MAK) >> RTC_DDR_TYPE_OFS),
+				(val & RTC_DDR_SIZE_MSK) << 5);
+}
+
+static u64 get_dram_size(void)
+{
+	const fdt64_t *val;
+	u64 size = 0;
+	int offset;
+	int len;
+
+	size = efuse_get_ddr_size();
+	if (size > 0)
+		return size;
+	rtc_get_ddr_info(NULL, &size);
+	if (size > 0)
+		return size;
+	offset = fdt_path_offset(gd->fdt_blob, "/memory");
+	if (offset < 0) {
+		pr_err("Get memory node from DTS failed.\n");
+		return size;
+	}
+
+	val = fdt_getprop(gd->fdt_blob, offset, "reg", &len);
+	if (len < sizeof(*val) * 2) {
+		pr_err("Get memory size from DTS failed.\n");
+		return size;
+	}
+
+	size = (u64)get_unaligned_be64(&val[1]);
+	return size;
+}
+
+int dram_init(void)
+{
+	gd->ram_size = get_dram_size();
+	if (gd->ram_size == 0) {
+		pr_err("Get DRAM size failed.\n");
+	}
+	return 0;
+}
+
+void fdt_fix_mem_size(void *blob)
+{
+	int len, nodeoffset;
+	const u64 *reg;
+	u64 start[1], size[1];
+	char *node = "/memory@40000000";
+
+	nodeoffset = fdt_path_offset(blob, node);
+	reg = fdt_getprop(blob, nodeoffset, "reg", &len);
+	if (reg) {
+		start[0] = fdt64_to_cpu(reg[0]);
+		size[0] = efuse_get_ddr_size();
+		if (size[0] == 0)
+			rtc_get_ddr_info(NULL, &size[0]);
+		if (size[0]) {
+			fdt_fix_memory(blob, start, size, node);
+		}
+	}
+
+}
+
+#if defined(CONFIG_FIT_SIGNATURE)
+static int replace_first_str(char *src, char *match_str, char *replace_str)
+{
+	int str_len;
+	char newstring[1024] = {0};
+	char *find_pos;
+
+	if (!match_str || !replace_str)
+		return -1;
+
+	find_pos = strstr(src, match_str);
+	if (!find_pos)
+		return -1;
+
+	while (find_pos) {
+		str_len = find_pos - src;
+		strncpy(newstring, src, str_len);
+		strcat(newstring, replace_str);
+		strcat(newstring, find_pos + strlen(match_str));
+		strcpy(src, newstring);
+		return 0;
+	}
+
+	return 0;
+}
+
+static int fdt_get_cmdline(void *fdt, char *console, char *cmdline)
+{
+	int  nodeoffset;
+	const char *create, *waitfor, *bootargs, *args;
+	char buf[1024];
+
+	/* find or create "/chosen" node. */
+	nodeoffset = fdt_find_or_add_subnode(fdt, 0, "chosen");
+	if (nodeoffset < 0)
+		return nodeoffset;
+
+	debug("Get bootargs parameters.\n");
+	create = fdt_getprop(fdt, nodeoffset, "dm-mod.create", NULL);
+	waitfor = fdt_getprop(fdt, nodeoffset, "dm-mod.waitfor", NULL);
+	bootargs = fdt_getprop(fdt, nodeoffset, "bootargs", NULL);
+	args = fdt_getprop(fdt, nodeoffset, "args", NULL);
+
+	if (!create || !waitfor || !bootargs || !args) {
+		printf("Get bootargs parameters failed!\n");
+		printf("If secure boot is not used, ");
+		printf("CONFIG_FIT_SIGNATURE should be disabled!\n");
+		return -EINVAL;
+	}
+	strcpy(buf, create);
+	if (replace_first_str(buf, "data_dev", env_get("root_part")))
+		printf("Set data dev failed.\n");
+	if (replace_first_str(buf, "hash_dev", env_get("hash_part")))
+		printf("Set hash dev failed.\n");
+
+	/* Don't add console= if user already set it */
+	if (strstr(bootargs, "console="))
+		snprintf(cmdline, 1024, "%s %s %s %s", bootargs, args, buf,
+			 waitfor);
+	else
+		snprintf(cmdline, 1024, "%s %s %s %s %s", console, bootargs,
+			 args, buf, waitfor);
+
+	return 0;
+}
+#endif
+
+#ifdef CONFIG_OF_BOARD_SETUP
+char *board_fdt_chosen_bootargs(void)
+{
+	/* Set up chosen bootargs in ft_board_setup */
+	return NULL;
+}
+
+static int ft_board_setup_chosen_bootargs(void *fdt)
+{
+	int  err, idx;
+	int nodeoffset;
+	char *str, *s;
+	char cmdline[1024], console[32];
+
+	/* find or create "/chosen" node. */
+	nodeoffset = fdt_find_or_add_subnode(fdt, 0, "chosen");
+	if (nodeoffset < 0)
+		return nodeoffset;
+	err = 0;
+	str = (char *)fdtdec_get_chosen_prop(fdt, "stdout-path");
+	if (str) {
+		for (s = str; *s; s++)
+			if (isdigit(*s) || *s == ':')
+				break;
+		idx = simple_strtoul(s, NULL, 10);
+		s = strchr(str, ':');
+		s++;
+	} else {
+		idx = 0;
+		s = "115200n8";
+	}
+	snprintf(console, 32, "console=ttyS%d,%s", idx, s);
+
+#if defined(CONFIG_FIT_SIGNATURE)
+	err = fdt_get_cmdline(fdt, console, cmdline);
+	if (err)
+		return err;
+#else
+	str = env_get("bootargs");
+
+	/* Don't add console= if user already set it */
+	if (strstr(str, "console="))
+		snprintf(cmdline, 1024, "%s", str);
+	else
+		snprintf(cmdline, 1024, "%s %s", console, str);
+#endif
+
+	if (str) {
+		err = fdt_setprop(fdt, nodeoffset, "bootargs", cmdline,
+				  strlen(cmdline) + 1);
+		if (err < 0) {
+			printf("WARNING: could not set bootargs %s.\n",
+			       fdt_strerror(err));
+			return err;
+		}
+	}
+
+	return err;
+}
+
+static int fdt_fix_aic_logo_reserved_memory(void *blob)
+{
+	int ret = 0;
+
+#ifdef CONFIG_VIDEO_ARTINCHIP
+	struct fdt_memory logo;
+	struct video_priv *priv;
+	struct udevice *dev;
+
+	ret = uclass_find_first_device(UCLASS_VIDEO, &dev);
+	if (ret) {
+		pr_err("%s: failed to find aicfb udevice\n", __func__);
+		return ret;
+	}
+	priv = dev_get_uclass_priv(dev);
+
+	if (IS_ERR_OR_NULL(priv)) {
+		pr_warn("%s: failed to find aic-logo info\n", __func__);
+		return 0;
+	}
+
+	logo.start = (phys_addr_t)priv->fb;
+	logo.end = (phys_addr_t)priv->fb + priv->fb_size - 1;
+
+	ret = fdtdec_add_reserved_memory(blob, "aic-logo", &logo, NULL, 0, NULL, false);
+	if (ret < 0 && ret != -FDT_ERR_EXISTS) {
+		pr_err("%s: failed to add reserved memory\n", __func__);
+		return ret;
+	}
+#endif
+
+	return ret;
+}
+
+static int fdt_fix_panel_id(void *blob)
+{
+#ifdef CONFIG_VIDEO_ARTINCHIP
+	u32 panel_id, index = 6;
+	int nodeoffset, ret;
+	struct udevice *dev;
+	unsigned int *plat;
+	char buf[256];
+
+	ret = uclass_first_device(UCLASS_PANEL, &dev);
+	if (ret) {
+		pr_err("Failed to find aicfb udevice\n");
+		return -1;
+	}
+
+	plat = dev_get_plat(dev);
+	if (!plat)
+		return 0;
+
+	/* If dtb miss panel-id  */
+	ret = ofnode_read_u32(dev_ofnode(dev), "panel-id", &panel_id);
+	if (ret)
+		return 0;
+
+	ret = ofnode_get_path(dev_ofnode(dev), buf, 256);
+	if (ret) {
+		pr_err("Error: Cannot get panel node path\n");
+		return -EINVAL;
+	}
+
+	nodeoffset = fdt_path_offset(blob, buf);
+	if (nodeoffset < 0) {
+		pr_err("Error: Cannot find panel node in kernel FDT\n");
+		return -EINVAL;
+	}
+
+	index = *plat;
+	if (fdt_setprop_u32(blob, nodeoffset, "panel-id", index) < 0) {
+		printf("Error: Failed to set panel-id property\n");
+		return -EINVAL;
+	}
+#endif
+	return 0;
+}
+
+int ft_board_setup(void *blob, struct bd_info *bd)
+{
+	fdt_fix_mem_size(blob);
+	ft_board_setup_chosen_bootargs(blob);
+	fdt_fix_aic_logo_reserved_memory(blob);
+	fdt_fix_panel_id(blob);
+
+	return 0;
+}
+
+#endif /* CONFIG_OF_BOARD_SETUP */
+
+int board_late_init(void)
+{
+	setup_boot_device();
+#if defined(CONFIG_FIT_SIGNATURE)
+	setup_dm_verity_part();
+#endif
+#ifdef CONFIG_VIDEO_ARTINCHIP
+	board_show_logo();
+#endif
+#ifdef CONFIG_USERID_SUPPORT
+	enum boot_device bd;
+
+	bd = aic_get_boot_device();
+	if (bd != BD_USB && bd != BD_SDFAT32)
+		userid_init();
+#endif
+
+	return 0;
+}
+
+void board_mtdparts_default(const char **mtdids, const char **mtdparts)
+{
+	static char ids[MAX_MTDIDS];
+	static char parts[MAX_MTDPARTS];
+	struct mtd_info *mtd = get_mtd_device(NULL, 0);
+	struct udevice *dev;
+	int pos, ret, cnt;
+	char *p;
+
+	if (IS_ERR_OR_NULL(mtd)) {
+		ret = uclass_first_device(UCLASS_MTD, &dev);
+		if (ret && !dev) {
+			pr_err("Find MTD device failed.\n");
+			goto out;
+		}
+
+		device_probe(dev);
+		mtd = get_mtd_device(NULL, 0);
+	}
+	if (IS_ERR_OR_NULL(mtd)) {
+		pr_err("There is no mtd device.\n");
+		goto out;
+	}
+
+	if ((gd->flags & GD_FLG_ENV_READY) == 0) {
+		pr_warn("env is not loaded.\n");
+		goto out;
+	}
+
+	p = env_get("MTD");
+	if (!p) {
+		pr_warn("Get MTD partition table from env failed.\n");
+		goto out;
+	}
+
+	memset(ids, 0, MAX_MTDIDS);
+	snprintf(ids, MAX_MTDIDS, "%s=", mtd->name);
+	for (pos = 0; pos < strlen(p); pos++) {
+		if (p[pos] == ':')
+			break;
+	}
+
+	if (pos == strlen(p)) {
+		pr_err("There is no mtd ids in partition table.\n");
+		return;
+	}
+
+	if ((pos + strlen(ids)) >= MAX_MTDIDS) {
+		pr_err("mtd ids is too long.\n");
+		return;
+	}
+
+	if (strlen(p) >= MAX_MTDPARTS) {
+		pr_err("mtd partition table is too long\n");
+		return;
+	}
+
+	memcpy(ids + strlen(ids), p, pos);
+	strcpy(parts, p);
+
+	/* Check if it is set minimal boot mtdparts number */
+	p = env_get("nand_boot_mtdparts_cnt");
+	if (p) {
+		cnt = simple_strtoul(p, NULL, 10);
+		if (!cnt)
+			goto all;
+		/* Filter minimal parts */
+		p = parts;
+		while (*p != '\0') {
+			p++;
+			if (*p == ',')
+				cnt--;
+			if (cnt == 0)
+				break;
+		}
+
+		/* OK, drop not relative mtdparts for u-boot */
+		if (!cnt && *p == ',')
+			*p = '\0';
+	}
+all:
+	*mtdids = ids;
+	*mtdparts = parts;
+
+	pr_info("U-Boot stage mtdparts: %s\n", parts);
+	return;
+out:
+	/* ENV is not ready, use default configuratioin if it is provided.*/
+#ifdef CONFIG_MTDIDS_DEFAULT
+	*mtdids = CONFIG_MTDIDS_DEFAULT;
+#endif
+#ifdef CONFIG_MTDPARTS_DEFAULT
+	*mtdparts = CONFIG_MTDPARTS_DEFAULT;
+#endif
+	return;
+}
+
+int dram_init_banksize(void)
+{
+	gd->bd->bi_dram[0].start = CONFIG_SYS_SDRAM_BASE;
+	gd->bd->bi_dram[0].size = gd->ram_size;
+	return 0;
+}
+
+#ifdef CONFIG_SPL_OS_BOOT
+static int search_boot_os(u8 *env_ram, int len)
+{
+	int i = 0, cnt = 0;
+
+	while (i < len) {
+		if (env_ram[i] != 0)
+			cnt = 0;
+		if ((env_ram[i] == 'b') &&
+		    !memcmp(&env_ram[i], "boot_os=yes", 11))
+			return 1;
+		else if (env_ram[i] == 0)
+			cnt++;
+		if (cnt >= 2)
+			break;
+		i++;
+	}
+
+	return 0;
+}
+
+#ifdef CONFIG_SPL_MMC_SUPPORT
+static int mmc_load_env_simple(int dev, u8 *env_ram)
+{
+	static struct mmc *mmc;
+	unsigned long count, sector_start, sector_cnt;
+	int err = -1;
+
+	mmc = find_mmc_device(dev);
+	if (!mmc)
+		return err;
+
+	sector_start = CONFIG_ENV_OFFSET / mmc->read_bl_len;
+	sector_cnt = CONFIG_ENV_SIZE / mmc->read_bl_len;
+
+	count = blk_dread(mmc_get_blk_desc(mmc), sector_start, sector_cnt,
+			  env_ram);
+	if (count != sector_cnt)
+		return -1;
+
+	return CONFIG_ENV_SIZE;
+}
+#endif
+
+#ifdef CONFIG_SPL_SPI_NAND_TINY
+static int spinand_load_env_simple(u8 *env_ram)
+{
+	struct spinand_device *spinand;
+	unsigned long offset, remain;
+	size_t rdlen;
+
+	spinand = spl_spinand_init();
+	if (IS_ERR_OR_NULL(spinand)) {
+		pr_err("Tiny SPI NAND init failed. ret = %ld\n",
+			PTR_ERR(spinand));
+		return -1;
+	}
+
+	offset = CONFIG_ENV_OFFSET;
+	remain = (uint32_t)CONFIG_ENV_SIZE;
+
+#ifndef CONFIG_SYS_REDUNDAND_ENVIRONMENT
+	spl_spi_nand_read(spinand, offset, remain, &rdlen, (void *)env_ram);
+	if (remain != rdlen) {
+		pr_err("Tiny SPI NAND read failed.\n");
+		return -1;
+	}
+
+	return CONFIG_ENV_SIZE;
+#else
+	int read1_fail = 0, read2_fail = 0;
+	u8 *buf = env_ram;
+	u8 *buf_redund = (u8 *)CONFIG_ENV_RAM_ADDR + CONFIG_ENV_SIZE;
+	char tmp_env1_flags, tmp_env2_flags;
+
+	read1_fail = spl_spi_nand_read(spinand, CONFIG_ENV_OFFSET, remain,
+				       &rdlen, (void *)buf);
+	read2_fail = spl_spi_nand_read(spinand, CONFIG_ENV_OFFSET_REDUND,
+				       remain, &rdlen, (void *)buf_redund);
+
+	if (read1_fail && read2_fail) {
+		pr_err("Tiny SPI NAND read failed.\n");
+		return -1;
+	}
+
+	tmp_env1_flags = buf[4];
+	tmp_env2_flags = buf_redund[4];
+
+	if (tmp_env1_flags == 255 && tmp_env2_flags == 0)
+		memcpy(env_ram, buf_redund, CONFIG_ENV_SIZE);
+	else if (tmp_env2_flags > tmp_env1_flags)
+		memcpy(env_ram, buf_redund, CONFIG_ENV_SIZE);
+
+	return CONFIG_ENV_SIZE;
+#endif
+}
+#endif
+
+#ifdef CONFIG_SPL_SPI_LOAD
+static int spinor_load_env_simple(u8 *env_ram)
+{
+	unsigned int bus = CONFIG_SF_DEFAULT_BUS;
+	unsigned int cs = CONFIG_SF_DEFAULT_CS;
+	struct udevice *new, *bus_dev;
+	struct spi_flash *flash;
+	int ret;
+
+	ret = spi_find_bus_and_cs(bus, cs, &bus_dev, &new);
+	if (ret) {
+		pr_err("Failed to find a spi device\n");
+		return -EINVAL;
+	}
+
+	flash = dev_get_uclass_priv(new);
+	ret = spi_flash_read(flash, CONFIG_ENV_OFFSET, CONFIG_ENV_SIZE,
+			     (void *)env_ram);
+	if (ret) {
+		pr_err("Failed to read env from SPINOR.\n");
+		return -1;
+	}
+	return CONFIG_ENV_SIZE;
+}
+#endif
+static int env_boot_os_flag(enum boot_device bd)
+{
+	u8 *env_ram = (u8 *)CONFIG_ENV_RAM_ADDR;
+	int size = 0;
+
+	switch (bd) {
+#ifdef CONFIG_SPL_MMC_SUPPORT
+	case BD_SDMC0:
+		size = mmc_load_env_simple(0, env_ram);
+		break;
+	case BD_SDMC1:
+		size = mmc_load_env_simple(1, env_ram);
+		break;
+#endif
+	case BD_SPINAND:
+#ifdef CONFIG_SPL_SPI_NAND_TINY
+		size = spinand_load_env_simple(env_ram);
+#endif
+		break;
+	case BD_SPINOR:
+#ifdef CONFIG_SPL_SPI_LOAD
+		size = spinor_load_env_simple(env_ram);
+#endif
+		break;
+	default:
+		break;
+	}
+
+	if (size > 0)
+		return search_boot_os(env_ram, size);
+	return 0;
+}
+
+#ifdef CONFIG_USERID_SUPPORT
+static int userid_lock_flag(enum boot_device bd)
+{
+	int ret = 0;
+	u32 flag = 0;
+
+	ret = userid_init();
+	if (ret) {
+		return 0;
+	}
+	ret = userid_read("lock", 0, (void *)&flag, 4);
+	if (ret <= 0)
+		return 0;
+
+	return (flag != 0);
+}
+#endif
+
+#if defined(CONFIG_ARTINCHIP_THERMAL) && defined(CONFIG_SPL_THERMAL)
+
+static struct udevice *aic_enable_adcim(void)
+{
+	struct udevice *dev = NULL;
+
+	if (uclass_first_device_err(UCLASS_MISC, &dev)) {
+		pr_err("Get UCLASS_MISC device failed.\n");
+		return NULL;
+	}
+
+	do {
+		if (device_is_compatible(dev, "artinchip,aic-adcim-v1.0"))
+			break;
+		uclass_next_device_err(&dev);
+	} while (dev);
+
+	return dev;
+}
+
+static void aic_force_remove(struct udevice *dev)
+{
+	const struct driver *drv = dev->driver;
+
+	if (drv && drv->remove)
+		drv->remove(dev);
+}
+
+static void aic_show_temperature(void)
+{
+	struct udevice *thermal_dev = NULL;
+	struct udevice *adcim_dev = NULL;
+	int temp = 0, ret;
+
+	adcim_dev = aic_enable_adcim();
+	if (!adcim_dev)
+		return;
+
+	ret = uclass_get_device(UCLASS_THERMAL, 0, &thermal_dev);
+	if (ret) {
+		printf("Couldn't get thermal device\n");
+		return;
+	}
+	ret = thermal_get_temp(thermal_dev, &temp);
+	if (ret) {
+		printf("Couldn't get temperature for tuning\n");
+		return;
+	}
+
+	printf("Current temperature: %d.%03d\n", temp / 1000, temp % 1000);
+
+	aic_force_remove(thermal_dev);
+	aic_force_remove(adcim_dev);
+}
+#endif
+
+#define START_UNKNOWN -1
+#define START_KERNEL   0
+#define START_UBOOT    1
+
+extern int aic_upg_mode_detect(void);
+/*
+ * This API will be called multi-times
+ */
+int spl_start_uboot(void)
+{
+#ifndef CONFIG_SPL_OS_BOOT
+	/* Falcon mode is not enabled, run u-boot directly */
+	return START_UBOOT;
+#else
+	static int start = START_UNKNOWN;
+	static int usb_dev_check;
+	enum boot_device bd;
+	int userid_lock = 0;
+
+	if (start == START_UBOOT)
+		return start;
+
+#if defined(CONFIG_ARTINCHIP_THERMAL) && defined(CONFIG_SPL_THERMAL)
+	aic_show_temperature();
+#endif
+
+	/* UNKNOWN, START_KERNEL: still need to check */
+
+	bd = aic_get_boot_device();
+	if (bd == BD_USB || bd == BD_SDFAT32) {
+		/* If Boot for image upgrading, force to start U-Boot. */
+		start = START_UBOOT;
+		puts("Run U-Boot: upgrading mode\n");
+		goto out;
+	}
+
+#ifdef CONFIG_SPL_SERIAL_SUPPORT
+	/* break into full u-boot with CTRL + c/C */
+	if (serial_tstc() && serial_getc() == CTRL('C')) {
+		start = START_UBOOT;
+		puts("Run U-Boot: got CTRL+C\n");
+		goto out;
+	}
+#endif
+	if (start == START_UNKNOWN) {
+#ifdef CONFIG_CMD_AICUPG
+		if (aic_upg_mode_detect()) {
+			start = START_UBOOT;
+			puts("Run U-Boot: Software reset to enter UPG mode\n");
+			goto out;
+		}
+#endif
+		if (env_boot_os_flag(bd) != 1) {
+			start = START_UBOOT;
+			puts("Run U-Boot: boot_os=no in ENV, don't boot os\n");
+			goto out;
+		}
+#ifdef CONFIG_UPDATE_UDISK_FATFS_ARTINCHIP
+		/* Check udisk upgrading:
+		 * Only check when userid is locked
+		 */
+		if (usb_host_udisk_connection_check()) {
+			/* Device is connecting to UDISK, goto uboot to check
+			 * whether it is going to perform UDISK upgrading
+			 */
+			start = START_UBOOT;
+			puts("Run U-Boot: try UDISK upgrading\n");
+			goto out;
+		}
+#endif
+		usb_dev_check = 0;
+#ifdef CONFIG_USERID_SUPPORT
+		userid_lock = userid_lock_flag(bd);
+#else
+		userid_lock = 1;
+#endif
+		/*
+		 * When userid partition is locked, it is no needed to check
+		 * usb connection for userid
+		 */
+		if (!userid_lock)
+			usb_dev_check++;
+#ifdef CONFIG_AICUPG_FORCE_USBUPG_SUPPORT
+		usb_dev_check++;
+#endif
+
+		/*
+		 * Switch to Device mode, and check whether USB connecting to PC.
+		 * This function should be called once.
+		 */
+		if (usb_dev_check)
+			usb_dev_connection_check_start(0);
+	}
+
+	/*
+	 * Check usb connecton status every time spl_start_uboot is called.
+	 */
+	if (usb_dev_check && usb_dev_connection_check_status(0)) {
+		start = START_UBOOT;
+		usb_dev_connection_check_end(0);
+		puts("Run U-Boot: Device is connecting to PC with USB, try to burn userid\n");
+		goto out;
+	}
+	start = START_KERNEL;
+out:
+	return start;
+#endif
+}
+#endif
+
+ulong board_spl_fit_size_align(ulong size)
+{
+	// NOLINTNEXTLINE
+	size = ALIGN(size, 0x20);
+
+	return size;
+}
+
+ulong board_get_opensbi_ram_top(ulong total_size)
+{
+	u64 dram_size;
+	phys_addr_t top;
+
+	dram_size = get_dram_size();
+	top = CONFIG_SYS_SDRAM_BASE + dram_size;
+
+	/* last region is for OpenSBI */
+	top = top - CONFIG_SPL_OPENSBI_SIZE;
+
+	return top;
+}
+
+/*
+ * Top of the FDT RAM region.
+ *
+ * The FDT is always kept at the end of DRAM, but the SPL and the U-Boot
+ * proper phases never share a region:
+ *
+ *   DRAM end +-------------------------+
+ *            | OpenSBI                 |  CONFIG_SPL_OPENSBI_SIZE
+ *            +-------------------------+
+ *            | falcon DTB   (SPL)      |  <args size>, SPL reads it back here
+ *            +-------------------------+  <- falcon top
+ *            | U-Boot DTB   (bootm)    |  CONFIG_UBOOT_FDT_RESV_MEM_SIZE
+ *            +-------------------------+  <- U-Boot proper ram_top
+ */
+ulong board_get_dtb_ram_top(ulong total_size)
+{
+	phys_addr_t top;
+
+	top = board_get_opensbi_ram_top(0);
+
+	/* last region is for Falcon */
+#ifdef CONFIG_SYS_SPL_WRITE_SIZE
+	top = top - CONFIG_SYS_SPL_WRITE_SIZE;
+#elif CONFIG_SYS_SPI_ARGS_SIZE
+	top = top - CONFIG_SYS_SPI_ARGS_SIZE;
+#elif CONFIG_SYS_MMCSD_RAW_MODE_ARGS_SECTORS
+	top = top - (CONFIG_SYS_MMCSD_RAW_MODE_ARGS_SECTORS * 512);
+#endif
+
+#ifndef CONFIG_SPL_BUILD
+	/*
+	 * U-Boot proper also needs room for the FDT that bootm hands over to
+	 * the kernel. Reserve it right below the falcon region so that the
+	 * two regions stay adjacent but never overlap: SPL keeps using the
+	 * falcon one above this point, U-Boot proper is limited to below it.
+	 */
+	top = top - CONFIG_UBOOT_FDT_RESV_MEM_SIZE;
+#endif
+
+	return top;
+}
+
+/* Get the top of usable RAM */
+ulong board_get_usable_ram_top(ulong total_size)
+{
+	return board_get_dtb_ram_top(0);
+}
+
+/*
+ * The FDT that bootm hands over to the OS goes into the region reserved just
+ * above board_get_usable_ram_top() (see board_get_dtb_ram_top()), which the
+ * SPL/falcon phase never touches.
+ */
+ulong board_get_fdt_ram_addr(ulong fdt_len)
+{
+	phys_addr_t base = board_get_usable_ram_top(0);
+
+	if (fdt_len > CONFIG_UBOOT_FDT_RESV_MEM_SIZE) {
+		pr_warn("FDT (0x%lx) does not fit the reserved area (0x%lx)\n",
+			fdt_len, (ulong)CONFIG_UBOOT_FDT_RESV_MEM_SIZE);
+		return 0;
+	}
+
+	return base;
+}
+
+int board_load_opensbi_to_ram_top(void)
+{
+	return 1;
+}
+
+void aic_upg_flag_clear(void)
+{
+	u32 val;
+
+	val = readl(RTC_CMU_REG);
+	if (!(val & RTC_CMU_BUS_EN_MSK))
+		writel(RTC_CMU_BUS_EN_MSK, RTC_CMU_REG);
+
+	writel(RTC_WRITE_KEY_VALUE, RTC_WRITE_KEY_REG);
+	val = readl(RTC_BOOTINFO1_REG);
+	val &= ~BOOTINFO1_REASON_MSK;
+	writel(val, RTC_BOOTINFO1_REG);
+	writel(0, RTC_WRITE_KEY_REG);
+}
+
+static int rtc_upg_flag_check(void)
+{
+	u32 val;
+
+	val = readl((void *)RTC_BOOTINFO1_REG);
+	val = (val & BOOTINFO1_REASON_MSK) >> BOOTINFO1_REASON_SHIFT;
+
+	if ((val == RTC_REBOOT_REASON_UPGRADE) ||
+	    (val == RTC_REBOOT_REASON_BL_UPGRADE)) {
+		printf("Software reboot to enter upgrading mode.\n");
+		return 1;
+	}
+
+	return 0;
+}
+
+void aic_upg_succ_cnt(void)
+{
+	u32 val;
+
+	val = readl(RTC_CMU_REG);
+	if (!(val & RTC_CMU_BUS_EN_MSK))
+		writel(RTC_CMU_BUS_EN_MSK, RTC_CMU_REG);
+
+	writel(RTC_WRITE_KEY_VALUE, RTC_WRITE_KEY_REG);
+	val = readl(RTC_SYS_BAK_REG(14));
+	val += 1;
+	writel(val, RTC_SYS_BAK_REG(14));
+	writel(0, RTC_WRITE_KEY_REG);
+
+	printf("Successfully burned %d times.\n", val);
+}
+
+int aic_upg_mode_detect(void)
+{
+	int ret;
+
+	ret = rtc_upg_flag_check();
+	return ret;
+}
+
+#ifndef CONFIG_SPL_BUILD
+extern int do_reset(struct cmd_tbl *cmdtp, int flag, int argc, char *const argv[]);
+void do_brom_upg(char *upg_mode)
+{
+	u32 val;
+
+	writel(RTC_WRITE_KEY_VALUE, RTC_WRITE_KEY_REG);
+
+	val = readl((void *)RTC_BOOTINFO1_REG);
+	val &= ~BOOTINFO1_REASON_MSK;
+	val |= (RTC_REBOOT_REASON_UPGRADE << BOOTINFO1_REASON_SHIFT);
+
+	writel(val, (void *)RTC_BOOTINFO1_REG);
+
+	writel(0, RTC_WRITE_KEY_REG);
+	do_reset(NULL, 0, 0, 0);
+}
+#endif

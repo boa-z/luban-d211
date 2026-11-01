@@ -1,0 +1,4 @@
+menuconfig BR2_PACKAGE_WIFI_P2P_CONFIG
+	bool "wifi p2p config"
+	default n
+

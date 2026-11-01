@@ -1,0 +1,4 @@
+config BR2_PACKAGE_LIBMTP
+    bool "libmtp"
+    default n
+

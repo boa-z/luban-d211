@@ -1,0 +1,4 @@
+menuconfig BR2_PACKAGE_WIFI_AP_CONFIG
+	bool "wifi ap config"
+	default n
+

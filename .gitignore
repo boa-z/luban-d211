@@ -1,0 +1,33 @@
+# SPDX-License-Identifier: GPL-2.0-only
+#
+# NOTE! Don't add files that are generated in specific
+# subdirectories here. Add them in the ".gitignore" file
+# in that subdirectory instead.
+#
+# NOTE! Please use 'git ls-files -i --exclude-standard'
+# command after changing this file, to see if there are
+# any tracked files which get ignored after the change.
+#
+# Normal rules (sorted alphabetically)
+#
+
+#
+# Top-level generic files
+#
+/output
+target/d211/Config.in.old
+source/third-party/
+source/uboot-2021.10/arch/riscv/dts/d211-ddr.dtsi
+source/uboot-2021.10/arch/riscv/dts/d211-ddr2-512Mb.dtsi
+source/uboot-2021.10/arch/riscv/dts/d211-ddr3-2Gb.dtsi
+source/uboot-2021.10/arch/riscv/dts/d211-pinctrl.dtsi
+source/uboot-2021.10/arch/riscv/dts/d211-qemu.dtsi
+source/uboot-2021.10/arch/riscv/dts/d211.dtsi
+tools/scripts/pinmux_check.pyc
+#
+# Generated include files
+#
+source/uboot-2021.10/include/dt-bindings/clock/artinchip,aic-cmu.h
+source/uboot-2021.10/include/dt-bindings/display/artinchip,aic-disp.h
+source/uboot-2021.10/include/dt-bindings/reset/artinchip,aic-reset.h
+

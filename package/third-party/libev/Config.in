@@ -1,0 +1,12 @@
+menuconfig BR2_PACKAGE_LIBEV
+	bool "libev"
+	help
+	  Userspace library for handling asynchronous notifications
+
+	  http://software.schmorp.de/pkg/libev.html
+
+if BR2_PACKAGE_LIBEV
+config BR2_PACKAGE_LIBEV_USE_PREBUILT
+	bool "use prebuilt binary instead of building from source"
+	default y
+endif

@@ -1,0 +1,7 @@
+TEST_RTC_VERSION =
+TEST_RTC_ENABLE_TARBALL = NO
+TEST_RTC_ENABLE_PATCH = NO
+
+TEST_RTC_DEPENDENCIES += test-common
+
+$(eval $(generic-package))

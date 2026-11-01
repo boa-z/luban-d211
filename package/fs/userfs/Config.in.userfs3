@@ -1,0 +1,415 @@
+menuconfig BR2_TARGET_USERFS3
+	bool "UserFS 3"
+	default n
+
+if BR2_TARGET_USERFS3
+config BR2_TARGET_USERFS3_NAME
+	string "Name"
+	default "userfs3"
+
+choice
+	prompt "FS Type"
+	default BR2_TARGET_USERFS3_TYPE_EXT4
+
+	config BR2_TARGET_USERFS3_TYPE_EXT4
+		bool "Ext4"
+	config BR2_TARGET_USERFS3_TYPE_UBIFS
+		bool "UBIFS"
+	config BR2_TARGET_USERFS3_TYPE_JFFS2
+		bool "JFFS2"
+	config BR2_TARGET_USERFS3_TYPE_SQUASHFS
+		bool "SQUASHFS"
+endchoice
+
+config BR2_TARGET_USERFS3_GZIP
+	bool
+	default n
+
+config BR2_TARGET_USERFS3_BZIP2
+	bool
+	default n
+
+config BR2_TARGET_USERFS3_LZMA
+	bool
+	default n
+
+config BR2_TARGET_USERFS3_LZO
+	bool
+	default n
+
+config BR2_TARGET_USERFS3_XZ
+	bool
+	default n
+
+if BR2_TARGET_USERFS3_TYPE_EXT4
+config BR2_TARGET_USERFS3_EXT4_TO_SPARSE
+	bool "generate sparse format filesystem"
+	default y
+	select BR2_PACKAGE_HOST_ANDROID_TOOLS
+	select BR2_PACKAGE_HOST_ANDROID_TOOLS_EXT4_UTILS
+
+config BR2_TARGET_USERFS3_EXT4_SIZE
+	string "Size"
+	default "10M"
+
+config BR2_TARGET_USERFS3_EXT4_INODES
+	int "Number of inodes (leave at 0 for auto calculation)"
+	default 0
+
+config BR2_TARGET_USERFS3_EXT4_RESBLKS
+	int "Reserved blocks percentage"
+	default 5
+
+config BR2_TARGET_USERFS3_EXT4_MKFS_OPTIONS
+	string "Additional mke2fs options"
+	default "-O ^64bit"
+endif # BR2_TARGET_USERFS3_TYPE_EXT4
+
+if BR2_TARGET_USERFS3_TYPE_UBIFS
+
+config BR2_TARGET_USERFS3_UBI_DEVICE_SPI_NAND_2K_128K
+	bool
+
+config BR2_TARGET_USERFS3_UBI_DEVICE_SPI_NAND_4K_256K
+	bool
+
+choice
+	prompt "ubi parameter select"
+	default BR2_TARGET_USERFS3_UBI_PARAM_ALL_SPI_NAND
+
+config BR2_TARGET_USERFS3_UBI_PARAM_ALL_SPI_NAND
+	bool "spi-nand all type support"
+	select BR2_TARGET_USERFS3_UBI_DEVICE_SPI_NAND_2K_128K
+	select BR2_TARGET_USERFS3_UBI_DEVICE_SPI_NAND_4K_256K
+
+config BR2_TARGET_USERFS3_UBI_PARAM_SPI_NAND_2K_128K
+	bool "spi-nand page:2k block:128k"
+	select BR2_TARGET_USERFS3_UBI_DEVICE_SPI_NAND_2K_128K
+
+config BR2_TARGET_USERFS3_UBI_PARAM_SPI_NAND_4K_256K
+	bool "spi-nand page:4k block:256k"
+	select BR2_TARGET_USERFS3_UBI_DEVICE_SPI_NAND_4K_256K
+
+config BR2_TARGET_USERFS3_UBI_PARAM_USER_CUSTOM
+	bool "user custom"
+
+endchoice
+
+config BR2_TARGET_USERFS3_TYPE_UBI
+	bool "ubi image containing an ubifs userfs3 filesystem"
+	default y
+	help
+	  Build an ubi image from the ubifs one (with ubinize).
+
+if BR2_TARGET_USERFS3_TYPE_UBI
+
+if BR2_TARGET_USERFS3_UBI_PARAM_USER_CUSTOM
+config BR2_TARGET_USERFS3_UBI_PEBSIZE
+	hex "physical eraseblock size"
+	default 0x20000
+	help
+	  Tells ubinize the physical eraseblock (PEB) size of the
+	  flash chip the ubi image is created for. The value provided
+	  here is passed to the -p/--peb-size option of ubinize.
+
+config BR2_TARGET_USERFS3_UBI_SUBSIZE
+	int "sub-page size"
+	default 512
+	help
+	  Tells ubinize that the flash supports sub-pages and the
+	  sub-page size. Use 0 if sub-pages are not supported on flash
+	  chip.
+	  The value provided here is passed to the -s/--sub-page-size
+	  option of ubinize.
+endif
+
+config BR2_TARGET_USERFS3_UBI_USE_CUSTOM_CONFIG
+	bool "Use custom config file"
+	help
+	  Select this option to use a custom ubinize configuration file,
+	  rather than the default configuration used by Buildroot (which
+	  defines a single dynamic volume marked as auto-resize).
+	  Passing a custom ubinize configuration file allows you to
+	  create several volumes, specify volume types, etc.
+
+	  As a convenience, buildroot replaces the string
+	  "BR2_USERFS3_UBIFS_PATH" with the path to the built ubifs file.
+	  So the volume defined for the root filesystem can specify the
+	  image path as:  image=BR2_USERFS3_UBIFS_PATH
+
+	  Buildroot also replaces the string "BINARIES_DIR" with the
+	  value of $(BINARIES_DIR), so that it is possible to reference
+	  other build artefacts (e.g. to include the kernel in a UBI
+	  volume).
+
+config BR2_TARGET_USERFS3_UBI_CUSTOM_CONFIG_FILE
+	string "Configuration file path"
+	depends on BR2_TARGET_USERFS3_UBI_USE_CUSTOM_CONFIG
+	help
+	  Path to the ubinize configuration file.
+
+config BR2_TARGET_USERFS3_UBI_OPTS
+	string "Additional ubinize options"
+	help
+	  Any additional ubinize options you may want to include.
+
+endif # BR2_TARGET_USERFS3_TYPE_UBI
+
+if BR2_TARGET_USERFS3_UBI_PARAM_USER_CUSTOM
+config BR2_TARGET_USERFS3_UBIFS_LEBSIZE
+	hex "logical eraseblock size"
+	default 0x1f800
+	help
+	  Logical eraseblock (LEB) size. The value provided here is
+	  passed to the -e/--leb-size option of mkfs.ubifs.
+
+config BR2_TARGET_USERFS3_UBIFS_MINIOSIZE
+	hex "minimum I/O unit size"
+	default 0x800
+	help
+	  Minimum I/O unit size. The value provided here is passed
+	  to the -m/--min-io-size option of mkfs.ubifs/ubinize.
+
+config BR2_TARGET_USERFS3_UBIFS_MAXLEBCNT
+	int "maximum logical eraseblock count"
+	default 2048
+	help
+	  Maximum logical eraseblock (LEB) count. The value provided
+	  here is passed to the -c/--max-leb-cnt option of mkfs.ubifs.
+endif
+
+if !BR2_TARGET_USERFS3_UBI_PARAM_USER_CUSTOM
+config BR2_TARGET_USERFS3_UBIFS_MAX_SIZE
+	hex "ubifs size(Should be aligned to MB)"
+	default 0x1000000
+	help
+	  Maximum size of UBIFS. The value will be used to calulate the
+	  -c/--max-leb-cnt option of mkfs.ubifs.
+endif
+
+choice
+	prompt "ubifs runtime compression"
+	default BR2_TARGET_USERFS3_UBIFS_RT_NONE
+	help
+	  Select which compression format to use at run-time within
+	  the ubifs file system. The choice made here is passed to
+	  the -x/--compr option of mkfs.ubifs
+
+config BR2_TARGET_USERFS3_UBIFS_RT_NONE
+	bool "no compression"
+	help
+	  Don't use run-time compression.
+
+config BR2_TARGET_USERFS3_UBIFS_RT_ZLIB
+	bool "gzip"
+	help
+	  Use zlib compression at run-time.
+
+config BR2_TARGET_USERFS3_UBIFS_RT_LZO
+	bool "lzo"
+	help
+	  Use lzo compression at run-time.
+
+endchoice
+
+choice
+	prompt "Compression method"
+	default BR2_TARGET_USERFS3_UBIFS_NONE
+	help
+	  Select which compression format to compress the final image
+	  into.
+
+config BR2_TARGET_USERFS3_UBIFS_NONE
+	bool "no compression"
+	help
+	  Do not compress the ubifs filesystem.
+
+config BR2_TARGET_USERFS3_UBIFS_GZIP
+	bool "gzip"
+	select BR2_TARGET_USERFS3_GZIP
+	help
+	  Do compress the ubifs filesystem with gzip.
+
+config BR2_TARGET_USERFS3_UBIFS_BZIP2
+	bool "bzip2"
+	select BR2_TARGET_USERFS3_BZIP2
+	help
+	  Do compress the ubifs filesystem with bzip2.
+
+config BR2_TARGET_USERFS3_UBIFS_LZMA
+	bool "lzma"
+	select BR2_TARGET_USERFS3_LZMA
+	help
+	  Do compress the ubifs filesystem with lzma.
+
+config BR2_TARGET_USERFS3_UBIFS_LZO
+	bool "lzo"
+	select BR2_TARGET_USERFS3_LZO
+	help
+	  Do compress the ubifs filesystem with lzop.
+
+config BR2_TARGET_USERFS3_UBIFS_XZ
+	bool "xz"
+	select BR2_TARGET_USERFS3_XZ
+	help
+	  Do compress the ubifs filesystem with xz.
+
+endchoice
+
+config BR2_TARGET_USERFS3_UBIFS_OPTS
+	string "Additional mkfs.ubifs options"
+	help
+	  Any additional mkfs.ubifs options you may want to include.
+endif # BR2_TARGET_USERFS3_TYPE_UBIFS
+
+if BR2_TARGET_USERFS3_TYPE_JFFS2
+
+choice
+	prompt "Flash Type"
+	default BR2_TARGET_USERFS3_JFFS2_FLASH_128
+
+config BR2_TARGET_USERFS3_JFFS2_DATAFLASH_1056
+	bool "AT45 dataflash with 1056 byte pagesize"
+	select BR2_TARGET_USERFS3_JFFS2_NOCLEANMARKER
+
+config BR2_TARGET_USERFS3_JFFS2_DATAFLASH_528
+	bool "AT45 dataflash with 528 byte pagesize"
+	select BR2_TARGET_USERFS3_JFFS2_NOCLEANMARKER
+
+config BR2_TARGET_USERFS3_JFFS2_NANDFLASH_16K
+	bool "NAND flash with 16 kB erasesize"
+	select BR2_TARGET_USERFS3_JFFS2_NOCLEANMARKER
+
+config BR2_TARGET_USERFS3_JFFS2_NANDFLASH_128K
+	bool "NAND flash with 128 kB erasesize"
+	select BR2_TARGET_USERFS3_JFFS2_NOCLEANMARKER
+
+config BR2_TARGET_USERFS3_JFFS2_FLASH_128
+	bool "Parallel flash with 128 kB erase size"
+
+config BR2_TARGET_USERFS3_JFFS2_FLASH_64
+	bool "Parallel flash with 64 kB erase size"
+
+config BR2_TARGET_USERFS3_JFFS2_CUSTOM
+	bool "Select custom erase size"
+
+endchoice
+
+config BR2_TARGET_USERFS3_JFFS2_CUSTOM_EBSIZE
+	hex "Erase block size"
+	default 0x20000
+	depends on BR2_TARGET_USERFS3_JFFS2_CUSTOM
+	help
+	  Set to erase size of memory
+
+config BR2_TARGET_USERFS3_JFFS2_EBSIZE
+	hex
+	default 0x2100 if BR2_TARGET_USERFS3_JFFS2_DATAFLASH_1056
+	default 0x1080 if BR2_TARGET_USERFS3_JFFS2_DATAFLASH_528
+	default 0x4000 if BR2_TARGET_USERFS3_JFFS2_NANDFLASH_16K
+	default 0x20000 if BR2_TARGET_USERFS3_JFFS2_NANDFLASH_128K
+	default 0x20000 if BR2_TARGET_USERFS3_JFFS2_FLASH_128
+	default 0x10000 if BR2_TARGET_USERFS3_JFFS2_FLASH_64
+	default BR2_TARGET_USERFS3_JFFS2_CUSTOM_EBSIZE if BR2_TARGET_ROOTFS_JFFS2_CUSTOM
+
+config BR2_TARGET_USERFS3_JFFS2_NOCLEANMARKER
+	bool "Do not use Cleanmarker"
+	default y if BR2_TARGET_USERFS3_JFFS2_DATAFLASH_1056
+	default y if BR2_TARGET_USERFS3_JFFS2_DATAFLASH_528
+	default y if BR2_TARGET_USERFS3_JFFS2_NANDFLASH_16K
+	default y if BR2_TARGET_USERFS3_JFFS2_NANDFLASH_128K
+	help
+	  Do not use cleanmarkers if using NAND flash or Dataflash where
+	  the pagesize is not a power of 2
+
+config BR2_TARGET_USERFS3_JFFS2_PAD
+	bool "Pad output"
+
+config BR2_TARGET_USERFS3_JFFS2_PADSIZE
+	hex "Pad output size (0x0 = to end of EB)"
+	default 0x0
+	depends on BR2_TARGET_USERFS3_JFFS2_PAD
+	help
+	  Set to 0x0 to pad to end of erase block.
+
+choice
+	prompt "Endianess"
+	default BR2_TARGET_USERFS3_JFFS2_BE if BR2_ENDIAN = "BIG"
+
+config BR2_TARGET_USERFS3_JFFS2_LE
+	bool "little-endian"
+
+config BR2_TARGET_USERFS3_JFFS2_BE
+	bool "big-endian"
+
+endchoice
+
+config BR2_TARGET_USERFS3_JFFS2_SUMMARY
+	bool "Produce a summarized JFFS2 image"
+	help
+	  A summarised image can be mounted faster if support is
+	  enabled in the kernel (CONFIG_JFFS2_SUMMARY)
+
+config BR2_TARGET_USERFS3_JFFS2_USE_CUSTOM_PAGESIZE
+	bool "Select custom virtual memory page size"
+	help
+	  Use a custom virtual memory page size. Note that this is not
+	  related to the flash memory page size. Using this option is
+	  only needed if Linux is configured to use a page size
+	  different than 4kB.
+
+config BR2_TARGET_USERFS3_JFFS2_CUSTOM_PAGESIZE
+	hex "Virtual memory page size"
+	default 0x1000
+	depends on BR2_TARGET_USERFS3_JFFS2_USE_CUSTOM_PAGESIZE
+	help
+	  Set to virtual memory page size of target system (in bytes).
+	  This value should match the virtual page size in Linux (i.e.
+	  this should have the same value as the value of the PAGE_SIZE
+	  macro in Linux). It is not related to the flash memory page
+	  size.
+
+endif # BR2_TARGET_USERFS3_TYPE_JFFS2
+
+if BR2_TARGET_USERFS3_TYPE_SQUASHFS
+
+config BR2_TARGET_USERFS3_SQUASHFS_PAD
+	bool "pad to a 4K boundary"
+	default y # legacy was always ON
+	help
+	  Say 'y' here (the default) to pad the the filesystem image
+	  to a 4K boundary. Say 'n' to disable padding.
+
+choice
+	prompt "Compression algorithm"
+	default BR2_TARGET_USERFS3_SQUASHFS4_GZIP
+	help
+	  Select the squashfs compression algorithm to use when
+	  generating the filesystem.
+
+config BR2_TARGET_USERFS3_SQUASHFS4_GZIP
+	bool "gzip"
+
+config BR2_TARGET_USERFS3_SQUASHFS4_LZ4
+	bool "lz4"
+
+config BR2_TARGET_USERFS3_SQUASHFS4_LZMA
+	bool "lzma"
+
+config BR2_TARGET_USERFS3_SQUASHFS4_LZO
+	bool "lzo"
+
+config BR2_TARGET_USERFS3_SQUASHFS4_XZ
+	bool "xz"
+
+config BR2_TARGET_USERFS3_SQUASHFS4_ZSTD
+	bool "zstd"
+
+endchoice
+
+endif # BR2_TARGET_USERFS3_TYPE_SQUASHFS
+
+config BR2_TARGET_USERFS3_OVERLAY
+	string "Overlay directory"
+	default ""
+endif

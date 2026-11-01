@@ -1,0 +1,3 @@
+menuconfig BR2_PACKAGE_TEST_SDMC
+	bool "test-sdmc"
+	default n

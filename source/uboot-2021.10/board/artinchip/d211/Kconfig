@@ -1,0 +1,41 @@
+if TARGET_D211
+
+config SYS_BOARD
+	default "d211"
+
+config SYS_CONFIG_NAME
+	default "d211"
+
+config DRAM_TAIL_RESERVE_SIZE
+	hex "Reserve size of dram at the end"
+	default 0x0
+
+config UBOOT_FDT_RESV_MEM_SIZE
+	hex "Size of the FDT region reserved at the end of DRAM"
+	default 0x40000
+	help
+	  Size of the region reserved at the end of DRAM for the FDT that
+	  U-Boot hands over to the OS. It sits just below the region used by
+	  SPL for the falcon FDT, so the SPL and the U-Boot phases never
+	  share FDT memory.
+
+	  The region is used when fdt_high is not set: bootm then places the
+	  FDT at the bottom of it instead of letting the lmb allocator pick
+	  an address. When fdt_high is set, this region stays unused.
+
+	  Set to 0 to disable the reservation and leave the memory to U-Boot.
+
+config D211_MANUAL_DDR_SIZE
+	bool "Manually specify DDR size"
+	default n
+	help
+	  Enable this option to override the DDR size detected from eFuse or RTC.
+
+config D211_DDR_SIZE
+	hex "Manual DDR size"
+	depends on D211_MANUAL_DDR_SIZE
+	default 0x4000000
+	help
+	  Specify the DDR size in bytes when manual DDR size override is enabled.
+
+endif

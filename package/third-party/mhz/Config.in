@@ -1,0 +1,18 @@
+config BR2_PACKAGE_MHZ
+	bool "mhz"
+	help
+	  CPU frequency measurement utility.
+
+	  https://github.com/wtarreau/mhz.git
+
+if BR2_PACKAGE_MHZ
+config BR2_PACKAGE_MHZ_USE_PREBUILT
+	depends on BR2_PACKAGE_MHZ
+	bool "use prebuilt binary instead of building from source"
+	default y
+endif
+
+config BR2_PACKAGE_MHZ_STATIC
+	bool "Build mhz with static link"
+	default n
+	depends on BR2_PACKAGE_MHZ && !BR2_PACKAGE_MHZ_USE_PREBUILT

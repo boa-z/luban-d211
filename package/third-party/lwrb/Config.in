@@ -1,0 +1,6 @@
+menuconfig BR2_PACKAGE_LWRB
+	bool "lwRB"
+	help
+	  Library provides generic FIFO ring buffer implementation.
+
+	  https://github.com/MaJerle/lwrb

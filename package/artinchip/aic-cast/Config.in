@@ -1,0 +1,9 @@
+menuconfig BR2_PACKAGE_AIC_CAST
+	bool "aic-cast"
+	default n
+
+if BR2_PACKAGE_AIC_CAST
+config BR2_PACKAGE_AIC_CASE_ENABLE_AUDIO
+	bool "enable audio"
+	default n
+endif

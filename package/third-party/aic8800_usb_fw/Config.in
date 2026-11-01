@@ -1,0 +1,35 @@
+menuconfig BR2_PACKAGE_AIC8800_USB_FW
+	bool "AIC8800 USB firmware"
+	default n
+
+if BR2_PACKAGE_AIC8800_USB_FW
+
+menu "Select supported chip ids"
+
+config AIC8800_USB_FW_ID_AIC8800
+	bool "aic8800"
+	default y
+
+config AIC8800_USB_FW_ID_AIC8800D80
+	bool "aic8800D80"
+	default y
+
+config AIC8800_USB_FW_ID_AIC8800D80_MINI
+	bool "aic8800D80-mini"
+	default y
+
+config AIC8800_USB_FW_ID_AIC8800D80N
+	bool "aic8800D80N"
+	default y
+
+config AIC8800_USB_FW_ID_AIC8800D80X2
+	bool "aic8800D80X2"
+	default y
+
+config AIC8800_USB_FW_ID_AIC8800D80DC
+	bool "aic8800D80DC"
+	default y
+
+endmenu
+
+endif

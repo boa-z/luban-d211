@@ -1,0 +1,21 @@
+#!/bin/sh
+
+if [ -f /proc/device-tree/cpus/gtc-base ]; then
+        GTC_REG=`hexdump -C /proc/device-tree/cpus/gtc-base | awk -F ' ' '{print $2$3}'`
+        GTC_REG=0x${GTC_REG}0008
+else
+        GTC_REG=0x19050008
+fi
+
+GTC_TICK=`devmem $GTC_REG`
+BTIME_S=`echo "scale=6;$((GTC_TICK)) / 4000000" | bc`
+BTIME_S=$(printf "%.3f" ${BTIME_S})
+
+printf "Startup : $BTIME_S sec (from Power-On-Reset)\n"
+
+if [ -f usr/bin/version ]; then
+	version
+fi
+if [ -f usr/bin/bitfile_version ]; then
+	bitfile_version
+fi
